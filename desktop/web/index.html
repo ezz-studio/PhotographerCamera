@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhotographerCamera Studio — 摄影师风格生成工作台</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <b>PhotographerCamera</b> <span class="sub">Studio</span>
+  </div>
+  <nav class="steps">
+    <span class="step" data-step="1">1 · 导入参考片</span>
+    <span class="step" data-step="2">2 · 生成风格</span>
+    <span class="step" data-step="3">3 · 微调对比</span>
+    <span class="step" data-step="4">4 · 导出</span>
+  </nav>
+  <div class="top-actions">
+    <span id="status" class="status">就绪</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ────────────────────────── left: sources ────────────────────────── -->
+  <aside class="panel left">
+    <h2>参考照片</h2>
+
+    <div class="field">
+      <label>本机目录路径</label>
+      <div class="row">
+        <input id="dirInput" type="text" placeholder="例如 C:\Users\EDY\Pictures\set01" spellcheck="false">
+        <button id="btnLoadDir" class="primary">载入</button>
+      </div>
+      <div class="hint">路径需本机可访问；也可用下方按钮上传（浏览器限制，无法自动获取绝对路径）。</div>
+    </div>
+
+    <div id="dropzone" class="dropzone">
+      <strong>拖拽照片到这里</strong>
+      <span>或</span>
+      <button id="btnPick" class="ghost">选择文件…</button>
+      <input id="fileInput" type="file" accept="image/*" multiple hidden>
+      <div class="hint">上传前会在浏览器内压缩到长边 1600px，仅保存在本机工程目录。</div>
+    </div>
+
+    <div class="list-head">
+      <span id="imgCount">0 张</span>
+      <label class="chk"><input id="selectAll" type="checkbox" checked> 全选用于生成</label>
+    </div>
+
+    <div id="thumbs" class="thumbs"></div>
+
+    <div class="gen-box">
+      <label>风格名称</label>
+      <input id="profileName" type="text" value="My Look" spellcheck="false">
+      <label>滤镜简介（APP 预设列表显示）</label>
+      <textarea id="profileIntro" rows="2" spellcheck="false" placeholder="一句话介绍这个滤镜，如：胶片感 · 暖调 · 适合街拍人像"></textarea>
+      <label>滤镜图标（图片文件，保存时与风格同名成对导出）</label>
+      <button id="btnPickIcon" class="ghost">选择图标图片…</button>
+      <input id="iconInput" type="file" accept="image/*" hidden>
+      <div id="iconPreview" class="icon-preview" hidden><img alt="icon"><span id="iconMeta"></span></div>
+      <button id="btnGenerate" class="primary big">生成风格</button>
+      <div class="hint">流程：风格分析 → v1 初稿 → 优化器 → 留出集验证</div>
+    </div>
+  </aside>
+
+  <!-- ───────────────────────── center: compare ───────────────────────── -->
+  <section class="panel center">
+    <div class="view-head">
+      <div class="seg">
+        <button class="seg-btn active" data-mode="wipe">对比滑块</button>
+        <button class="seg-btn" data-mode="orig">原图</button>
+        <button class="seg-btn" data-mode="rend">渲染后</button>
+      </div>
+      <div id="viewName" class="view-name">—</div>
+    </div>
+
+    <div id="stage" class="stage">
+      <img id="imgOrig" alt="原图" draggable="false">
+      <div id="rendWrap" class="rend-wrap">
+        <img id="imgRend" alt="渲染结果" draggable="false">
+      </div>
+      <div id="wipe" class="wipe"><span class="wipe-knob"></span></div>
+      <div class="tag tag-l">原图</div>
+      <div class="tag tag-r">渲染后</div>
+      <div id="spinner" class="spinner" hidden></div>
+      <div id="empty" class="empty">
+        导入参考照片并生成风格后，这里会显示原图 / 渲染结果对比
+      </div>
+    </div>
+
+    <div class="filmstrip" id="filmstrip"></div>
+
+    <div id="jobLog" class="joblog" hidden></div>
+  </section>
+
+  <!-- ───────────────────────── right: controls ───────────────────────── -->
+  <aside class="panel right">
+    <h2>风格参数</h2>
+    <div id="ctrlBox" class="ctrl-box">
+      <div class="hint">尚未载入风格。可先生成，或从工程载入已有 profile。</div>
+    </div>
+
+    <h2>验证与导出</h2>
+    <div id="reportBox" class="report">
+      <div class="hint">生成完成后显示留出集损失与验证状态。</div>
+    </div>
+
+    <div class="export-box">
+      <button id="btnSave" class="ghost wide">保存 LUT（.cube，颜色层）</button>
+      <button id="btnExportAndroid" class="ghost wide">写入 Android 资产（JSON + 图标）</button>
+      <button id="btnBatch" class="ghost wide">批量渲染当前选片</button>
+      <button id="btnReset" class="ghost wide danger">重置为生成值</button>
+    </div>
+  </aside>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

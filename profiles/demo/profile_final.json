@@ -1,0 +1,200 @@
+{
+  "version": 2,
+  "schema_version": 1,
+  "name": "Demo Photographer",
+  "validation_status": "validated",
+  "exposure": {
+    "bias": 0.16837135359482563
+  },
+  "white_balance": {
+    "temperature_bias": 0.41893536016966554,
+    "tint_bias": 0.040534710277517295
+  },
+  "color_matrix": {
+    "matrix_3x3": [
+      [
+        0.8251611098570945,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.8957549723296399,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0914777210389772
+      ]
+    ],
+    "input_gamut": "sRGB",
+    "output_gamut": "sRGB"
+  },
+  "hsl": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 1.3304,
+      "lightness": 1.0
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1.0
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1.0
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 1.397,
+      "lightness": 1.0
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 1.2754,
+      "lightness": 1.0
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 1.0208,
+      "lightness": 1.0
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.81,
+      "lightness": 1.0
+    }
+  },
+  "tone_curve": {
+    "points": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0625,
+        0.009
+      ],
+      [
+        0.125,
+        0.0373
+      ],
+      [
+        0.1875,
+        0.0841
+      ],
+      [
+        0.25,
+        0.1528
+      ],
+      [
+        0.3125,
+        0.2477
+      ],
+      [
+        0.375,
+        0.3563
+      ],
+      [
+        0.4375,
+        0.4769
+      ],
+      [
+        0.5,
+        0.6068
+      ],
+      [
+        0.5625,
+        0.7284
+      ],
+      [
+        0.625,
+        0.8399
+      ],
+      [
+        0.6875,
+        0.9173
+      ],
+      [
+        0.75,
+        0.9694
+      ],
+      [
+        0.8125,
+        0.998
+      ],
+      [
+        0.875,
+        1.0
+      ],
+      [
+        0.9375,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ]
+  },
+  "highlight_rolloff": {
+    "threshold": 0.7,
+    "strength": 0.98499235770124,
+    "saturation": 1.0
+  },
+  "shadow": {
+    "black_point": 4.837936347156647e-06,
+    "compression": 0.0,
+    "tint": [
+      0.3,
+      0.3,
+      0.3
+    ],
+    "saturation": 1.0,
+    "contrast": 1.0
+  },
+  "lens": {
+    "vignette": 0.0,
+    "chromatic_aberration": 0.0748,
+    "sharpness_falloff": 0.0,
+    "distortion": 0.0,
+    "bloom": 0.0,
+    "flare": 0.0
+  },
+  "grain": {
+    "amount": 5.9608609865491405e-06,
+    "size": 1.0,
+    "density": 1.0
+  },
+  "noise": {
+    "luma": 0.017624205005725944,
+    "chroma": 5.069240949928155e-06
+  },
+  "halation": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9,
+    "warmth": 1.0
+  },
+  "bloom": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9
+  },
+  "vignette": {
+    "amount": 0.6227467451645518,
+    "radius": 1.0,
+    "feather": 0.5,
+    "center": [
+      0.5,
+      0.5
+    ]
+  },
+  "sharpen": {
+    "amount": 0.0,
+    "radius": 1.0
+  }
+}

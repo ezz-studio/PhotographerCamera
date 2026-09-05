@@ -1,0 +1,68 @@
+{
+  "schema": "profile_generation_report/v1",
+  "name": "Smoke Look",
+  "decisions": [
+    {
+      "param": "exposure.bias",
+      "value": -0.11076412189980744,
+      "reason": "mean_brightness=0.540 -> pull toward 0.5",
+      "confidence": "high"
+    },
+    {
+      "param": "white_balance.temperature_bias",
+      "value": 0.0013050000000000002,
+      "reason": "Lab b_mean=0.03",
+      "confidence": "high"
+    },
+    {
+      "param": "white_balance.tint_bias",
+      "value": -0.1163,
+      "reason": "Lab a_mean=2.33",
+      "confidence": "high"
+    },
+    {
+      "param": "color_matrix",
+      "value": "gray-world estimate",
+      "reason": "from color_matrix.json",
+      "confidence": "high"
+    },
+    {
+      "param": "tone_curve",
+      "value": "empirical CDF",
+      "reason": "from tone_curve_initial.json",
+      "confidence": "high"
+    },
+    {
+      "param": "highlight_rolloff.threshold",
+      "value": 0.7,
+      "reason": "from 90th percentile",
+      "confidence": "high"
+    },
+    {
+      "param": "shadow.black_point",
+      "value": 0.2,
+      "reason": "from 2nd percentile",
+      "confidence": "high"
+    },
+    {
+      "param": "hsl",
+      "value": "per-hue saturation factors",
+      "reason": "from hsl_mapping.json",
+      "confidence": "high"
+    },
+    {
+      "param": "vignette.amount",
+      "value": 0.001,
+      "reason": "from lens geometry",
+      "confidence": "high"
+    },
+    {
+      "param": "noise/grain",
+      "value": "from smooth-region noise estimate",
+      "reason": "texture_model.json",
+      "confidence": "high"
+    }
+  ],
+  "warnings": [],
+  "schema_valid": true
+}

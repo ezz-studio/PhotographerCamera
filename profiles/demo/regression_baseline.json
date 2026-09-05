@@ -1,0 +1,12 @@
+{
+  "overall_test_loss": 0.44041,
+  "components": {
+    "color": 0.03954,
+    "tone": 0.0868,
+    "histogram": 0.01719,
+    "hsl": 0.07167,
+    "highlight": 0.01169,
+    "shadow": 0.10694,
+    "texture": 0.50338
+  }
+}

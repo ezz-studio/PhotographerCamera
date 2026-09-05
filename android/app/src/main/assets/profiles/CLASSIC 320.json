@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "schema_version": 1,
+  "name": "CLASSIC 320",
+  "author": "PhotographerCamera",
+  "description": "经典胶片 · 低饱和 · 柔和",
+  "validation_status": "validated",
+  "exposure": {
+    "bias": 0.0
+  },
+  "white_balance": {
+    "temperature_bias": -0.05,
+    "tint_bias": 0.0
+  },
+  "color_matrix": {
+    "matrix_3x3": [
+      [
+        0.97,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.03
+      ]
+    ],
+    "input_gamut": "sRGB",
+    "output_gamut": "sRGB"
+  },
+  "hsl": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 0.9,
+      "lightness": 1.0
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 0.9,
+      "lightness": 1.0
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 0.9,
+      "lightness": 1.0
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 0.95,
+      "lightness": 1.0
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 0.95,
+      "lightness": 1.0
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 1.0,
+      "lightness": 1.0
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.95,
+      "lightness": 1.0
+    }
+  },
+  "tone_curve": {
+    "points": [
+      [
+        0.0,
+        0.02
+      ],
+      [
+        0.0625,
+        0.09
+      ],
+      [
+        0.125,
+        0.19
+      ],
+      [
+        0.1875,
+        0.3
+      ],
+      [
+        0.25,
+        0.41
+      ],
+      [
+        0.3125,
+        0.52
+      ],
+      [
+        0.375,
+        0.62
+      ],
+      [
+        0.4375,
+        0.72
+      ],
+      [
+        0.5,
+        0.81
+      ],
+      [
+        0.5625,
+        0.88
+      ],
+      [
+        0.625,
+        0.93
+      ],
+      [
+        0.6875,
+        0.965
+      ],
+      [
+        0.75,
+        0.99
+      ],
+      [
+        0.8125,
+        0.999
+      ],
+      [
+        0.875,
+        1.0
+      ],
+      [
+        0.9375,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ]
+  },
+  "highlight_rolloff": {
+    "threshold": 0.75,
+    "strength": 0.45,
+    "saturation": 1.0
+  },
+  "shadow": {
+    "black_point": 0.02,
+    "compression": 0.05,
+    "tint": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "saturation": 1.0,
+    "contrast": 1.0
+  },
+  "lens": {
+    "vignette": 0.0,
+    "chromatic_aberration": 0.04,
+    "sharpness_falloff": 0.0,
+    "distortion": 0.0,
+    "bloom": 0.0,
+    "flare": 0.0
+  },
+  "grain": {
+    "amount": 0.07,
+    "size": 1.0,
+    "density": 1.0
+  },
+  "noise": {
+    "luma": 0.01,
+    "chroma": 0.0
+  },
+  "halation": {
+    "amount": 0.04,
+    "radius": 1.0,
+    "threshold": 0.9,
+    "warmth": 1.2
+  },
+  "bloom": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9
+  },
+  "vignette": {
+    "amount": 0.3,
+    "radius": 1.0,
+    "feather": 0.5,
+    "center": [
+      0.5,
+      0.5
+    ]
+  },
+  "sharpen": {
+    "amount": 0.1,
+    "radius": 1.0
+  },
+  "film_curve": {
+    "shadow_floor": 8,
+    "highlight_ceiling": 248
+  }
+}

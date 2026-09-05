@@ -1,0 +1,11 @@
+{
+  "schema": "lens_model/v1",
+  "n_images": 12,
+  "vignette": 0.0544,
+  "chromatic_aberration": 0.0748,
+  "sharpness_falloff": 0.0,
+  "distortion": 0.0,
+  "bloom": 0.0,
+  "flare": 0.0,
+  "note": "vignette/CA estimated from geometry; others left 0 pending optimizer"
+}

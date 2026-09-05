@@ -1,0 +1,13 @@
+{
+  "schema": "texture_model/v1",
+  "n_images": 12,
+  "luma_noise": 0.8986,
+  "chroma_noise": 20.8298,
+  "noise_frequency": "high",
+  "grain_size": 1.0,
+  "grain_density": 1.0,
+  "shadow_grain": 1.0,
+  "midtone_grain": 1.0,
+  "highlight_grain": 1.0,
+  "note": "noise estimated in smooth regions to separate from JPEG edges; grain size/density neutral"
+}

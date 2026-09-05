@@ -1,0 +1,164 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://photographercamera.local/schemas/photographer_profile.schema.json",
+  "title": "PhotographerProfile",
+  "description": "Phase 0 初始 Schema 草案。每个参数含类型/范围/默认/单位语义，以 profile_spec.md 第 3 节为权威说明。随 Phase 17 完善。",
+  "type": "object",
+  "required": ["version", "schema_version", "name", "exposure", "white_balance", "color_matrix", "hsl", "tone_curve", "highlight_rolloff", "shadow", "lens", "grain", "noise", "halation", "bloom", "vignette", "sharpen"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1, "description": "摄影师 Profile 迭代版本" },
+    "schema_version": { "type": "integer", "minimum": 1, "default": 1, "description": "Profile 结构版本" },
+    "name": { "type": "string" },
+    "author": { "type": "string" },
+    "description": { "type": "string" },
+    "created_at": { "type": "string" },
+    "validation_status": { "type": "string", "enum": ["pending", "validated", "failed"] },
+    "conditions": {
+      "type": "object",
+      "description": "可选：条件化 Profile（Phase 31）子参数集，键为 Daylight/Cloudy/Tungsten/Low Light/Flash/Backlight；每个值为一个（部分）Profile，可覆盖对应层参数",
+      "additionalProperties": { "$ref": "#" }
+    },
+    "exposure": {
+      "type": "object",
+      "properties": {
+        "bias": { "type": "number", "minimum": -2, "maximum": 2, "default": 0.0, "description": "整体曝光偏置，单位 EV" }
+      }
+    },
+    "white_balance": {
+      "type": "object",
+      "properties": {
+        "temperature_bias": { "type": "number", "minimum": -1, "maximum": 1, "default": 0.0, "description": "色温偏置，正=暖" },
+        "tint_bias": { "type": "number", "minimum": -1, "maximum": 1, "default": 0.0, "description": "色调偏置，正=品红" }
+      }
+    },
+    "color_matrix": {
+      "type": "object",
+      "properties": {
+        "matrix_3x3": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -2, "maximum": 2 } },
+          "default": [[1,0,0],[0,1,0],[0,0,1]]
+        },
+        "input_gamut": { "type": "string", "default": "sRGB" },
+        "output_gamut": { "type": "string", "default": "sRGB" }
+      }
+    },
+    "hsl": {
+      "type": "object",
+      "properties": {
+        "red":    { "$ref": "#/definitions/hsl_color" },
+        "orange": { "$ref": "#/definitions/hsl_color" },
+        "yellow": { "$ref": "#/definitions/hsl_color" },
+        "green":  { "$ref": "#/definitions/hsl_color" },
+        "cyan":   { "$ref": "#/definitions/hsl_color" },
+        "blue":   { "$ref": "#/definitions/hsl_color" },
+        "purple": { "$ref": "#/definitions/hsl_color" }
+      }
+    },
+    "tone_curve": {
+      "type": "object",
+      "properties": {
+        "points": {
+          "type": "array", "minItems": 2,
+          "items": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "default": [[0,0],[1,1]]
+        }
+      }
+    },
+    "film_curve": {
+      "type": "object",
+      "description": "输出一致性胶片曲线（成像链最后一道 pass，位于 grain/vignette 之后）。shadow_floor / highlight_ceiling 单位为 0-255 显示级；膝点由上下限推导（C1 连续 soft-knee），共享同一 lo/hi 的所有 Profile 具有相同曲线特征。",
+      "properties": {
+        "shadow_floor": { "type": "number", "minimum": 0, "maximum": 64, "default": 8, "description": "暗部下限（显示级 0-255），低于暗部膝点的值平滑抬升至此下限，不压穿纯黑" },
+        "highlight_ceiling": { "type": "number", "minimum": 191, "maximum": 255, "default": 248, "description": "高光上限（显示级 0-255），高于高光膝点的值平滑回卷至此上限，不生硬削顶" }
+      }
+    },
+    "highlight_rolloff": {
+      "type": "object",
+      "properties": {
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
+        "strength":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+      }
+    },
+    "shadow": {
+      "type": "object",
+      "properties": {
+        "black_point": { "type": "number", "minimum": 0, "maximum": 0.2, "default": 0.0 },
+        "compression": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "tint": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -1, "maximum": 1 }, "default": [0,0,0] },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 },
+        "contrast":   { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+      }
+    },
+    "lens": {
+      "type": "object",
+      "properties": {
+        "vignette": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "chromatic_aberration": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "sharpness_falloff": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "distortion": { "type": "number", "minimum": -1, "maximum": 1, "default": 0.0 },
+        "bloom": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "flare": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 }
+      }
+    },
+    "grain": {
+      "type": "object",
+      "properties": {
+        "amount":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "size":    { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 },
+        "density": { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 }
+      }
+    },
+    "noise": {
+      "type": "object",
+      "properties": {
+        "luma":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "chroma": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 }
+      }
+    },
+    "halation": {
+      "type": "object",
+      "properties": {
+        "amount":    { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "radius":    { "type": "number", "minimum": 0.5, "maximum": 4, "default": 1.0 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
+        "warmth":    { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+      }
+    },
+    "bloom": {
+      "type": "object",
+      "properties": {
+        "amount":    { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "radius":    { "type": "number", "minimum": 0.5, "maximum": 4, "default": 1.0 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 }
+      }
+    },
+    "vignette": {
+      "type": "object",
+      "properties": {
+        "amount":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "radius":  { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0 },
+        "feather": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5 },
+        "center":  { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number", "minimum": 0, "maximum": 1 }, "default": [0.5,0.5] }
+      }
+    },
+    "sharpen": {
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
+        "radius": { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 }
+      }
+    }
+  },
+  "definitions": {
+    "hsl_color": {
+      "type": "object",
+      "properties": {
+        "hue_shift":  { "type": "number", "minimum": -30, "maximum": 30, "default": 0 },
+        "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 },
+        "lightness":  { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+      }
+    }
+  }
+}

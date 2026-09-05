@@ -1,0 +1,28 @@
+[project]
+name = "photographercamera"
+version = "0.1.0"
+description = "Offline Photographer Camera Profile builder (dataset -> features -> profile -> optimize -> validate)."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+heic = ["pillow-heif>=0.15"]
+analysis = ["opencv-python-headless>=4.8", "scikit-image>=0.21"]
+ai = ["torch>=2.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["tools"]
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+line-length = 100

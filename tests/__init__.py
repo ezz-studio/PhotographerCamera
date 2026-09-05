@@ -1,0 +1,1 @@
+"""PhotographerCamera test suite."""

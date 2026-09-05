@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PhotographerCamera" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#111111</item>
+        <item name="android:colorPrimaryDark">#000000</item>
+        <item name="android:colorAccent">#ff4081</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

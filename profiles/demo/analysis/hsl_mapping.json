@@ -1,0 +1,42 @@
+{
+  "schema": "hsl_mapping/v1",
+  "n_images": 12,
+  "hues": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 1.3304,
+      "lightness": 1.0
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1.0
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1.0
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 1.397,
+      "lightness": 1.0
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 1.2754,
+      "lightness": 1.0
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 1.0208,
+      "lightness": 1.0
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.81,
+      "lightness": 1.0
+    }
+  },
+  "note": "saturation factor vs global mean; hue_shift/lightness neutral until optimizer runs"
+}

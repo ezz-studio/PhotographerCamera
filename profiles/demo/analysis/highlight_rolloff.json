@@ -1,0 +1,8 @@
+{
+  "schema": "highlight_rolloff/v1",
+  "n_images": 12,
+  "threshold": 0.7,
+  "strength": 0.0,
+  "saturation": 1.0,
+  "note": "threshold from 90th percentile; strength left 0 for optimizer"
+}

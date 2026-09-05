@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "schema_version": 1,
+  "name": "Smoke Look",
+  "validation_status": "pending",
+  "exposure": {
+    "bias": -0.111
+  },
+  "white_balance": {
+    "temperature_bias": 0.001,
+    "tint_bias": -0.116
+  },
+  "color_matrix": {
+    "matrix_3x3": [
+      [
+        1.001,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0024,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.9967
+      ]
+    ],
+    "input_gamut": "sRGB",
+    "output_gamut": "sRGB"
+  },
+  "hsl": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1.0
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 0.8569,
+      "lightness": 1.0
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 1.1624,
+      "lightness": 1.0
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 1.0773,
+      "lightness": 1.0
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 0.7596,
+      "lightness": 1.0
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 1.0498,
+      "lightness": 1.0
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.9448,
+      "lightness": 1.0
+    }
+  },
+  "tone_curve": {
+    "points": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0625,
+        0.0
+      ],
+      [
+        0.125,
+        0.0
+      ],
+      [
+        0.1875,
+        0.0
+      ],
+      [
+        0.25,
+        0.0
+      ],
+      [
+        0.3125,
+        0.0066
+      ],
+      [
+        0.375,
+        0.0656
+      ],
+      [
+        0.4375,
+        0.1727
+      ],
+      [
+        0.5,
+        0.2903
+      ],
+      [
+        0.5625,
+        0.5302
+      ],
+      [
+        0.625,
+        0.8202
+      ],
+      [
+        0.6875,
+        0.9784
+      ],
+      [
+        0.75,
+        0.9999
+      ],
+      [
+        0.8125,
+        1.0
+      ],
+      [
+        0.875,
+        1.0
+      ],
+      [
+        0.9375,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ]
+  },
+  "highlight_rolloff": {
+    "threshold": 0.7,
+    "strength": 0.0,
+    "saturation": 1.0
+  },
+  "shadow": {
+    "black_point": 0.2,
+    "compression": 0.0,
+    "tint": [
+      0.2585,
+      0.3,
+      0.2928
+    ],
+    "saturation": 1.0,
+    "contrast": 1.0
+  },
+  "lens": {
+    "vignette": 0.0,
+    "chromatic_aberration": 0.2004,
+    "sharpness_falloff": 0.0,
+    "distortion": 0.0,
+    "bloom": 0.0,
+    "flare": 0.0
+  },
+  "grain": {
+    "amount": 0.3277,
+    "size": 1.0,
+    "density": 1.0
+  },
+  "noise": {
+    "luma": 0.4916,
+    "chroma": 1.0
+  },
+  "halation": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9,
+    "warmth": 1.0
+  },
+  "bloom": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9
+  },
+  "vignette": {
+    "amount": 0.001,
+    "radius": 1.0,
+    "feather": 0.5,
+    "center": [
+      0.5,
+      0.5
+    ]
+  },
+  "sharpen": {
+    "amount": 0.0,
+    "radius": 1.0
+  },
+  "film_curve": {
+    "shadow_floor": 8,
+    "highlight_ceiling": 248
+  }
+}

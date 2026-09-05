@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "schema_version": 1,
+  "name": "VINTAGE 400",
+  "author": "PhotographerCamera",
+  "description": "暖调人像 · 细腻颗粒 · 高宽容度",
+  "validation_status": "validated",
+  "exposure": {
+    "bias": 0.05
+  },
+  "white_balance": {
+    "temperature_bias": 0.25,
+    "tint_bias": 0.05
+  },
+  "color_matrix": {
+    "matrix_3x3": [
+      [
+        1.05,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.95
+      ]
+    ],
+    "input_gamut": "sRGB",
+    "output_gamut": "sRGB"
+  },
+  "hsl": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 1.15,
+      "lightness": 1.0
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 1.2,
+      "lightness": 1.0
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 1.1,
+      "lightness": 1.0
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 0.95,
+      "lightness": 1.0
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 0.9,
+      "lightness": 1.0
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 0.85,
+      "lightness": 1.0
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.95,
+      "lightness": 1.0
+    }
+  },
+  "tone_curve": {
+    "points": [
+      [
+        0.0,
+        0.04
+      ],
+      [
+        0.0625,
+        0.1
+      ],
+      [
+        0.125,
+        0.2
+      ],
+      [
+        0.1875,
+        0.3
+      ],
+      [
+        0.25,
+        0.4
+      ],
+      [
+        0.3125,
+        0.5
+      ],
+      [
+        0.375,
+        0.6
+      ],
+      [
+        0.4375,
+        0.69
+      ],
+      [
+        0.5,
+        0.77
+      ],
+      [
+        0.5625,
+        0.84
+      ],
+      [
+        0.625,
+        0.9
+      ],
+      [
+        0.6875,
+        0.94
+      ],
+      [
+        0.75,
+        0.97
+      ],
+      [
+        0.8125,
+        0.99
+      ],
+      [
+        0.875,
+        1.0
+      ],
+      [
+        0.9375,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ]
+  },
+  "highlight_rolloff": {
+    "threshold": 0.75,
+    "strength": 0.5,
+    "saturation": 1.0
+  },
+  "shadow": {
+    "black_point": 0.04,
+    "compression": 0.1,
+    "tint": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "saturation": 1.0,
+    "contrast": 1.0
+  },
+  "lens": {
+    "vignette": 0.0,
+    "chromatic_aberration": 0.05,
+    "sharpness_falloff": 0.0,
+    "distortion": 0.0,
+    "bloom": 0.0,
+    "flare": 0.0
+  },
+  "grain": {
+    "amount": 0.12,
+    "size": 1.0,
+    "density": 1.0
+  },
+  "noise": {
+    "luma": 0.02,
+    "chroma": 0.0
+  },
+  "halation": {
+    "amount": 0.05,
+    "radius": 1.0,
+    "threshold": 0.9,
+    "warmth": 1.3
+  },
+  "bloom": {
+    "amount": 0.0,
+    "radius": 1.0,
+    "threshold": 0.9
+  },
+  "vignette": {
+    "amount": 0.35,
+    "radius": 1.0,
+    "feather": 0.5,
+    "center": [
+      0.5,
+      0.5
+    ]
+  },
+  "sharpen": {
+    "amount": 0.1,
+    "radius": 1.0
+  },
+  "film_curve": {
+    "shadow_floor": 8,
+    "highlight_ceiling": 248
+  }
+}

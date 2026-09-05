@@ -1,0 +1,18 @@
+# PhotographerCamera — Python Profile Builder dependencies
+# Phase 0 skeleton requires only numpy + pillow to run smoke tests.
+# OpenCV / scikit-image / pillow-heif are needed from Phase 1+ (feature analysis, HEIC).
+
+# P0 — required for skeleton + dataset loader
+numpy>=1.24
+pillow>=10.0
+
+# P1 — HEIC decoding (recommended; optional for Phase 0)
+pillow-heif>=0.15
+
+# P0/P1 — feature analysis (Phase 3+ RGB/HSV/HSL/Lab/Tone/Texture)
+opencv-python-headless>=4.8
+scikit-image>=0.21
+
+# P2 — optional AI Profile Generator
+# torch>=2.0
+# (LLM API access configured at runtime, no package needed)

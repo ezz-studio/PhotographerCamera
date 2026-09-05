@@ -1,0 +1,13 @@
+{
+  "schema": "tone_statistics/v1",
+  "n_images": 12,
+  "black_point": 0.0928,
+  "shadow": 0.315,
+  "midtone": 0.4484,
+  "highlight": 0.5739,
+  "white_point": 0.7673,
+  "global_contrast": 0.5791,
+  "local_contrast": 1.4844,
+  "highlight_compression": 0.0,
+  "shadow_compression": 0.0232
+}

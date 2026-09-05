@@ -1,0 +1,14 @@
+{
+  "schema": "shadow_model/v1",
+  "n_images": 12,
+  "black_point": 0.1016,
+  "compression": 0.0,
+  "tint": [
+    0.30000001192092896,
+    0.30000001192092896,
+    0.30000001192092896
+  ],
+  "saturation": 1.0,
+  "contrast": 1.0,
+  "note": "initial; refine via optimizer"
+}

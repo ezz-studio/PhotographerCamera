@@ -1,0 +1,46 @@
+{
+  "schema": "validation_report/v1",
+  "n_test": 2,
+  "overall_test_loss": 0.57877,
+  "loss_threshold": 1.0,
+  "validation_status": "validated",
+  "components": {
+    "color": 0.17312,
+    "tone": 0.19471,
+    "histogram": 0.04688,
+    "hsl": 0.0468,
+    "highlight": 0.0,
+    "shadow": 0.07102,
+    "texture": 0.31025
+  },
+  "per_image": [
+    {
+      "color": 0.17075559258218465,
+      "tone": 0.18945271770159403,
+      "histogram": 0.04627486577643172,
+      "hsl": 0.029286563396453857,
+      "highlight": 0.0,
+      "shadow": 0.07301643490791321,
+      "texture": 0.2860298749039283,
+      "total": 0.5568144222493131
+    },
+    {
+      "color": 0.17548433749407855,
+      "tone": 0.1999686062335968,
+      "histogram": 0.04747973326359833,
+      "hsl": 0.06431075930595398,
+      "highlight": 0.0,
+      "shadow": 0.06902405619621277,
+      "texture": 0.3344787902496919,
+      "total": 0.6007158832835718
+    }
+  ],
+  "dataset": {
+    "discovered": 12,
+    "loaded": 12,
+    "train": 8,
+    "validation": 2,
+    "optimize_images": 10,
+    "test": 2
+  }
+}

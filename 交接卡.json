@@ -1,0 +1,117 @@
+{
+  "title": "PhotographerCamera 交接卡",
+  "generated_at": "2026-09-04T21:15:00+08:00",
+  "current_branch_state": "【2026-09-05 01:55 预览变形根治（复用DAZZ OES标准做法）】OPPO截图实锤：4:3横buffer被压成横条=oes2d.frag手算mat2 u_rot推UV出[0,1]（(0,-1,1,0)=旋转90°push neg）。DAZZ CameraGLRenderer深读确认标准做法=SurfaceTexture.getTransformMatrix()→vertex mat4 u_stMatrix（不在fragment）。新建passthrough_oes.vert；oes2d/blit.frag删u_rot；passthrough.vert加u_uvWin；ProfileRenderer rotation:FloatArray(4)→stMatrix:FloatArray(16)；coverWindow不再依赖rot90；CameraPreviewView每帧getTransformMatrix；computeRot删除。build+test全绿，APK=app-debug7-stmatrix.apk。复用原则：OES集成复用DAZZ，渲染管线差异化（15 pass profile）保留；其余4仓库优化入路线图。",
+  "project_state": {
+    "summary": "上回合 film_curve/RAW/点按测光已交付；本回合修复相册返回闪退（maxZoom 空安全）并补齐 film_curve 一致性链（schema/CPU 参考/等价测试/Validation），测试套件全绿。",
+    "done_this_round": [
+      "修复相册→相机返回闪退：CameraEngine.maxZoom() maxOf→maxOfOrNull（空 lenses 返回 5f，与 UI 兜底一致）；CameraScreen.zoomStops remember 键加 zoomState。",
+      "（前一轮 20:38）film_curve 一致性补齐：schema 增 film_curve 字段；tools/glsl_reference.py 与 tools/profile_renderer.py 增 CPU 精确复刻（C1 soft-knee，链末调用）；test_shader_equivalence.py 增随机 film_curve + 5 组边界对拍；test_renderer.py 恒等测试显式禁用 film_curve 并新增默认边界断言；static_cross_check.py 改动态枚举 assets/profiles；Validation.kt 增 2 项 film 校验；run_tests.py 全绿。",
+      "审计报告：docs/AUDIT_2026-09-04_film_curve.md。"
+    ],
+    "unverified_or_pending": [
+      "emulator-5556 不支持 RAW_SENSOR，RAW 路径在模拟器自动回退 YUV_420_888，需在真机验证 RAW 直出与 4K 分辨率。",
+      "film_curve 的 248/8 像素边界需在真机亮/暗场景做像素统计验证（模拟器虚拟相机为暗静帧，仅能验证下限 floor 不破坏、上限 248 不被超过）。",
+      "点按测光区到传感器坐标的旋转映射（sensorOrientation 90/180/270）仅在真机横/竖屏切换时才能完整验证。"
+    ]
+  },
+  "build_artifact": "android/app/build/outputs/apk/debug/app-debug.apk",
+  "protected_files": {
+    "warning": "以下文件为「GPU 与 CPU 参考一致性」与「参数注入契约」的锚点，改了其一必须同步其余，否则会破坏预览/拍摄一致性与着色器等价性测试。",
+    "must_not_edit_casually": [
+      {
+        "path": "android/app/src/main/java/com/photographercamera/core/gpu/GpuParams.kt",
+        "reason": "GPU uniform 与 Profile 的唯一桥。改字段须同步 mainchain.frag 的 uniform 声明、ProfileRenderer 的 pass 注入、以及数值范围/默认值。"
+      },
+      {
+        "path": "android/app/src/main/assets/shaders/mainchain.frag",
+        "reason": "主链顺序与 uniform 声明的权威。新增/删除 uniform 必须与 GpuParams、ProfileRenderer 三处同时改。"
+      },
+      {
+        "path": "android/app/src/main/assets/shaders/film_curve.frag",
+        "reason": "本次新增的最后一道 pass。膝点/上下限若硬编码违反 AGENTS 规则5（参数不得写死在 GLSL），且必须与 Profile.film_curve 配置保持一致。"
+      },
+      {
+        "path": "android/app/src/main/assets/shaders/common.glsl",
+        "reason": "pc_hue_index 与 LUT 约定被 GpuParams.HUE_ORDER 严格绑定，改动会导致 HSL LUT 错位。"
+      },
+      {
+        "path": "android/app/src/main/java/com/photographercamera/core/gpu/ProfileRenderer.kt",
+        "reason": "pass 顺序即权威（见 docs/rendering_pipeline.md §1）。film_curve 必须保持在 grain/vignette 之后、blit 之前。调整 pass 顺序需同步文档。"
+      },
+      {
+        "path": "android/app/src/main/java/com/photographercamera/core/profile/Profile.kt",
+        "reason": "Profile 数据模型。新增字段须带 SCHEMA DEFAULTS 且同步 JSON 与 schema，否则旧缓存 JSON 解析失败或行为漂移。"
+      },
+      {
+        "path": "android/app/src/main/assets/profiles/*.json",
+        "reason": "6 个预设配置。film_curve 等新增层已写入；改字段需与 schema 一致，且注意 ProfileLoader 仅在首次 init 拷贝到 filesDir（旧文件会留在 filesDir）。"
+      },
+      {
+        "path": "profiles/schema/photographer_profile.schema.json",
+        "reason": "字段契约。Profile 模型与 JSON 必须与其对齐。"
+      },
+      {
+        "path": "tools/glsl_reference.py",
+        "reason": "GLSL 的 CPU 参考实现，是 GPU 正确性的判定基准（HUE_ORDER、LUT 约定）。"
+      },
+      {
+        "path": "tools/profile_renderer.py",
+        "reason": "15 层成像链的 CPU 参考，与 ProfileRenderer 顺序等价。"
+      },
+      {
+        "path": "tools/static_cross_check.py / tests/test_shader_equivalence.py",
+        "reason": "GPU↔CPU 一致性测试。改动任何成像逻辑后必须跑这两个判定。"
+      },
+      {
+        "path": "AGENTS.md",
+        "reason": "项目宪法。规则5/6/7/12 内嵌于多处代码注释，改动成像逻辑必须遵守。"
+      }
+    ]
+  },
+  "rules_to_read_first": {
+    "warning": "下一步执行者必须在动手前先读以下规则文件，确认改动不违反约束。",
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "focus": "§2 强制规则 5（参数不写死 GLSL）、6（Uniform/UBO 注入）、7（预览=Capture 核心逻辑一致）、12（禁止 AI Runtime）；§1 项目定义与 Phase 顺序"
+      },
+      {
+        "path": "docs/rendering_pipeline.md",
+        "focus": "§1 管线顺序权威、§4 参数注入契约（禁止数值写死 GLSL）"
+      },
+      {
+        "path": "docs/profile_spec.md",
+        "focus": "Profile 参数定义/单位/范围/默认值规范（film_curve 的 shadow_floor/highlight_ceiling 单位为 0-255 显示级）"
+      },
+      {
+        "path": "profiles/schema/photographer_profile.schema.json",
+        "focus": "字段契约与枚举"
+      },
+      {
+        "path": "tests/test_shader_equivalence.py",
+        "focus": "GPU↔CPU 一致性判定方式（改 film_curve/RAW 相关着色器或链顺序必须过此测试）"
+      }
+    ]
+  },
+  "execution_protocol": {
+    "phase_1_inspect_only": "只能先检查，不能直接动手。只读上述规则与受保护文件，运行 static_cross_check.py 与 test_shader_equivalence.py 仅观察结果，核对当前代码与上次交付的 diff。禁止写代码、禁止构建、禁止安装。",
+    "phase_2_act_only_after_approval": "动手仅在上述检查结论明确且用户批准后。改动须遵循 AGENTS 规则：改 GpuParams 同步 Shader uniform 与注入；改 Shader 同步 tools/ 下 CPU 参考与一致性测试；改 Profile 模型同步 JSON 与 schema。",
+    "phase_3_must_output_audit": "执行完任何改动后，必须输出审计报告。审计报告至少包含：改动文件清单、是否违反 AGENTS 规则（逐条）、GPU/CPU 一致性测试结论、构建结果（BUILD EXIT 码与 APK 路径）、模拟器/真机验证结论、遗留风险与下一步建议。"
+  },
+  "next_recommended_steps": [
+    "真机安装验证 RAW_SENSOR 直出（确认设备 cap 含 REQUEST_AVAILABLE_CAPABILITIES_RAW 且 RAW 尺寸暴露）。",
+    "真机亮/暗场景像素统计：确认最亮通道 ≤ 248、最暗通道 ≥ 8，验证 film_curve 边界。",
+    "核对点按测光区在 sensorOrientation 90/180/270 下的坐标映射（横竖屏 + 前/后摄）。",
+    "补充 film_curve 与 RAW 去马赛克在 test_shader_equivalence.py / 单元级像素对拍的回归用例。",
+    "（可选）将更多调整项（色相分区、去雾、分离色调）纳入同一 profile 配置层，保持「一致曲线特征」原则。"
+  ],
+  "audit_report_template": {
+    "changed_files": [],
+    "agents_rules_violations": "逐条对照 AGENTS.md §2，无/有（列明）",
+    "gpu_cpu_equivalence": "static_cross_check.py / test_shader_equivalence.py 结论",
+    "build_result": "BUILD EXIT=0/1, APK 路径",
+    "verification": "模拟器/真机结论（RAW 回退或直出、film 边界、对焦测光）",
+    "risks_and_next": "遗留风险与下一步建议"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "schema": "photographer_color_model/v1",
+  "n_images": 12,
+  "hue_regions": {
+    "red": {
+      "mean_a": 15.3563,
+      "mean_b": 8.7134,
+      "n_samples": 127894
+    },
+    "orange": {
+      "mean_a": 2.5867,
+      "mean_b": 6.1324,
+      "n_samples": 281007
+    },
+    "yellow": {
+      "mean_a": -2.6658,
+      "mean_b": 9.2299,
+      "n_samples": 57251
+    },
+    "green": {
+      "mean_a": -18.7414,
+      "mean_b": 18.3107,
+      "n_samples": 203049
+    },
+    "cyan": {
+      "mean_a": -14.1155,
+      "mean_b": -1.3473,
+      "n_samples": 14347
+    },
+    "blue": {
+      "mean_a": 7.5323,
+      "mean_b": -15.926,
+      "n_samples": 43133
+    },
+    "purple": {
+      "mean_a": 9.4527,
+      "mean_b": -5.2848,
+      "n_samples": 59751
+    }
+  },
+  "semantic_regions": {
+    "neutral": {
+      "mean_rgb": [
+        0.351500004529953,
+        0.3447999954223633,
+        0.34689998626708984
+      ]
+    },
+    "skin": {
+      "mean_rgb": [
+        0.5805000066757202,
+        0.49300000071525574,
+        0.4343999922275543
+      ]
+    },
+    "sky": {
+      "mean_rgb": [
+        0.4408000111579895,
+        0.45980000495910645,
+        0.5680000185966492
+      ]
+    },
+    "plant": {
+      "mean_rgb": [
+        0.41749998927116394,
+        0.527899980545044,
+        0.3749000132083893
+      ]
+    },
+    "highlight": {
+      "mean_rgb": [
+        0.8410999774932861,
+        0.7605999708175659,
+        0.7343999743461609
+      ]
+    },
+    "shadow": {
+      "mean_rgb": [
+        0.06689999997615814,
+        0.07670000195503235,
+        0.048700001090765
+      ]
+    }
+  },
+  "note": "stable features only; variance across images not used to force params"
+}
