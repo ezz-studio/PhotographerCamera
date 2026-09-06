@@ -31,12 +31,24 @@ package com.photographercamera.core.gpu
 import android.opengl.GLES30
 
 /**
- * Mirrors `CGEImageFilterInterfaceAbstract::render2Texture` — one pass of the
- * pipeline. Implementations bind their own program/textures and draw the quad.
+ * Mirrors `CGEImageFilterInterfaceAbstract` (cgeImageFilter.{h,cpp}) — one pass
+ * of the pipeline. The upstream class has an init/release lifecycle around its
+ * pure-virtual `render2Texture(handler, srcTexture, vertexBufferID)`; we model
+ * that as [attach] / [render] / [release]. [attach] and [release] are no-ops by
+ * default because the concrete filters here wrap programs owned by
+ * [ProfileRenderer] and hold no GL resources of their own — only [render] is
+ * mandatory. The chain calls [attach] when a filter is added and [release] when
+ * the chain is cleared/released.
  */
 interface GpuFilter {
+    /** Called once when the filter is added to a chain. No-op by default. */
+    fun attach() {}
+
     /** Render [srcTexture] into [dstFramebuffer] (size [w]x[h]). */
     fun render(srcTexture: Int, dstFramebuffer: Int, w: Int, h: Int)
+
+    /** Called when the chain is cleared or released. No-op by default. */
+    fun release() {}
 }
 
 /** Ported from `CGEImageHandler` (m_vecFilters + swapBufferFBO ping-pong). */
@@ -46,16 +58,20 @@ class GpuFilterChain {
 
     /** Append a pass. Mirrors `CGEImageHandler::addImageFilter`. */
     fun add(filter: GpuFilter): GpuFilterChain {
+        filter.attach()
         filters.add(filter)
         return this
     }
 
     fun clear() {
+        for (f in filters) f.release()
         filters.clear()
     }
 
     /** Delete the chain's GL resources (call from the renderer's release()). */
     fun release() {
+        for (f in filters) f.release()
+        filters.clear()
         if (texA != 0) {
             GLES30.glDeleteTextures(1, intArrayOf(texA), 0)
             GLES30.glDeleteFramebuffers(1, intArrayOf(fboA), 0)

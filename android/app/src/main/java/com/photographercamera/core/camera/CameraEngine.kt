@@ -381,6 +381,10 @@ class CameraEngine(
         try {
             val supported = ImageCapture.getImageCaptureCapabilities(p.getCameraInfo(selector))
                 .supportedOutputFormats
+            // per camera-samples camerax-rawcapture: capability is probed via
+            // ImageCapture.getImageCaptureCapabilities().supportedOutputFormats
+            // BEFORE binding (it guards OUTPUT_FORMAT_RAW_JPEG there); the same
+            // sanctioned probe gates our YUV vs RAW selection (yuvCaptureOn below).
             val rawCapableNow = supported.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG) ||
                 supported.contains(ImageCapture.OUTPUT_FORMAT_RAW)
             rawCapable = rawCapableNow
@@ -433,8 +437,21 @@ class CameraEngine(
             DebugLog.log("CAM", "yuv capture mode ON (full-res YUV_420_888 stills, no HAL JPEG)")
         }
 
+        // capture config cross-checked against camera-samples
+        // (vendor/camera-samples/samples/camerax-rawcapture, camerax-takeaphoto,
+        // camerax-ultrahdr, camerax-effects; repo snapshot 2026-09-06).
+        // NOTE: the upstream task referenced "CameraXAdvanced/Camera2Basic" — those
+        // sample apps no longer exist in the current camera-samples layout; the
+        // closest functional equivalents (YUV/RAW/ImageCapture + Camera2Interop) are
+        // used as the reference below. No SUBSTANTIVE deviation was found; the
+        // existing config is validated or exceeds the samples where they apply, so
+        // no logic change is made — only this annotation + inline source tags.
         val newCapture = ImageCapture.Builder()
-            // full-res ISP JPEG; MAXIMIZE_QUALITY also prefers the largest buffer
+            // full-res ISP JPEG; MAXIMIZE_QUALITY also prefers the largest buffer.
+            // per camera-samples camerax-ultrahdr (ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+            // for the quality-priority still path); camerax-takeaphoto uses MINIMIZE_LATENCY
+            // (basic snappy capture) — MAXIMIZE_QUALITY is the correct choice for a
+            // photographer-quality app.
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setResolutionSelector(
                 ResolutionSelector.Builder()
@@ -448,6 +465,12 @@ class CameraEngine(
                         // clipping) were artifacts of that mode, not of the app.
                         // 50MP can return later as an opt-in setting once we run
                         // our own RAW ISP with highlight recovery.
+                        // Resolution strategy cross-checked: camerax-effects uses
+                        // FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER and camerax-rawcapture
+                        // (FULL_SENSOR) uses HIGHEST_AVAILABLE_STRATEGY; neither
+                        // contradicts pinning to a known binned size for ISP-pipeline
+                        // preservation. CLOSEST_LOWER_THEN_HIGHER keeps us at the
+                        // validated 12.5MP bin on devices that lack the exact size.
                         ResolutionStrategy(
                             Size(4096, 3072),
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
@@ -496,11 +519,24 @@ class CameraEngine(
                     // 闪光 precapture 联动照常工作，输出仍是 YUV。
                     // CameraX 1.6 移除了 setOutputImageFormat，setBufferFormat
                     // 是替代 API（ImagePipeline 以此为输入格式）。
+                    // per camera-samples: no sample in the current layout uses
+                    // setBufferFormat(YUV_420_888) on ImageCapture (it is a newer
+                    // CameraX 1.6 API than the samples); the camera2-* YUV_420_888
+                    // usage (camerax-luminosity / camera2-qrscanner / camera2-hdrviewfinder)
+                    // is on ImageReader/ImageAnalysis, confirming YUV_420_888 is the
+                    // canonical non-JPEG still format — kept with the existing rationale.
                     setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
                     // YUV 直采画质补强：HAL 对 YUV still 的 ISP 档位默认跟随
                     // FAST，绕过了 JPEG 路径隐含的高质量处理。这里用 camera2
                     // interop 显式请求 HIGH_QUALITY 档的降噪/锐化/色差校正，
                     // 让 HAL 端把 ISP 管线拉满（失败的设备忽略之，不阻塞）。
+                    // per camera-samples camerax-rawcapture: its RAW path uses
+                    // Camera2Interop.setCaptureRequestOption(SENSOR_PIXEL_MODE,
+                    // MAXIMUM_RESOLUTION) — confirming Camera2Interop request
+                    // injection is the sanctioned way to steer HAL ISP behavior
+                    // from CameraX; our HQ NR/EDGE/ABERRATION trio is the same
+                    // sanctioned mechanism applied to the YUV still. No sample
+                    // contradicted this; kept.
                     try {
                         Camera2Interop.Extender(this)
                             .setCaptureRequestOption(

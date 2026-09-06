@@ -117,6 +117,20 @@ object YuvNative {
      * honors a padded source row stride — exactly what I420 plane compaction
      * needs.
      */
+    /**
+     * ported from libyuv `source/planar_functions.cc :: CopyPlane` (line 29)
+     * + `source/row_common.cc :: CopyRow_C` (line 3273).
+     *
+     * CopyPlane runs, for every row y in [0, height):
+     *     CopyRow(src + y*srcStride, dst + y*dstStride, width)
+     * where CopyRow_C is a per-row memcpy of `width` bytes. We elide the C
+     * version's negative-height (image inversion) branch — Android YUV planes
+     * are always positive-height — but we DO mirror its row-coalesce
+     * optimization: when both strides equal `width` the whole plane is one
+     * contiguous `width*height` block, so a single bulk copy replaces the
+     * per-row loop. This matches the original [ProfileRenderer.compactPlane]
+     * tight-I420 fast path and avoids a per-byte perf regression.
+     */
     private fun copyPlane(
         src: ByteBuffer,
         srcStride: Int,
@@ -126,6 +140,15 @@ object YuvNative {
         height: Int,
     ) {
         if (width <= 0 || height <= 0) return
+        // libyuv CopyPlane coalesce: src/dst contiguous, one memcpy.
+        if (srcStride == width && dstStride == width) {
+            val n = width * height
+            src.limit(n); src.position(0)
+            dst.limit(n); dst.position(0)
+            dst.put(src)
+            dst.position(0); src.position(0)
+            return
+        }
         for (y in 0 until height) {
             val s = y * srcStride
             val d = y * dstStride

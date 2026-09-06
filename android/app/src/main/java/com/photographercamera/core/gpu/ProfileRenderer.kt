@@ -65,6 +65,11 @@ class ProfileRenderer private constructor(
     private val quad: Int,
 ) {
     companion object {
+        // One-shot guard: log the libyuv->Java fallback at most once per
+        // process so a persistently-failing compaction does not spam the GL
+        // thread (integration mandate: "回退时 log 一次").
+        @Volatile private var yuvNativeFallbackLogged = false
+
         // Stride 16 floats per vertex: pos(vec2) + uv(vec2) interleaved so
         // layout(location=0) is position and layout(location=1) is uv.
         private val QUAD_DATA = FloatArray(6 * 4).also { arr ->
@@ -749,18 +754,31 @@ class ProfileRenderer private constructor(
     /**
      * Read one Y/U/V plane via the libyuv-ported [YuvNative.compactYuvPlane]
      * (Google libyuv: CopyPlane for I420, SplitUVRow_C for NV12). Falls back to
-     * the original hand-written [compactPlane] on ANY failure so the YUV direct
-     * path can never regress if the ported routine throws.
+     * the original hand-written [compactPlane] on ANY failure (exception OR a
+     * null return for an unsupported/too-small buffer) so the YUV direct path
+     * can never regress if the ported routine throws or declines.
      */
     private fun readYuvPlane(plane: android.media.Image.Plane, outW: Int, outH: Int): ByteBuffer? {
-        return try {
+        val native = try {
             YuvNative.compactYuvPlane(plane, outW, outH)
         } catch (t: Throwable) {
-            com.photographercamera.core.debug.DebugLog.log(
-                "YUV", "libyuv compact failed (${t.message}) - Java fallback",
-            )
-            compactPlane(plane, outW, outH)
+            yuvNativeFallback(t.message)
+            null
         }
+        if (native != null) return native
+        // compactYuvPlane returned null (buffer too small / unsupported layout):
+        // also fall back to the Java path instead of dropping the plane.
+        yuvNativeFallback("null")
+        return compactPlane(plane, outW, outH)
+    }
+
+    /** Emit the libyuv->Java fallback warning at most once per process. */
+    private fun yuvNativeFallback(msg: String?) {
+        if (yuvNativeFallbackLogged) return
+        yuvNativeFallbackLogged = true
+        com.photographercamera.core.debug.DebugLog.log(
+            "YUV", "libyuv compact failed ($msg) - Java fallback active",
+        )
     }
 
     /** 中心 1px 采样（诊断用）：区分"转换段输出灰"还是"effect 段输出灰"。 */
@@ -826,7 +844,7 @@ class ProfileRenderer private constructor(
     // the YUV/RAW capture chains can run through the shared GpuFilterChain.
 
     /** Wraps the chroma-denoise program as a [GpuFilter] (CGEImageFilter port). */
-    private class ChromaFilter(
+    private inner class ChromaFilter(
         private val prog: Int,
         private val tw: Int,
         private val th: Int,
@@ -849,7 +867,7 @@ class ProfileRenderer private constructor(
     }
 
     /** Wraps the unified effect program as a [GpuFilter] (CGEImageFilter port). */
-    private class EffectFilter(
+    private inner class EffectFilter(
         private val p: GpuParams,
         private val timestampMs: Long,
         private val tonePreLinear: Boolean,

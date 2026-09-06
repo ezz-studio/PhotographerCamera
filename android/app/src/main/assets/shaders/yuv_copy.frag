@@ -16,6 +16,24 @@
 //   u_win: cover-crop window in UPRIGHT uv (x0,y0,x1,y1)
 //   u_mirror: front camera - HAL JPEG output is mirrored by the capture HAL;
 //             the raw YUV analysis stream is NOT, so we flip to match.
+//
+// --- Calibration vs android-gpuimage-plus (vendor/android-gpuimage-plus) ---
+// Reference YUV->RGB shaders inspected:
+//   library/src/main/java/org/wysaid/gpuCodec/TextureDrawerCodec.java
+//     (MATRIX_YUV2RGB, used by TextureDrawerI420ToRGB / TextureDrawerNV21ToRGB)
+//   library/src/main/java/org/wysaid/gpuCodec/TextureDrawerI420ToRGB.java
+//     (fshI420ToRGB: yuv = (Y, U-0.5, V-0.5); rgb = colorConversion * yuv)
+// SUBSTANTIVE DIFFERENCE FOUND - NOT ADOPTED:
+//   android-gpuimage-plus uses FULL-RANGE (JFIF) BT.601:
+//       R = Y + 1.57481*V ; G = Y - 0.18732*U - 0.46813*V ; B = Y + 1.8556*U
+//   with Y taken directly in [0,1] (NO (Y-16/255) offset, NO *255/219 scale).
+//   That matrix is correct for DECODED MediaCodec video frames (Y in [0,255]),
+//   NOT for CameraX YUV_420_888, which is BT.601 LIMITED-RANGE (studio swing):
+//   Y in [16,235], UV in [16,240]. Adopting the full-range matrix here would
+//   dark-shift / mis-tint the stills and REGRESS the 0.3.7 device-verified
+//   color output. Per the "do-not-regress verified fixes / stability-first"
+//   mandate we therefore KEEP the limited-range matrix below. If a future data
+//   source is full-range, swap this block for the gpuimage-plus matrix.
 precision highp float;
 
 uniform sampler2D u_y;   // luma plane  (GL_R8, W x H)
