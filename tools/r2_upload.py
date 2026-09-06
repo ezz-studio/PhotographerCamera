@@ -21,7 +21,10 @@ import boto3
 import botocore
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APK_DIR = os.path.join(REPO, "android", "app", "build", "outputs", "apk", "debug")
+APK_DIRS = [
+    os.path.join(REPO, "android", "app", "build2", "outputs", "apk", "debug"),
+    os.path.join(REPO, "android", "app", "build", "outputs", "apk", "debug"),
+]
 GRADLE = os.path.join(REPO, "android", "app", "build.gradle.kts")
 
 
@@ -34,7 +37,7 @@ def load_creds():
 def find_apk():
     if len(sys.argv) > 1 and sys.argv[1].endswith(".apk"):
         return sys.argv[1]
-    cands = [os.path.join(APK_DIR, f) for f in os.listdir(APK_DIR) if f.endswith(".apk")]
+    cands = [os.path.join(d, f) for d in APK_DIRS if os.path.isdir(d) for f in os.listdir(d) if f.endswith(".apk")]
     return max(cands, key=os.path.getmtime)
 
 
