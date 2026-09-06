@@ -285,7 +285,81 @@ class CameraPreviewView @JvmOverloads constructor(
         when (frame) {
             is com.photographercamera.core.camera.StillFrame.Raw -> renderRawThroughChain(frame.frame, onDone)
             is com.photographercamera.core.camera.StillFrame.Yuv -> renderYuvThroughChain(frame, onDone)
+            is com.photographercamera.core.camera.StillFrame.Stack -> renderStackThroughChain(frame, onDone)
             is com.photographercamera.core.camera.StillFrame.Isp -> renderBitmapThroughChain(frame.bitmap, 1f, onDone)
+        }
+    }
+
+    /**
+     * 0.5.0 多帧堆栈成片（PhotonCamera 管线移植）。两段式：
+     *  1) 后台线程：GlesYuvStacker（自带 EGL context）对齐合并降噪 N 张
+     *     YUV 帧 → 一张干净位图；完成后统一 close 所有 proxy。
+     *  2) GL 线程：干净位图进移植的 recipe 调色链（renderPhotonChain），
+     *     数学与预览 effect 内核一致（WYSIWYG）。
+     * 任何失败都以 1x1 bitmap 回调（上层走预览帧回退）。
+     */
+    private val stackExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "pc-stack").apply { isDaemon = true }
+    }
+
+    private fun renderStackThroughChain(
+        frame: com.photographercamera.core.camera.StillFrame.Stack,
+        onDone: (Bitmap) -> Unit,
+    ) {
+        val proxies = frame.proxies
+        stackExecutor.execute {
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            val p = params
+            val stacked: Bitmap? = try {
+                com.photographercamera.core.photon.PhotonStackPipeline.process(
+                    proxies, frame.rotDeg, frame.mirror, p,
+                )
+            } catch (t: Throwable) {
+                com.photographercamera.core.debug.DebugLog.logError("SHOT", "photon stack failed", t)
+                null
+            } finally {
+                for (px in proxies) {
+                    try {
+                        px.close()
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+            if (stacked == null) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "SHOT", "photon stack unavailable - falling back",
+                )
+                onDone(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+                return@execute
+            }
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "photon stack done ${stacked.width}x${stacked.height} " +
+                    "in ${android.os.SystemClock.elapsedRealtime() - t0}ms",
+            )
+            queueEvent {
+                val r = renderer
+                val pp = params
+                val out = if (r != null && pp != null) {
+                    try {
+                        r.renderPhotonChain(stacked, pp, t0)
+                    } catch (t: Throwable) {
+                        com.photographercamera.core.debug.DebugLog.logError("SHOT", "photon recipe render failed", t)
+                        null
+                    }
+                } else null
+                if (out == null) {
+                    com.photographercamera.core.debug.DebugLog.log("SHOT", "photon recipe unavailable - falling back")
+                    onDone(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+                } else {
+                    com.photographercamera.core.debug.DebugLog.log(
+                        "SHOT",
+                        "photon chain done ${out.width}x${out.height} " +
+                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
+                    )
+                    onDone(out)
+                }
+            }
         }
     }
 

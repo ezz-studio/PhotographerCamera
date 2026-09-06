@@ -182,6 +182,19 @@ class CameraEngine(
     @Volatile private var yuvCaptureOn = false
 
     /**
+     * 多帧堆栈采集（0.5.0，PhotonCamera 管线移植）：YUV 直采主通道上叠加
+     * 连续 N 帧连拍（每帧独立 takePicture，HAL ISP YUV 输出不变），交给
+     * GlesYuvStacker 对齐合并降噪。filesDir/pc_burst.txt 可改帧数（默认 6，
+     * <2 视为关闭）；filesDir/pc_burst_off.txt 应急后门。闪光模式自动回退
+     * 单帧（precapture 联动与多帧连拍冲突）。
+     */
+    @Volatile private var burstCount: Int = 6
+
+    private val burstOptOut: Boolean by lazy {
+        File(appContext.filesDir, "pc_burst_off.txt").exists()
+    }
+
+    /**
      * UI RAW 开关（任务：能力检测驱动显示/隐藏 + 持久化）。
      * 写入 pc_settings.raw_isp_enabled 并重建 ImageCapture —— RAW 输出格式
      * 是 bind 时属性，切换必须 rebind（与 switchFacing 同路径，<1s）。
@@ -267,11 +280,23 @@ class CameraEngine(
         surfaceTexture = st
     }
 
+    /** Bind 时读取多帧帧数配置（filesDir/pc_burst.txt 写数字即生效）。 */
+    private fun refreshBurstCount() {
+        try {
+            val f = File(appContext.filesDir, "pc_burst.txt")
+            if (f.exists()) {
+                burstCount = f.readText().trim().toIntOrNull() ?: 6
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     /**
      * Bind the camera (idempotent). Safe to call from the GL thread — the actual
      * CameraX work happens on the main thread, as required by ProcessCameraProvider.
      */
     fun open() {
+        refreshBurstCount()
         mainHandler.post { bindOnMain() }
     }
 
@@ -871,6 +896,7 @@ class CameraEngine(
         onBitmap: (Bitmap) -> Unit,
         onRawFrame: ((RawFrame) -> Unit)? = null,
         onYuvFrame: ((ImageProxy, Int, Boolean) -> Unit)? = null,
+        onStackFrame: ((List<ImageProxy>, Int, Boolean) -> Unit)? = null,
     ): Boolean {
         if (capturing) {
             DebugLog.log("SHOT", "capture already in progress — ignored (guards double shutter)")
@@ -1171,9 +1197,69 @@ class CameraEngine(
             )
         }
 
+        /**
+         * 多帧 YUV 连拍（0.5.0 主通道）：连续 burstCount 张全分辨率
+         * YUV_420_888 顺序采集（每张成功后再拍下一张，HAL AE 连续收敛，
+         * 静态场景曝光漂移可忽略；对齐合并由 GlesYuvStacker 兜住）。任一帧
+         * 失败即用手头已收到的帧交付；一张都没收到则回退单帧链。
+         */
+        fun shootYuvBurst(onStack: (List<ImageProxy>, Int, Boolean) -> Unit) {
+            val n = burstCount.coerceIn(2, 12)
+            val frames = ArrayList<ImageProxy>(n)
+            val mirror = facing == CameraSelector.LENS_FACING_FRONT
+            var rot = 0
+            val t1 = SystemClock.elapsedRealtime()
+
+            fun deliver() {
+                finish()
+                if (frames.isEmpty()) {
+                    DebugLog.log("SHOT", "burst produced no frames - single-frame fallback")
+                    if (onYuvFrame != null && yuvAlive) shootYuv(onYuvFrame!!) { shootBitmap() }
+                    else shootBitmap()
+                    return
+                }
+                val total = SystemClock.elapsedRealtime() - t1
+                DebugLog.log(
+                    "SHOT",
+                    "burst done: ${frames.size}/$n frames ${frames[0].width}x${frames[0].height} " +
+                        "rot=$rot mirror=$mirror in ${total}ms",
+                )
+                mainHandler.post { onStack(frames, rot, mirror) }
+            }
+
+            fun shootNext() {
+                ic.takePicture(
+                    mainExecutor,
+                    object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: ImageProxy) {
+                            if (frames.isEmpty()) rot = image.imageInfo.rotationDegrees
+                            frames.add(image)
+                            DebugLog.log(
+                                "SHOT",
+                                "burst frame ${frames.size}/$n ${image.width}x${image.height} " +
+                                    "(capture ${SystemClock.elapsedRealtime() - t1}ms)",
+                            )
+                            if (frames.size >= n) deliver() else shootNext()
+                        }
+
+                        override fun onError(exception: ImageCaptureException) {
+                            DebugLog.logError("SHOT", "burst frame ${frames.size + 1} failed", exception)
+                            deliver()
+                        }
+                    },
+                )
+            }
+            shootNext()
+        }
+
         fun shoot() = when {
             rawIspMode -> shootRawIsp()
             rawMode -> shootRawBundle()
+            // 0.5.0 多帧堆栈主通道：YUV 直采可用、闪光关闭、burst 未关且回调
+            // 已接线时，先走多帧连拍（对齐合并降噪）；任何不满足逐级回退。
+            onStackFrame != null && yuvCaptureOn &&
+                flashModeState == ImageCapture.FLASH_MODE_OFF &&
+                !burstOptOut && burstCount >= 2 -> shootYuvBurst(onStackFrame!!)
             // 全分辨率 YUV 直采主通道（含闪光：precapture 由 ImageCapture 驱动，
             // 输出仍是 YUV）。回退链：analysis 流帧 → JPEG。
             yuvCaptureOn -> shootYuvCapture {

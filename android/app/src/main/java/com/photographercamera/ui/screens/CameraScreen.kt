@@ -361,6 +361,20 @@ fun CameraScreen(navController: NavController) {
                     else fallBackToPreview()
                 }
             },
+            // 0.5.0 多帧堆栈（PhotonCamera 管线移植）：引擎连拍 N 张 YUV，
+            // GlesYuvStacker 对齐合并降噪后走统一风格链。UI/动效零改动；
+            // 堆栈不可用时回调 1x1 位图 → 预览帧兜底。
+            onStackFrame = { proxies, rot, mirror ->
+                previewRef?.renderStill(StillFrame.Stack(proxies, rot, mirror)) { processed ->
+                    DebugLog.log(
+                        "SHOT",
+                        "GPU chain done (Stack): ${processed.width}x${processed.height} " +
+                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
+                    )
+                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
+                    else fallBackToPreview()
+                }
+            },
         ) ?: false
         if (!issued) {
             // Fallback: grab the current preview frame through the GL chain.

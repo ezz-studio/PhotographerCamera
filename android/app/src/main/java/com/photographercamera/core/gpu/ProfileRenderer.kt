@@ -64,6 +64,7 @@ class ProfileRenderer private constructor(
     private val progChroma: Int,
     private val progLuma: Int,
     private val progSharpen: Int,
+    private val progFilmCurve: Int,
     private val quad: Int,
 ) {
     companion object {
@@ -137,6 +138,14 @@ class ProfileRenderer private constructor(
             if (progCopy == 0 || progBlit == 0) {
                 throw IllegalStateException("minimum pipeline (oes2d copy / blit) failed to build - preview impossible")
             }
+            // 0.5.0 Photon 管线终层：FilmCurve 输出一致性 remap（stack/recipe
+            // 成片路径的最后一级，与 effect.frag 内的 pc_film_curve 同源数学）。
+            val progFilmCurve = GLSL.program(assets, "shaders/passthrough.vert", "shaders/film_curve.frag")
+            if (progFilmCurve == 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "GL", "film_curve program failed to build - Photon chain film curve disabled",
+                )
+            }
             val degraded = mutableListOf<String>()
             if (progEffect == 0) degraded.add("effect")
             com.photographercamera.core.debug.DebugLog.log(
@@ -146,7 +155,7 @@ class ProfileRenderer private constructor(
             )
             return ProfileRenderer(
                 assets, progCopy, progEffect, progBlit, progRawIsp, progYuv,
-                progChroma, progLuma, progSharpen, quad,
+                progChroma, progLuma, progSharpen, progFilmCurve, quad,
             )
         }
 
@@ -665,6 +674,65 @@ class ProfileRenderer private constructor(
             "YUV", "yuv chain output avg=${bmpAvgStr(outBmp)}",
         )
         return outBmp
+    }
+
+    /**
+     * 0.5.0 Photon 成片链终层（GL 线程）：stack + recipe 已在后台线程完成，
+     * 这里只做输出一致性 FilmCurve remap（与 effect.frag 的 pc_film_curve
+     * 同源数学，film_curve.frag）。任何失败返回 null（上层回退）。
+     * 输入位图已 upright、已调色、已镜像。
+     */
+    fun renderPhotonChain(
+        srcBmp: Bitmap,
+        params: GpuParams,
+        timestampMs: Long,
+    ): Bitmap? {
+        if (progFilmCurve == 0) return null
+        val w = srcBmp.width
+        val h = srcBmp.height
+        if (w <= 0 || h <= 0) return null
+        ensureBuffers(w, h)
+
+        // Upload the styled bitmap to a temp texture (same pattern as renderBitmap).
+        val tmpTex = IntArray(1)
+        GLES30.glGenTextures(1, tmpTex, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tmpTex[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        val px = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+        srcBmp.copyPixelsToBuffer(px)
+        px.position(0)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, px,
+        )
+
+        // Film curve pass: tmpTex -> outFbo (readback target).
+        val targetFbo = ensureOut(w, h)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, targetFbo)
+        GLES30.glViewport(0, 0, w, h)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glUseProgram(progFilmCurve)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tmpTex[0])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(progFilmCurve, "u_input"), 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(progFilmCurve, "u_film"),
+            params.filmFloor, params.filmCeil,
+        )
+        // passthrough.vert 的 u_uvWin 恒等重置（同 renderBitmap 的教训）。
+        u4fOn(progFilmCurve, "u_uvWin", 1f, 1f, 0f, 0f)
+        drawQuad()
+        GLES30.glDeleteTextures(1, tmpTex, 0)
+        com.photographercamera.core.debug.DebugLog.log(
+            "PHOTON",
+            "film curve done floor=${params.filmFloor} ceil=${params.filmCeil} enabled=${params.filmEnabled} " +
+                "(${w}x${h}, ${android.os.SystemClock.elapsedRealtime() - timestampMs}ms)",
+        )
+        // Bitmap upload cancels glReadPixels' bottom-up origin — flipY=false.
+        return readback(w, h, flipY = false)
     }
 
     /**

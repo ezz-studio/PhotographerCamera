@@ -32,6 +32,18 @@ sealed class StillFrame {
         val mirror: Boolean,
     ) : StillFrame()
 
+    /**
+     * 多帧 YUV 堆栈输入（0.5.0，PhotonCamera 管线移植）：连续 N 张全分辨率
+     * YUV_420_888 帧，交给移植的 GlesYuvStacker 做帧间对齐 + 时域合并 +
+     * 空间降噪后出一张干净位图，再进统一风格链。所有 [proxies] 的生命周期
+     * 移交给渲染端（堆栈读取完成后统一 close）。[rotDeg]/[mirror] 取首帧。
+     */
+    data class Stack(
+        val proxies: List<ImageProxy>,
+        val rotDeg: Int,
+        val mirror: Boolean,
+    ) : StillFrame()
+
     /** 设备 ISP 输出（已 demosaic/已 gamma 的 upright 位图，JPEG 兜底路径）。 */
     data class Isp(val bitmap: Bitmap) : StillFrame()
 }

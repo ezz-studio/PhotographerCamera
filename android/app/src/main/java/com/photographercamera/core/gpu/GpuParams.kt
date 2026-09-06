@@ -63,6 +63,8 @@ class GpuParams private constructor(
     val filmFloor: Float,
     val filmCeil: Float,
     val filmEnabled: Boolean,
+    /** 0.5.0: 源 Profile 引用（PhotonCamera recipe 管线映射用；flatten 后仍可回溯）。 */
+    val sourceProfile: PhotographerProfile? = null,
 ) {
     companion object {
         fun from(profile: PhotographerProfile, aspect: Float = 1.0f): GpuParams {
@@ -117,6 +119,7 @@ class GpuParams private constructor(
                 filmFloor = (profile.filmCurve.shadowFloor / 255f).coerceIn(0f, 0.4f),
                 filmCeil = (profile.filmCurve.highlightCeiling / 255f).coerceIn(0.6f, 1f),
                 filmEnabled = profile.filmCurve.shadowFloor > 0f || profile.filmCurve.highlightCeiling < 255f,
+                sourceProfile = profile,
             )
         }
 
