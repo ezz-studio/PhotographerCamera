@@ -319,6 +319,9 @@ fun CameraScreen(navController: NavController) {
                 val photonRecipe = com.photographercamera.photon.model.ColorRecipeParams
                     .fromJson(mapping.recipe.toJson())
                 lm.saveColorRecipeParams(lutId, photonRecipe)
+                // lens 光学阶段参数（distortion/falloff/vignette/bloom/flare）——
+                // 预览 LutRenderer 与成片 LutImageProcessor 从单例读取
+                com.photographercamera.core.photon.lens.LensParamsStore.current = mapping.residual.lens
                 pvm.setLut(lutId)
             } catch (t: Throwable) {
                 com.photographercamera.core.debug.DebugLog.logError("PROFILE", "recipe inject failed for '$selected'", t)

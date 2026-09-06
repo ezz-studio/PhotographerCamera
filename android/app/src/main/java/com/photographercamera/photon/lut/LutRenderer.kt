@@ -46,6 +46,14 @@ enum class PreviewCaptureSource {
 }
 
 class LutRenderer(context: Context) : GLSurfaceView.Renderer {
+
+    // lens 光学阶段（我方 glue；本渲染线程上下文内惰性建 program/FBO）
+    private val lensStage = com.photographercamera.core.photon.lens.LensStageGl()
+
+    // identity stMatrix / 全幅 crop（lens 输出纹理接回颜色链时用）
+    private val identityStMatrix = floatArrayOf(
+        1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
+    )
     private val appContext = context.applicationContext
     companion object {
         private const val TAG = "LutRenderer"
@@ -1435,8 +1443,37 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             false
         }
         val enableVideoLog = true
+
+        // ---- lens 光学阶段（Stage 0，颜色链之前；docs/HANDOFF_android_lens.md）------
+        // profile.lens 的 distortion/falloff/vignette/bloom/flare 在进入颜色链前
+        // 完成（光学先于风格化，与桌面 CPU 参考链序一致）。全零时直通、零开销。
+        var sourceTextureTarget = currentCameraTextureTarget
+        var sourceTextureId = currentCameraTextureId
+        var sourceStMatrix = currentCameraTextureMatrix
+        var sourceCropRect = cropRect
+        var sourceKind = currentCameraTextureSource
+        val lensParams = com.photographercamera.core.photon.lens.LensParamsStore.current
+        if (!lensParams.isZero) {
+            val lensTex = lensStage.process(
+                srcTex = currentCameraTextureId,
+                srcTarget = currentCameraTextureTarget,
+                srcStMatrix = currentCameraTextureMatrix,
+                srcCropRect = cropRect,
+                width = width,
+                height = height,
+                p = lensParams,
+            )
+            if (lensTex != 0) {
+                sourceTextureTarget = GLES30.GL_TEXTURE_2D
+                sourceTextureId = lensTex
+                sourceStMatrix = identityStMatrix
+                sourceCropRect = floatArrayOf(0f, 0f, 1f, 1f)
+                sourceKind = PreviewColorTextureSource.TEXTURE_2D
+            }
+        }
+
         val locations = getColorPassLocations(
-            textureSource = currentCameraTextureSource,
+            textureSource = sourceKind,
             lutConfig = layerLutConfig,
             lutEnabled = layerLutEnabled,
             params = layerParams,
@@ -1447,10 +1484,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             targetFboId = fboId,
             width = width,
             height = height,
-            sourceTextureTarget = currentCameraTextureTarget,
-            sourceTextureId = currentCameraTextureId,
-            sourceStMatrix = currentCameraTextureMatrix,
-            sourceCropRect = cropRect,
+            sourceTextureTarget = sourceTextureTarget,
+            sourceTextureId = sourceTextureId,
+            sourceStMatrix = sourceStMatrix,
+            sourceCropRect = sourceCropRect,
             targetMvpMatrix = targetMvpMatrix,
             lutConfig = layerLutConfig,
             lutTextureId = layerLutTextureId,

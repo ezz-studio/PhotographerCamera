@@ -11,6 +11,7 @@
  */
 package com.photographercamera.core.photon.color
 
+import com.photographercamera.core.photon.lens.LensParams
 import com.photographercamera.core.profile.Hsl
 import com.photographercamera.core.profile.PhotographerProfile
 
@@ -31,6 +32,9 @@ data class ResidualParams(
     val shadowTint: List<Float>,
     val filmCurveShadowFloor: Float,
     val filmCurveHighlightCeiling: Float,
+    /** lens 光学阶段参数（distortion/falloff/vignette/bloom/flare；CA 走 recipe）。 */
+    val lens: com.photographercamera.core.photon.lens.LensParams =
+        com.photographercamera.core.photon.lens.LensParams.ZERO,
 )
 
 data class RecipeMapping(val recipe: ColorRecipeParams, val residual: ResidualParams)
@@ -60,7 +64,9 @@ object ProfileToRecipeMapper {
             // 中间调反差：shadow.contrast (1=中性) → pivot 轻度联动（保守 1/10）
             tonePivot = (p.shadow.contrast - 1f) * 0.1f,
             contrast = 1f, // 我方 contrast 语义在 shadow.contrast/toneCurve 中，recipe contrast 保持中性
-            vignette = p.vignette.amount.takeIf { it != 0f } ?: p.lens.vignette,
+            // lens.vignette（光学暗角）与 style vignette.amount 独立（HANDOFF_android_lens）：
+            // 光学暗角走 LensStage（Stage 0，色彩链之前），此处只保留风格化暗角。
+            vignette = p.vignette.amount,
             chromaticAberration = p.lens.chromaticAberration,
             filmGrain = p.grain.amount,
             noise = (p.noise.luma + p.noise.chroma).coerceIn(0f, 1f),
@@ -89,6 +95,7 @@ object ProfileToRecipeMapper {
             shadowTint = p.shadow.tint,
             filmCurveShadowFloor = p.filmCurve.shadowFloor,
             filmCurveHighlightCeiling = p.filmCurve.highlightCeiling,
+            lens = LensParams.fromProfile(p.lens),
         )
 
         return RecipeMapping(
@@ -186,5 +193,6 @@ object ProfileToRecipeMapper {
         sharpenRadius = 1f, bloomRadius = 1f, bloomThreshold = 0.9f,
         shadowTint = listOf(0f, 0f, 0f),
         filmCurveShadowFloor = 8f, filmCurveHighlightCeiling = 248f,
+        lens = LensParams.ZERO,
     )
 }

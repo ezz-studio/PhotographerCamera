@@ -50,6 +50,9 @@ data class LutStackRenderResult(
 class LutImageProcessor(context: Context? = null) {
     private val appContext = context?.applicationContext
 
+    // lens 光学阶段（我方 glue；glDispatcher 上下文内惰性建 program/FBO）
+    private val lensStage = com.photographercamera.core.photon.lens.LensStageGl()
+
     @Volatile
     private var glThread: Thread? = null
 
@@ -586,6 +589,68 @@ class LutImageProcessor(context: Context? = null) {
         outputBitmap
     }
 
+    /**
+     * lens 光学阶段 bitmap→bitmap（HANDOFF_android_lens）。在 glDispatcher 的
+     * EGL 上下文内上传纹理 → LensStageGl 全 pass → glReadPixels 读回。
+     * 仅在 LensParamsStore.current 非零时被调用；本方法内不再判断。
+     */
+    private suspend fun applyLensStage(input: Bitmap): Bitmap = withContext(glDispatcher) {
+        if (!isInitialized && !initialize()) return@withContext input
+        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        try {
+            val w = input.width
+            val h = input.height
+            // 上传输入 bitmap（约定与文件内其他链路一致：GLUtils 直传，读回不翻转）
+            val tex = IntArray(1)
+            GLES30.glGenTextures(1, tex, 0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex[0])
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            android.opengl.GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, input, 0)
+
+            val identity = floatArrayOf(
+                1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
+            )
+            val outTex = lensStage.process(
+                srcTex = tex[0],
+                srcTarget = GLES30.GL_TEXTURE_2D,
+                srcStMatrix = identity,
+                srcCropRect = floatArrayOf(0f, 0f, 1f, 1f),
+                width = w,
+                height = h,
+                p = com.photographercamera.core.photon.lens.LensParamsStore.current,
+            )
+            if (outTex == 0) return@withContext input
+
+            // 读回：临时 FBO 挂输出纹理
+            val fbo = IntArray(1)
+            GLES30.glGenFramebuffers(1, fbo, 0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo[0])
+            GLES30.glFramebufferTexture2D(
+                GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D, outTex, 0,
+            )
+            GLES30.glViewport(0, 0, w, h)
+            GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
+            val buffer = java.nio.ByteBuffer.allocateDirect(w * h * 4)
+                .order(java.nio.ByteOrder.nativeOrder())
+            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
+            buffer.position(0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            GLES30.glDeleteFramebuffers(1, fbo, 0)
+            GLES30.glDeleteTextures(1, tex, 0)
+
+            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            out.copyPixelsFromBuffer(buffer)
+            out
+        } catch (t: Throwable) {
+            android.util.Log.w("LensStage", "applyLensStage failed, passthrough", t)
+            input
+        }
+    }
+
     suspend fun applyLutStack(
         bitmap: Bitmap,
         baselineLayer: LutRenderLayer?,
@@ -593,6 +658,15 @@ class LutImageProcessor(context: Context? = null) {
         noiseReductionValue: Float = 0f,
         chromaNoiseReductionValue: Float = 0f,
     ): Bitmap {
+        // lens 光学阶段（Stage 0，docs/HANDOFF_android_lens.md）：在一切 LUT/配方层
+        // 之前执行（光学先于风格化）。全零参数直通；失败原样返回不阻断成片。
+        var source = bitmap
+        runCatching {
+            if (!com.photographercamera.core.photon.lens.LensParamsStore.current.isZero) {
+                source = applyLensStage(source)
+            }
+        }
+        val bitmap = source
         val hasBaseline = baselineLayer?.lutConfig != null || baselineLayer?.colorRecipeParams != null
         val hasCreative = creativeLayer?.lutConfig != null || creativeLayer?.colorRecipeParams != null
         return when {
