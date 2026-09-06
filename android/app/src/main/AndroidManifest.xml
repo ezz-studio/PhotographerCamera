@@ -70,5 +70,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Look/recipe cross-process store used by LutManager (upstream mgc providers). -->
+        <provider
+            android:name="com.photographercamera.photon.mgc.PhotonLookProvider"
+            android:authorities="${applicationId}.mgc.look"
+            android:exported="true" />
+
+        <provider
+            android:name="com.photographercamera.photon.mgc.PhotonRawProvider"
+            android:authorities="${applicationId}.mgc.raw"
+            android:exported="true" />
     </application>
 </manifest>

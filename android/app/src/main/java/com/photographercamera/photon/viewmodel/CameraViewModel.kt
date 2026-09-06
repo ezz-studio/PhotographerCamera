@@ -3427,9 +3427,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置变焦倍数
      */
     fun setZoomRatio(ratio: Float) {
-        zoomRatioByMain = ratio
-        val cameraInfo = state.value.getCurrentCameraInfo()
-        setCameraControllerZoomRatio(ratio, cameraInfo)
+        // 0.8.2 变焦链路日志（真机排查 0.6~1x 死区）
+        val cur = state.value.getCurrentCameraInfo()
+        com.photographercamera.core.debug.DebugLog.log(
+            "ZOOM",
+            "vm.in ratio=${"%.3f".format(ratio)} cur=${cur?.cameraId} dispIntrinsic=${cur?.displayIntrinsicZoomRatio} " +
+                "global=[${"%.2f".format(globalMinZoom)},${"%.2f".format(globalMaxZoom)}]",
+        )
+        // 全局钳制（后台回前台手势失控时可到 99999x——这里硬性收口）
+        val clamped = ratio.coerceIn(globalMinZoom, globalMaxZoom)
+        zoomRatioByMain = clamped
+        // 跨镜头边界判定：1x 以下立即用超广角；≥ 某镜头 displayIntrinsic 的最大档接管。
+        // 只在边界跨越时切换相机（reopen 较重，不能每帧走）。
+        val target = selectCameraForZoom(clamped)
+        if (target != null && target.cameraId != cur?.cameraId) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "ZOOM",
+                "vm.switch ${cur?.cameraId} -> ${target.cameraId} at zoom=${"%.3f".format(clamped)}",
+            )
+            switchToLensAndSetZoomRatio(target.cameraId, clamped)
+            return
+        }
+        setCameraControllerZoomRatio(clamped, cur)
+    }
+
+    /**
+     * 按显示倍率选镜头：在所有倍率 ≤ zoom 的镜头里取 displayIntrinsic 最大者
+     * （0.8x → 只有超广角(0.6)覆盖；1.0x → 主摄接管；4.6x → 长焦接管）。
+     * zoom 低于最广镜头（<0.6x）时直接用最广镜头。
+     */
+    private fun selectCameraForZoom(zoom: Float): CameraInfo? {
+        val cams = state.value.availableCameras.filter { it.lensType != LensType.FRONT }
+        if (cams.isEmpty()) return null
+        return cams.filter { zoom >= (it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f) - 0.001f }
+            .maxByOrNull { it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f }
+            ?: cams.minByOrNull { it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f }
     }
 
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
@@ -3440,6 +3472,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun setCameraControllerZoomRatio(ratio: Float, cameraInfo: CameraInfo?) {
         val displayIntrinsicZoomRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1.0f
+        com.photographercamera.core.debug.DebugLog.log(
+            "ZOOM",
+            "vm.out ratio=${"%.3f".format(ratio)} / dispIntrinsic=$displayIntrinsicZoomRatio " +
+                "-> ctrl=${"%.3f".format(ratio / displayIntrinsicZoomRatio)} (${cameraInfo?.cameraId})",
+        )
         cameraController.setZoomRatio(ratio / displayIntrinsicZoomRatio)
     }
 
@@ -3756,6 +3793,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setAwbTemperature(kelvin: Int) {
         cameraController.setAwbTemperature(kelvin)
+    }
+
+    /** 手动白平衡色调（正=品红，负=偏绿，0=跟随冻结锚点实测值）。 */
+    fun setAwbTint(tint: Int) {
+        cameraController.setAwbTint(tint)
     }
 
     fun setMeteringMode(mode: MeteringMode) {

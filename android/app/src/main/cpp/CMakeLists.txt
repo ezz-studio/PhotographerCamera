@@ -234,6 +234,7 @@ target_link_libraries(
 )
 add_library(my-native-lib SHARED 
     native-lib.cpp
+    photon_jni_bridge.cpp
     dng_hdrnet_pgtm_jni.cpp
     raw_signal_stats_jni.cpp
     raw_legacy_auto_exposure_solver.cpp

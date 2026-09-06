@@ -293,6 +293,7 @@ data class CameraState(
 
     val awbMode: Int = 1, // 自动白平衡模式
     val awbTemperature: Int = 5000, // 色温 (K)
+    val awbTint: Int = 0, // 手动色调（CCT tint，正=品红 负=绿；0=跟随锚点）
     val actualAwbTemperature: Int? = null, // 相机当前实际/估算色温 (K)
     val actualAwbTint: Int? = null,
     val actualAwbGains: WhiteBalanceGains? = null,

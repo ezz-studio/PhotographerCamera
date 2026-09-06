@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
@@ -85,98 +86,18 @@ fun FocusIndicator(
             ) {
                 val x = displayPosition.first * size.width
                 val y = displayPosition.second * size.height
-                val boxSize = (if (source == FocusPointSource.EYE) 24.dp else 60.dp).toPx() * scale
-                val halfSize = boxSize / 2
-                val cornerLength = (if (source == FocusPointSource.EYE) 6.dp else 15.dp).toPx()
+                val circleSize = (if (source == FocusPointSource.EYE) 24.dp else 60.dp).toPx() * scale
                 val strokeWidth = (if (source == FocusPointSource.EYE) 1.5.dp else 2.dp).toPx()
 
                 val drawColor = color.copy(alpha = alpha)
 
-                // 左上角
-                drawLine(
+                // 对焦指示：单个圆圈（替代旧四角框 + 锁定角标）
+                drawCircle(
                     color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize + cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
+                    radius = circleSize / 2,
+                    center = Offset(x, y),
+                    style = Stroke(width = strokeWidth)
                 )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y - halfSize),
-                    end = Offset(x - halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
-
-                // 右上角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize - cornerLength, y - halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y - halfSize),
-                    end = Offset(x + halfSize, y - halfSize + cornerLength),
-                    strokeWidth = strokeWidth
-                )
-
-                // 左下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize + cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x - halfSize, y + halfSize),
-                    end = Offset(x - halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
-
-                // 右下角
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize - cornerLength, y + halfSize),
-                    strokeWidth = strokeWidth
-                )
-                drawLine(
-                    color = drawColor,
-                    start = Offset(x + halfSize, y + halfSize),
-                    end = Offset(x + halfSize, y + halfSize - cornerLength),
-                    strokeWidth = strokeWidth
-                )
-            }
-
-            if (source == FocusPointSource.MANUAL && isFocusLocked && position != null) {
-                val badgeSize = 24.dp
-                val badgeSizePx = with(density) { badgeSize.toPx() }
-                val focusHalfSizePx = with(density) { 30.dp.toPx() }
-                val maxWidthPx = constraints.maxWidth.toFloat()
-                val maxHeightPx = constraints.maxHeight.toFloat()
-                val offsetX = (displayPosition.first * maxWidthPx + focusHalfSizePx - badgeSizePx * 0.55f)
-                    .coerceIn(0f, (maxWidthPx - badgeSizePx).coerceAtLeast(0f))
-                val offsetY = (displayPosition.second * maxHeightPx - focusHalfSizePx - badgeSizePx * 0.45f)
-                    .coerceIn(0f, (maxHeightPx - badgeSizePx).coerceAtLeast(0f))
-                val badgeColor = color.copy(alpha = alpha.coerceAtLeast(0.75f))
-
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                        .size(badgeSize)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(1.dp, badgeColor, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
             }
         }
     }

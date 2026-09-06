@@ -283,8 +283,13 @@ fun CameraScreen(navController: NavController) {
 
     // Live QuickControl adjustments (WB / Grain) applied on top of the chosen preset.
     var sheetTarget by remember { mutableStateOf<String?>(null) }
+    // 0.8.2 EV：AE-L 门控——开启后滑条写入 recipe.exposure（叠加在 profile 基准上）；
+    // 关闭时 recipe 回到 profile 基准曝光（设备/配方自动接管），滑条灰置。
     var adjEv by remember { mutableFloatStateOf(0f) }
-    var adjWbTemp by remember { mutableFloatStateOf(0f) }
+    var aeLockOn by remember { mutableStateOf(sp.getBoolean("ae_l_on", false)) }
+    // 0.8.2 WB 绝对值滑条：色温真实开尔文、色调 ±20（引擎 CCT/tint 语义）；
+    // AWB 关闭瞬间以引擎冻结的实测值为起点（LaunchedEffect 同步）。
+    var adjWbTemp by remember { mutableFloatStateOf(5000f) }
     var adjWbTint by remember { mutableFloatStateOf(0f) }
     // 0.6.0 AWB 开关：开启=相机自动白平衡，色温/色调滑块灰置不可调；
     // 关闭=用户接管（GPU 后段相对调整），滑块可用。持久化到 pc_settings。
@@ -294,6 +299,15 @@ fun CameraScreen(navController: NavController) {
     var adjGrain by remember { mutableFloatStateOf(1f) }
 
     val sheetState = rememberModalBottomSheetState()
+
+    // AWB 关闭瞬间：滑块以引擎冻结的实测色温/色调为起点（绝对值语义）
+    LaunchedEffect(awbOn) {
+        if (!awbOn) {
+            val s = pvm.state.value
+            adjWbTemp = s.awbTemperature.toFloat()
+            adjWbTint = s.awbTint.toFloat()
+        }
+    }
 
     // 风格注入：把选中的 profile 通过 ProfileToRecipeMapper 映射到 ColorRecipeParams，
     // 写入 LutManager（按 lutId 存 DataStore），再 pvm.setLut 让预览+成片套用。
@@ -305,11 +319,16 @@ fun CameraScreen(navController: NavController) {
             return
         }
         val mapping = ProfileToRecipeMapper.map(profile)
+        // 0.8.2 快捷面板叠加：EV（AE-L 门控的 recipe 曝光偏移）与 Grain 乘数
+        val adjustedRecipe = mapping.recipe.copy(
+            exposure = mapping.recipe.exposure + if (aeLockOn) adjEv else 0f,
+            filmGrain = mapping.recipe.filmGrain * adjGrain,
+        )
         val lutId = "profile:$selected"
         com.photographercamera.core.debug.DebugLog.log(
             "PROFILE",
-            "inject '$selected' -> lut=$lutId grain=${mapping.recipe.filmGrain} " +
-                "wb=(${mapping.recipe.temperature},${mapping.recipe.tint}) ev=${mapping.recipe.exposure}",
+            "inject '$selected' -> lut=$lutId grain=${adjustedRecipe.filmGrain} " +
+                "wb=(${adjustedRecipe.temperature},${adjustedRecipe.tint}) ev=${adjustedRecipe.exposure}",
         )
         scope.launch {
             try {
@@ -317,7 +336,7 @@ fun CameraScreen(navController: NavController) {
                 // 类型转换：core.photon.color.ColorRecipeParams → photon.model.ColorRecipeParams
                 // 两者字段完全一致（同源移植），用 JSON 序列化桥接。
                 val photonRecipe = com.photographercamera.photon.model.ColorRecipeParams
-                    .fromJson(mapping.recipe.toJson())
+                    .fromJson(adjustedRecipe.toJson())
                 lm.saveColorRecipeParams(lutId, photonRecipe)
                 // lens 光学阶段参数（distortion/falloff/vignette/bloom/flare）——
                 // 预览 LutRenderer 与成片 LutImageProcessor 从单例读取
@@ -841,8 +860,9 @@ fun CameraScreen(navController: NavController) {
             )
         }
 
-        val minZoom = state.getMinZoom()
-        val maxZoom = state.getMaxZoom()
+        // 0.8.2 变焦范围用全局值（跨镜头连续变焦 0.6x~10x），不再取当前相机的局部范围
+        val minZoom = pvm.globalMinZoom
+        val maxZoom = pvm.globalMaxZoom
         BottomPanel(
             selected = selected,
             onPresetClick = { navController.navigate("presets") },
@@ -895,13 +915,39 @@ fun CameraScreen(navController: NavController) {
                     when (sheetTarget) {
                         "EV" -> {
                             Text("曝光补偿 EV", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(6.dp))
+                            // AE-L 门控：开启后 EV 写 recipe.exposure 才生效，关闭=profile 基准
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "AE-L 锁定曝光基准",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = aeLockOn,
+                                    onCheckedChange = {
+                                        aeLockOn = it
+                                        sp.edit().putBoolean("ae_l_on", it).apply()
+                                    },
+                                )
+                            }
                             AdjustSlider(
                                 value = adjEv,
                                 center = 0f,
                                 range = -2f..2f,
+                                enabled = aeLockOn,
                                 onValueChange = { adjEv = it; applyAdjustments() },
                             )
-                            Text("${"%.2f".format(adjEv)} EV", color = TextSecondary, fontSize = 13.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "${"%.2f".format(adjEv)} EV",
+                                color = if (aeLockOn) TextSecondary else TextSecondary.copy(alpha = 0.4f),
+                                fontSize = 13.sp,
+                            )
                         }
                         "WB" -> {
                             Row(
@@ -911,8 +957,7 @@ fun CameraScreen(navController: NavController) {
                                 Text(
                                     "AWB 自动白平衡",
                                     color = TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp,
                                     modifier = Modifier.weight(1f),
                                 )
                                 Switch(
@@ -920,34 +965,44 @@ fun CameraScreen(navController: NavController) {
                                     onCheckedChange = {
                                         awbOn = it
                                         sp.edit().putBoolean("awb_on", it).apply()
+                                        pvm.setAwbMode(
+                                            if (it) android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO
+                                            else android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_OFF
+                                        )
                                     },
                                 )
                             }
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                "色温",
+                                "色温 ${adjWbTemp.roundToInt()}K",
                                 color = if (awbOn) TextSecondary else TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
                             )
                             AdjustSlider(
                                 value = adjWbTemp,
-                                center = 0f,
-                                range = -1f..1f,
+                                center = 6200f,
+                                range = 2500f..9900f, // 统一固定范围（各设备一致，引擎侧仍按设备能力收口）
                                 enabled = !awbOn,
-                                onValueChange = { adjWbTemp = it; applyAdjustments() },
+                                onValueChange = {
+                                    adjWbTemp = it
+                                    pvm.setAwbTemperature(it.roundToInt())
+                                },
                             )
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                "色调",
+                                "色调 " + (if (adjWbTint > 0f) "+" else "") + "${adjWbTint.roundToInt()}",
                                 color = if (awbOn) TextSecondary else TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
                             )
                             AdjustSlider(
                                 value = adjWbTint,
                                 center = 0f,
-                                range = -1f..1f,
+                                range = -20f..20f,
                                 enabled = !awbOn,
-                                onValueChange = { adjWbTint = it; applyAdjustments() },
+                                onValueChange = {
+                                    adjWbTint = it
+                                    pvm.setAwbTint(it.roundToInt())
+                                },
                             )
                         }
                         "Grain" -> {

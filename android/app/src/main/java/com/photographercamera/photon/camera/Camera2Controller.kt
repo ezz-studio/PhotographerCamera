@@ -4168,7 +4168,7 @@ class Camera2Controller(private val context: Context) {
         isCapture: Boolean,
         anchor: ManualWhiteBalanceAnchor?
     ) {
-        if (Build.VERSION.SDK_INT < 36 || anchor?.colorTint == null) {
+        if (Build.VERSION.SDK_INT < 36 || (anchor?.colorTint == null && state.awbTint == 0)) {
             applyAutoWhiteBalanceSettings(
                 builder = builder,
                 state = state.copy(awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO),
@@ -4184,7 +4184,11 @@ class Camera2Controller(private val context: Context) {
             CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE,
             coerceCctAwbTemperature(state.awbTemperature.coerceIn(range.lower, range.upper))
         )
-        builder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, anchor.colorTint)
+        // 用户显式设置的色调优先；未设置(0)时沿用冻结锚点的实测 tint
+        builder.set(
+            CaptureRequest.COLOR_CORRECTION_COLOR_TINT,
+            if (state.awbTint != 0) state.awbTint else anchor?.colorTint ?: 0
+        )
     }
 
     private fun applyMatrixWhiteBalanceSettings(
@@ -4204,18 +4208,31 @@ class Camera2Controller(private val context: Context) {
             isCapture = isCapture
         )
         val resolvedGains = resolveManualMatrixGains(state.awbTemperature, resolvedAnchor, gains)
-        val transform = buildColorMatrixWhiteBalanceTransform(resolvedGains)
-            ?: resolvedAnchor.transform
-            ?: return applyAutoWhiteBalanceSettings(
-                builder = builder,
-                state = state.copy(awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO),
-                isCapture = isCapture
-            )
+        val tintedGains = applyAwbTintToGains(resolvedGains, state.awbTint)
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
         builder.set(CaptureRequest.CONTROL_AWB_LOCK, false)
-        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, resolvedGains)
-        builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+        // 纯 RGGB gains 直控：不走颜色矩阵变换（transform 路径在部分设备颜色全错）
+        builder.set(
+            CaptureRequest.COLOR_CORRECTION_MODE,
+            if (isManualPostProcessingSupported) {
+                CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+            } else {
+                CaptureRequest.COLOR_CORRECTION_MODE_FAST
+            }
+        )
+        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, tintedGains)
+    }
+
+    /** tint 折算绿色通道增益：+20 → G×0.8（品红），-20 → G×1.2（偏绿）。 */
+    private fun applyAwbTintToGains(gains: RggbChannelVector, tint: Int): RggbChannelVector {
+        if (tint == 0) return gains
+        val gScale = 1f - tint / 100f
+        return RggbChannelVector(
+            gains.red,
+            gains.greenEven * gScale,
+            gains.greenOdd * gScale,
+            gains.blue
+        )
     }
 
     private fun buildColorMatrixWhiteBalanceTransform(gains: RggbChannelVector): ColorSpaceTransform? {
@@ -5213,6 +5230,8 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(
                 awbMode = CameraMetadata.CONTROL_AWB_MODE_OFF,
                 awbTemperature = initialTemperature,
+                // 色调滑块起点 = 冻结的实测 tint（滑块绝对值语义）
+                awbTint = anchor.colorTint ?: 0,
                 canAdjustWhiteBalance = true
             )
         } else {
@@ -5261,6 +5280,25 @@ class Camera2Controller(private val context: Context) {
                 "AWB temperature set to: ${clampedKelvin}K (${anchor.controlPath.name})"
             )
             updatePreview()
+        }
+    }
+
+    /**
+     * 设置手动白平衡色调（tint）
+     *
+     * 正值偏品红、负值偏绿，0 表示跟随开启手动 WB 时冻结的实测 tint。
+     * CCT 路径（API 36+）直接下发 COLOR_CORRECTION_COLOR_TINT；
+     * MATRIX 路径折算到绿色通道增益（tint=±20 → G 增益 ±20%）。
+     */
+    fun setAwbTint(tint: Int) {
+        val clampedTint = tint.coerceIn(-20, 20)
+        _state.value = _state.value.copy(awbTint = clampedTint)
+        if (_state.value.awbMode == CameraMetadata.CONTROL_AWB_MODE_OFF) {
+            previewRequestBuilder?.apply {
+                applyWhiteBalanceSettings(this, _state.value, false)
+                PLog.d(TAG, "AWB tint set to: $clampedTint")
+                updatePreview()
+            }
         }
     }
 
@@ -5586,9 +5624,16 @@ class Camera2Controller(private val context: Context) {
             val minZoom = zoomRatioRange?.lower ?: 1f
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
             val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
+            com.photographercamera.core.debug.DebugLog.log(
+                "ZOOM",
+                "ctrl requested=${"%.3f".format(requestedRatio)} open=$openCameraId " +
+                    "physOut=$activeOutputPhysicalCameraId range=[${"%.2f".format(minZoom)},${"%.2f".format(maxSupportedZoom)}] " +
+                    "clamped=${"%.3f".format(clampedRatio)}",
+            )
 
             _state.value = _state.value.copy(zoomRatio = clampedRatio)
             if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) {
+                com.photographercamera.core.debug.DebugLog.log("ZOOM", "ctrl session recreate for physical zoom")
                 PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (physical output session recreated)")
                 return
             }
