@@ -13,9 +13,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -97,7 +101,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -229,6 +235,8 @@ fun CameraScreen(navController: NavController) {
                 .getBoolean("use_live_photo", false),
         )
     }
+    // 0.8.3 冷启动同步：把持久化的开关状态灌入 photon 引擎（并发录制 + 拍摄偏好）
+    LaunchedEffect(Unit) { pvm.setUseLivePhoto(liveOn) }
 
     // total zoom across lenses (mirrors photon state for recomposition)
     var zoomState by remember { mutableFloatStateOf(1f) }
@@ -378,8 +386,9 @@ fun CameraScreen(navController: NavController) {
             return
         }
         capturing = true
-        // 安全兜底：若某条回调丢失导致 capturing 卡死，8s 后自动复位，避免再也拍不了。
-        scope.launch {
+        // 安全兜底：guard 绑定本次拍摄（0.8.3 修复——旧实现 8s 后无条件复位，
+        // 会在下一次拍摄进行中误杀 capturing，表现为"拍了但没照片，只有动画"）。
+        val guardJob = scope.launch {
             kotlinx.coroutines.delay(8000)
             if (capturing) {
                 DebugLog.log("SHOT", "capture guard timeout — auto reset")
@@ -396,6 +405,7 @@ fun CameraScreen(navController: NavController) {
             } catch (t: Throwable) {
                 DebugLog.logError("SHOT", "photon capture failed", t)
             } finally {
+                guardJob.cancel()
                 kotlinx.coroutines.delay(1200)
                 capturing = false
             }
@@ -836,9 +846,11 @@ fun CameraScreen(navController: NavController) {
             onLiveToggle = {
                 liveOn = !liveOn
                 sp.edit().putBoolean("use_live_photo", liveOn).apply()
+                // 0.8.3 实装：驱动 photon 引擎并发录制 + 拍摄链路偏好（DataStore）
+                pvm.setUseLivePhoto(liveOn)
                 Toast.makeText(
                     context,
-                    if (liveOn) "动态照片已开启（录制将在下版生效）" else "动态照片已关闭",
+                    if (liveOn) "动态照片已开启" else "动态照片已关闭",
                     Toast.LENGTH_SHORT,
                 ).show()
             },
@@ -897,6 +909,7 @@ fun CameraScreen(navController: NavController) {
                     }
                 }
             },
+            isProcessing = capturing,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
@@ -931,7 +944,12 @@ fun CameraScreen(navController: NavController) {
                                     checked = aeLockOn,
                                     onCheckedChange = {
                                         aeLockOn = it
+                                        // 0.8.3 修复：关闭 AE-L 时清零手动 EV 并重新注入配方，
+                                        // recipe.exposure 回到 profile 基准（设备/配方自动接管），
+                                        // 不再停留在上次手动调整的值。
+                                        if (!it) adjEv = 0f
                                         sp.edit().putBoolean("ae_l_on", it).apply()
+                                        applyAdjustments()
                                     },
                                 )
                             }
@@ -1031,6 +1049,8 @@ fun CameraScreen(navController: NavController) {
             AppSettingsScreen(
                 onDismiss = { showSettings = false },
                 onDebugClick = { showSettings = false; showDebug = true },
+                // 0.8.3：接 photon 引擎（镜头列表 / 微距 ID 选项 / 引擎就绪状态）
+                photonVm = pvm,
             )
         }
 
@@ -1494,6 +1514,8 @@ private fun BottomPanel(
     maxZoom: Float,
     onZoom: (Float) -> Unit,
     onShutter: () -> Unit,
+    // 0.8.3 拍摄处理动画：处理中快门外圈白弧旋转
+    isProcessing: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1544,7 +1566,7 @@ private fun BottomPanel(
             )
 
             // Shutter (center)
-            ShutterButton(onClick = onShutter, scale = shutterScale)
+            ShutterButton(onClick = onShutter, scale = shutterScale, isProcessing = isProcessing)
 
             // Last capture thumbnail (right)
             LastCaptureThumb(lastCapture, onGalleryClick, scale = thumbScale)
@@ -1681,7 +1703,7 @@ private fun PresetShortcut(name: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ShutterButton(onClick: () -> Unit, scale: Float = 1f) {
+private fun ShutterButton(onClick: () -> Unit, scale: Float = 1f, isProcessing: Boolean = false) {
     Box(
         modifier = Modifier
             .size(66.dp)
@@ -1697,6 +1719,42 @@ private fun ShutterButton(onClick: () -> Unit, scale: Float = 1f) {
                 .clip(CircleShape)
                 .background(Color.White),
         )
+        // 0.8.3 拍摄处理动画：处理中在快门按钮外圈绘制拖尾白条旋转
+        // （主弧 270° + 尾部渐隐小弧），表示正在处理图片。
+        if (isProcessing) {
+            val transition = rememberInfiniteTransition(label = "shutterProcessing")
+            val sweepAngle by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 900, easing = LinearEasing),
+                ),
+                label = "shutterProcessingSweep",
+            )
+            Canvas(Modifier.matchParentSize()) {
+                val stroke = 3.dp.toPx()
+                val radius = (size.minDimension - stroke * 2f) / 2f
+                val center = Offset(size.width / 2f, size.height / 2f)
+                drawArc(
+                    color = Color.White,
+                    startAngle = sweepAngle,
+                    sweepAngle = 270f,
+                    useCenter = false,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                drawArc(
+                    color = Color.White.copy(alpha = 0.35f),
+                    startAngle = sweepAngle + 285f,
+                    sweepAngle = 55f,
+                    useCenter = false,
+                    topLeft = Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
     }
 }
 

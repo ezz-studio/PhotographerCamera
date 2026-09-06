@@ -41,8 +41,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.photographercamera.core.camera.CameraEngine
+import com.photographercamera.core.camera.LensRef
 import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.profile.ProfileLoader
+import com.photographercamera.photon.camera.LensType
+import com.photographercamera.photon.viewmodel.CameraViewModel
 import kotlinx.coroutines.launch
 
 // 与 CameraScreen 一致的暗色观感
@@ -68,6 +71,8 @@ fun AppSettingsScreen(
     onDismiss: () -> Unit,
     onDebugClick: () -> Unit,
     engine: CameraEngine? = null,
+    // 0.8.3：photon 引擎镜头源（engine 为 null 时镜头列表/微距 ID 选项从此取）
+    photonVm: CameraViewModel? = null,
 ) {
     val context = LocalContext.current
     val sp = remember { context.getSharedPreferences("pc_settings", Context.MODE_PRIVATE) }
@@ -95,12 +100,25 @@ fun AppSettingsScreen(
     var macroLensId by remember { mutableStateOf(sp.getString("macro_camera_id", "auto") ?: "auto") }
     var lenses by remember(lensDiscovery, logicalProbe, lensWhitelist, macroLensId) {
         mutableStateOf(
+            // 0.8.3：engine 为空时从 photon VM 的镜头枚举构造（修复"引擎未就绪"，
+            // 同时让微距镜头 ID 选项可弹出）
             engine?.listLenses(
                 lensDiscovery,
                 logicalProbe = logicalProbe,
                 whitelist = lensWhitelist.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
                 macroId = macroLensId.takeIf { it != "auto" },
-            ) ?: emptyList()
+            ) ?: photonVm?.state?.value?.availableCameras?.mapNotNull { cam ->
+                val eq = cam.focalLength35mmEquivalent
+                if (cam.focalLength <= 0f && eq <= 0f) return@mapNotNull null
+                LensRef(
+                    id = cam.cameraId,
+                    focal = cam.focalLength.takeIf { it > 0f } ?: (eq / 43.27f),
+                    maxDigitalZoom = cam.maxZoom.takeIf { it > 0f } ?: 1f,
+                    eqFocal = eq,
+                    isMain = cam.lensType == LensType.BACK_MAIN,
+                    isMacro = cam.lensType == LensType.BACK_MACRO,
+                )
+            } ?: emptyList()
         )
     }
     var afEnabled by remember { mutableStateOf(engine?.manualFocusOn?.not() ?: true) }
@@ -286,7 +304,7 @@ fun AppSettingsScreen(
                 // 镜头选择（上游 lens_selection）
                 SettingsCard {
                     if (lenses.isEmpty()) {
-                        InfoRow("镜头", if (engine == null) "引擎未就绪" else "未发现镜头")
+                        InfoRow("镜头", if (engine == null && photonVm == null) "引擎未就绪" else "未发现镜头")
                     } else {
                         lenses.forEach { lens ->
                             val desc = buildString {

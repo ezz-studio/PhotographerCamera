@@ -3434,34 +3434,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "vm.in ratio=${"%.3f".format(ratio)} cur=${cur?.cameraId} dispIntrinsic=${cur?.displayIntrinsicZoomRatio} " +
                 "global=[${"%.2f".format(globalMinZoom)},${"%.2f".format(globalMaxZoom)}]",
         )
-        // 全局钳制（后台回前台手势失控时可到 99999x——这里硬性收口）
-        val clamped = ratio.coerceIn(globalMinZoom, globalMaxZoom)
-        zoomRatioByMain = clamped
-        // 跨镜头边界判定：1x 以下立即用超广角；≥ 某镜头 displayIntrinsic 的最大档接管。
-        // 只在边界跨越时切换相机（reopen 较重，不能每帧走）。
-        val target = selectCameraForZoom(clamped)
-        if (target != null && target.cameraId != cur?.cameraId) {
-            com.photographercamera.core.debug.DebugLog.log(
-                "ZOOM",
-                "vm.switch ${cur?.cameraId} -> ${target.cameraId} at zoom=${"%.3f".format(clamped)}",
+        // 0.8.3 修复：彻底移除 VM 层跨镜头自动切换（0.8.2 的 selectCameraForZoom +
+        // switchToLensAndSetZoomRatio 在异步 reopen 期间产生 0↔2↔3 乒乓风暴，且前置
+        // 会误跳后置）。真机日志证明逻辑多摄的 zoomRatioRange 覆盖全局（如 [0.60,20.00]），
+        // HAL 自动路由物理镜头，显示倍率换算后直接下发即可。
+        // 前置只做数字变焦：按前置自身范围钳制，绝不跨镜头。
+        val clamped = if (cur?.lensType == LensType.FRONT) {
+            ratio.coerceIn(
+                (cur.minZoom.takeIf { it > 0f } ?: 1f),
+                (cur.maxZoom.takeIf { it > 0f } ?: 8f),
             )
-            switchToLensAndSetZoomRatio(target.cameraId, clamped)
-            return
+        } else {
+            ratio.coerceIn(globalMinZoom, globalMaxZoom)
         }
+        zoomRatioByMain = clamped
         setCameraControllerZoomRatio(clamped, cur)
-    }
-
-    /**
-     * 按显示倍率选镜头：在所有倍率 ≤ zoom 的镜头里取 displayIntrinsic 最大者
-     * （0.8x → 只有超广角(0.6)覆盖；1.0x → 主摄接管；4.6x → 长焦接管）。
-     * zoom 低于最广镜头（<0.6x）时直接用最广镜头。
-     */
-    private fun selectCameraForZoom(zoom: Float): CameraInfo? {
-        val cams = state.value.availableCameras.filter { it.lensType != LensType.FRONT }
-        if (cams.isEmpty()) return null
-        return cams.filter { zoom >= (it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f) - 0.001f }
-            .maxByOrNull { it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f }
-            ?: cams.minByOrNull { it.displayIntrinsicZoomRatio.takeIf { d -> d > 0f } ?: 1f }
     }
 
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
@@ -3806,6 +3793,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             userPreferencesRepository.saveMeteringMode(mode)
         }
     }
+
+    // setUseLivePhoto 已存在（4566 行上游实现：关 JpgMax/多重曝光互斥 + 控制器 + 偏好），
+    // 0.8.3 由 CameraScreen 的 LIVE 开关直接调用，无需新增。
 
     // ==================== 计费相关方法 ====================
 

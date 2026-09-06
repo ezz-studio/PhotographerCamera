@@ -4168,7 +4168,11 @@ class Camera2Controller(private val context: Context) {
         isCapture: Boolean,
         anchor: ManualWhiteBalanceAnchor?
     ) {
-        if (Build.VERSION.SDK_INT < 36 || (anchor?.colorTint == null && state.awbTint == 0)) {
+        // 0.8.3 修复：旧 gate「anchor.colorTint==null && awbTint==0 回退 AUTO」在锚点
+        // 拿不到实测 tint 的设备上会让手动色温永远失效（setAwbMode(OFF) 时 awbTint
+        // 初始化为 anchor.colorTint ?: 0 = 0，gate 恒真）。现在只要 SDK>=36 且锚点
+        // 存在就走 CCT；tint=0 是合法值（无色调偏移）。
+        if (Build.VERSION.SDK_INT < 36 || anchor == null) {
             applyAutoWhiteBalanceSettings(
                 builder = builder,
                 state = state.copy(awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO),
@@ -4184,10 +4188,11 @@ class Camera2Controller(private val context: Context) {
             CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE,
             coerceCctAwbTemperature(state.awbTemperature.coerceIn(range.lower, range.upper))
         )
-        // 用户显式设置的色调优先；未设置(0)时沿用冻结锚点的实测 tint
-        builder.set(
-            CaptureRequest.COLOR_CORRECTION_COLOR_TINT,
-            if (state.awbTint != 0) state.awbTint else anchor?.colorTint ?: 0
+        builder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, state.awbTint)
+        PLog.d(
+            TAG,
+            "WB CCT apply: temp=${state.awbTemperature}K tint=${state.awbTint} " +
+                "path=CCT anchorTint=${anchor.colorTint}"
         )
     }
 
@@ -5315,6 +5320,11 @@ class Camera2Controller(private val context: Context) {
         applyMeteringRegions()
         updatePreview()
         PLog.d(TAG, "测光模式: $mode")
+        // 0.8.3：转发远程日志（PLog 不进 DebugLog 通道，真机排查测光无效看不到）
+        com.photographercamera.core.debug.DebugLog.log(
+            "METER",
+            "mode=$mode maxAeRegions=$maxAeRegions builder=${previewRequestBuilder != null}"
+        )
     }
 
     /**
@@ -7140,13 +7150,35 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        if (_state.value.captureMode != CaptureMode.PHOTO) return
-        if (_state.value.isCapturing) {
-            PLog.d(TAG, "Ignoring capture request while a capture is already active")
+        if (_state.value.captureMode != CaptureMode.PHOTO) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "controller.capture ignored: mode=${_state.value.captureMode}"
+            )
             return
         }
-        val device = cameraDevice ?: return
-        val reader = imageReader ?: return
+        if (_state.value.isCapturing) {
+            PLog.d(TAG, "Ignoring capture request while a capture is already active")
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "controller.capture ignored: isCapturing already active (stuck?)"
+            )
+            return
+        }
+        val device = cameraDevice ?: run {
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "controller.capture FAILED: cameraDevice is null (camera not open)"
+            )
+            return
+        }
+        val reader = imageReader ?: run {
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "controller.capture FAILED: imageReader is null"
+            )
+            return
+        }
 
         val baseExposureResult = lastCaptureResult
         // 关键修复：每次拍照前重置拍摄结果

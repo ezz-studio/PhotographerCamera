@@ -34,6 +34,11 @@ class MainActivity : ComponentActivity() {
         // Device-side diagnostics to Downloads/PhotographerCamera_debug.txt:
         // must init BEFORE any camera/GL code logs (buffered lines flush after).
         com.photographercamera.core.debug.DebugLog.init(this)
+        // 0.8.3：photon 内部 PLog 桥接到远程调试日志（拍摄保存/失败、手动 WB
+        // 拒绝等关键行为此前远程不可见）。
+        com.photographercamera.photon.utils.PLog.remoteForwarder = { tag, msg ->
+            com.photographercamera.core.debug.DebugLog.log(tag, msg)
+        }
         installCrashLog()
         enableEdgeToEdge()
         maybeRequestAllFilesAccess()

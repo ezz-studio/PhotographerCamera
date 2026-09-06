@@ -116,7 +116,18 @@ object PLog {
         while (logQueue.size > MAX_LOG_SIZE) {
             logQueue.poll()
         }
+
+        // 0.8.3：photon 内部日志桥接远程调试通道（App 启动时挂接）。
+        // 拍摄保存/失败、手动 WB 拒绝等关键行为此前对远程日志不可见。
+        try {
+            remoteForwarder?.invoke(tag, "${level.name.first()}/$message")
+        } catch (_: Throwable) {
+        }
     }
+
+    /** 远程日志转发器（DebugLog 挂接点）；为空时不转发。 */
+    @Volatile
+    var remoteForwarder: ((tag: String, message: String) -> Unit)? = null
 
     /**
      * 获取所有日志
