@@ -32,6 +32,10 @@ data class ResidualParams(
     val shadowTint: List<Float>,
     val filmCurveShadowFloor: Float,
     val filmCurveHighlightCeiling: Float,
+    /** halation.amount 原值（recipe.halation 经 toJson 桥会被上游强制抹零）。 */
+    val halationAmount: Float,
+    /** shadow.saturation 原值（0..2，阴影区饱和度乘数；recipe 无对应字段）。 */
+    val shadowSaturation: Float,
     /** lens 光学阶段参数（distortion/falloff/vignette/bloom/flare；CA 走 recipe）。 */
     val lens: com.photographercamera.core.photon.lens.LensParams =
         com.photographercamera.core.photon.lens.LensParams.ZERO,
@@ -95,6 +99,8 @@ object ProfileToRecipeMapper {
             shadowTint = p.shadow.tint,
             filmCurveShadowFloor = p.filmCurve.shadowFloor,
             filmCurveHighlightCeiling = p.filmCurve.highlightCeiling,
+            halationAmount = p.halation.amount,
+            shadowSaturation = p.shadow.saturation,
             lens = LensParams.fromProfile(p.lens),
         )
 
@@ -193,6 +199,8 @@ object ProfileToRecipeMapper {
         sharpenRadius = 1f, bloomRadius = 1f, bloomThreshold = 0.9f,
         shadowTint = listOf(0f, 0f, 0f),
         filmCurveShadowFloor = 8f, filmCurveHighlightCeiling = 248f,
+        halationAmount = 0f,
+        shadowSaturation = 1f,
         lens = LensParams.ZERO,
     )
 }

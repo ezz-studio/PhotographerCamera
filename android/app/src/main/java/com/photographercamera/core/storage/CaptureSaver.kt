@@ -122,9 +122,17 @@ object CaptureSaver {
             MediaStore.Images.Media.SIZE,
         )
         val (selection, args) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?" to arrayOf("$REL_PATH%")
+            // 0.9.1 修复"App 相册无照片但系统相册可见"：引擎 GalleryManager 默认写
+            // DCIM/PhotonCamera（PhotoSavePath.DCIM_PHOTON），旧管线写 Pictures/
+            // PhotographerCamera——旧 selection 只匹配后者，引擎照片永远查不到。
+            // 现两目录都收，按 DATE_ADDED 混排。
+            "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? " +
+                "OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?)" to
+                arrayOf("%DCIM/PhotonCamera%", "$REL_PATH%")
         } else {
-            "${MediaStore.Images.Media.DATA} LIKE ?" to arrayOf("%/$DIR_NAME/%")
+            "(${MediaStore.Images.Media.DATA} LIKE ? " +
+                "OR ${MediaStore.Images.Media.DATA} LIKE ?)" to
+                arrayOf("%/DCIM/PhotonCamera/%", "%/$DIR_NAME/%")
         }
         val out = mutableListOf<SavedPhoto>()
         resolver.query(

@@ -6750,10 +6750,6 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun setUseMultipleExposure(useMultipleExposure: Boolean) {
-        _state.value = _state.value.copy(useMultipleExposure = useMultipleExposure)
-    }
-
     fun onHdrBracketFramesCollected() {
         _state.value = _state.value.copy(
             hdrBracketCapturing = false,
@@ -7718,7 +7714,6 @@ class Camera2Controller(private val context: Context) {
                 !isRawCapture &&
                 !state.burstCapturing &&
                 !state.hdrBracketCapturing &&
-                !state.useMultipleExposure &&
                 !state.useLivePhoto
     }
 

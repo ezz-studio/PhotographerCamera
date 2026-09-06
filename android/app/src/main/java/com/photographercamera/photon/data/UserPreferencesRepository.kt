@@ -168,8 +168,6 @@ data class UserPreferences(
     val useJpgMax: Boolean = false, // YUV 多帧降噪
     val useJpgMaxHdrComposition: Boolean = false, // 多帧降噪固定不启用包围曝光
     val jpgMultiFrameDenoiseFrameCount: Int = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT,
-    val useMultipleExposure: Boolean = false, // 是否启用多重曝光
-    val multipleExposureCount: Int = 2, // 多重曝光张数
     val useRawMax: Boolean = false, // HDR+：RAW Radiance 管线
     val hdrPlusFrameCount: Int = MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT,
     val hdrPlusBracketExposureEnabled: Boolean =
@@ -284,7 +282,6 @@ data class CameraFeaturePreferencesUpdate(
     val useJpgMax: PreferenceUpdateValue<Boolean>? = null,
     val useRawMax: PreferenceUpdateValue<Boolean>? = null,
     val ultraHdrGainMapEnabled: PreferenceUpdateValue<Boolean>? = null,
-    val useMultipleExposure: PreferenceUpdateValue<Boolean>? = null,
     val frameId: PreferenceUpdateValue<String?>? = null,
     val rawDcpId: PreferenceUpdateValue<String?>? = null,
     val rawDcpIdsByLens: PreferenceUpdateValue<Map<String, String?>>? = null,
@@ -417,8 +414,6 @@ class UserPreferencesRepository(private val context: Context) {
         private val HDR_PLUS_FRAME_COUNT = intPreferencesKey("hdr_plus_frame_count")
         private val HDR_PLUS_BRACKET_EXPOSURE_ENABLED =
             booleanPreferencesKey("hdr_plus_bracket_exposure_enabled")
-        private val USE_MULTIPLE_EXPOSURE = booleanPreferencesKey("use_multiple_exposure")
-        private val MULTIPLE_EXPOSURE_COUNT = intPreferencesKey("multiple_exposure_count")
         private val LEGACY_USE_SUPER_RESOLUTION = booleanPreferencesKey("use_super_resolution")
         private val RAW_MAX_OUTPUT_SCALE = floatPreferencesKey("raw_max_output_scale")
         private val LEGACY_RAW_SUPER_RESOLUTION_SCALE = floatPreferencesKey("raw_super_resolution_scale")
@@ -687,8 +682,6 @@ class UserPreferencesRepository(private val context: Context) {
                 jpgMultiFrameDenoiseFrameCount = preferences[JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]
                     ?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
                     ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT,
-                useMultipleExposure = preferences[USE_MULTIPLE_EXPOSURE] ?: false,
-                multipleExposureCount = preferences[MULTIPLE_EXPOSURE_COUNT] ?: 2,
                 useRawMax = useRawMax,
                 hdrPlusFrameCount = preferences[HDR_PLUS_FRAME_COUNT]
                     ?.let {
@@ -1878,24 +1871,6 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
-    /**
-     * 保存是否使用多重曝光
-     */
-    suspend fun saveUseMultipleExposure(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[USE_MULTIPLE_EXPOSURE] = enabled
-        }
-    }
-
-    /**
-     * 保存多重曝光张数
-     */
-    suspend fun saveMultipleExposureCount(count: Int) {
-        context.dataStore.edit { preferences ->
-            preferences[MULTIPLE_EXPOSURE_COUNT] = count.coerceIn(2, 9)
-        }
-    }
-
     suspend fun saveRawMaxOutputScale(scale: Float) {
         context.dataStore.edit { preferences ->
             preferences[RAW_MAX_OUTPUT_SCALE] = MultiFrameConfig.normalizeOutputScale(
@@ -2329,9 +2304,6 @@ class UserPreferencesRepository(private val context: Context) {
             }
             update.ultraHdrGainMapEnabled?.let {
                 preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = it.value
-            }
-            update.useMultipleExposure?.let {
-                preferences[USE_MULTIPLE_EXPOSURE] = it.value
             }
             update.frameId?.let {
                 if (it.value != null) {

@@ -1092,7 +1092,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
 
         val liveRecorder = livePhotoRecorder
-        val hdfEnabled = halation > 0.001f
+        // 0.9.1：recipe.halation 经 JSON 桥被上游 toJson() 抹零 → 用 FilmParamsStore
+        // 补回 profile 原值（HDF 高光扩散链路；0.9.0 前此链路对 profile 恒关闭）
+        val effectiveHalation = maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength)
+        val hdfEnabled = effectiveHalation > 0.001f
         val halationEnabled = redHalation > 0.001f
         val bloomEnabled = bloom > 0.001f
         val softLightEnabled = softLight > 0.001f
@@ -1686,7 +1689,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val spatialScale = getPreviewSpatialEffectScale(width, height)
         val texelW = spatialScale / dsW;
         val texelH = spatialScale / dsH
-        val threshold = 0.9f - halation * 0.3f
+        // 0.9.1：hdfEnabled 已按 FilmParamsStore 补值判断，提取强度同步补值
+        //（否则 profile halation 被 JSON 桥抹零后提取纹理全黑，合成补值无效）
+        val effectiveHdfStrength = maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength)
+        val threshold = 0.9f - effectiveHdfStrength * 0.3f
         // Pass 1: Extract + Horizontal Blur
         GLES30.glUseProgram(hdfExtractBlurHProgram)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, hdfFboId[0])
@@ -1696,7 +1702,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uInputTexture"), 0)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uTexelSize"), texelW, texelH)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uThreshold"), threshold)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"), halation)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"), effectiveHdfStrength)
         drawSimpleQuad(hdfExtractBlurHProgram)
         // Pass 2: Vertical Blur
         GLES30.glUseProgram(hdfBlurVProgram)
@@ -2365,7 +2371,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[1])
         GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfCompositeProgram, "uBloomTexture"), 1)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfCompositeProgram, "uHalation"), halation)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfCompositeProgram, "uHalation"), maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength))
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (redHalation > 0f) halationTexId[1] else 0)

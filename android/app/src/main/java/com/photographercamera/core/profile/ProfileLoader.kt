@@ -122,7 +122,14 @@ object ProfileLoader {
     suspend fun import(context: Context, uri: Uri, id: String? = null): String = withContext(Dispatchers.IO) {
         val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: throw IllegalArgumentException("Cannot read $uri")
-        val name = id ?: (uri.lastPathSegment?.substringBeforeLast('.') ?: "imported")
+        // 0.9.1 修复：SAF 的 lastPathSegment 形如 "primary:Download/xxx.json"（含
+        // 冒号/斜杠），直接当文件名写缓存会失败。先取末段文件名，再把 id 消毒为
+        // [A-Za-z0-9_-]（缓存目录/注册表键/lutId 前缀都用它）。
+        val rawName = id
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
+        val name = (rawName ?: "imported")
+            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+            .ifBlank { "imported_${System.currentTimeMillis()}" }
         loadFromText(text, name)
         exportToCache(context, registry[name]!!, name)
         name

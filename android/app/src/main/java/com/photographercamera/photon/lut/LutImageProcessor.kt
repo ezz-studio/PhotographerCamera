@@ -1067,8 +1067,11 @@ class LutImageProcessor(context: Context? = null) {
         )
 
         // 设置 HDF 参数
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uHalation"), halation)
-        if (halation > 0f) {
+        // 0.9.1：recipe.halation 经 JSON 桥被上游 toJson() 抹零 → 用 FilmParamsStore
+        // 补回 profile 原值（成片端 HDF 链路；与预览端 LutRenderer 同源）
+        val effectiveHalation = maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uHalation"), effectiveHalation)
+        if (effectiveHalation > 0f) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[1])
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uHdfTexture"), 2)
@@ -2647,7 +2650,12 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uInputTexture"), 0)
         GLES30.glUniform2f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uTexelSize"), texelW, texelH)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uThreshold"), threshold)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"), halation)
+        // 0.9.1：HDF 提取强度按 FilmParamsStore 补值（与合成端 effectiveHalation 同源，
+        // 防上游 toJson 抹零后 profile halation 链全灭）
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"),
+            maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength),
+        )
         GLES30.glUniformMatrix4fv(
             GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uMVPMatrix"), 1, false, identityMatrix, 0
         )

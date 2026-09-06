@@ -254,7 +254,6 @@ data class CameraState(
     val useJpgMaxHdrComposition: Boolean = false,
     val hdrPlusBracketExposureEnabled: Boolean = MultiFrameConfig.DEFAULT_HDR_PLUS_BRACKET_EXPOSURE,
     val useRaw: Boolean = false,
-    val useMultipleExposure: Boolean = false,
     val rawMinShutterSpeedNs: Long = 0L,
     val useLivePhoto: Boolean = false,
     val droMode: String = "OFF",

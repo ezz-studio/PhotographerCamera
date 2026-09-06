@@ -29,6 +29,15 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- READ_PHONE_STATE is never declared by this app. It is silently IMPLIED
+         into the merged manifest by the manifest merger because
+         org.tensorflow.lite.gpu.api ships an AAR manifest without a
+         targetSdkVersion (< 4), which triggers the legacy auto-grant rule.
+         We use no telephony APIs — strip it explicitly. -->
+    <uses-permission
+        android:name="android.permission.READ_PHONE_STATE"
+        tools:node="remove" />
+
     <!-- OpenGL ES 3.0 is REQUIRED: the renderer uses #version 300 es shaders. -->
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />

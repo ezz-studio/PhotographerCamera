@@ -528,7 +528,7 @@ fun AppSettingsScreen(
                     AboutCard("RAW MAX", "Spatial 融合模式 · 默认启用", OkGreen, "已参与成像管线（GlesMgcRawSpatialStacker）")
                     AboutCard("照片质量", "JPEG 质量 100", OkGreen, "已参与成像管线（ImageCapture.setJpegQuality）")
                     AboutCard("镜头阴影校正", "已开启（写死）", OkGreen, "RAW 显影管线内已实现")
-                    AboutCard("拍摄后自动保存", "已开启（写死）", OkGreen, "已参与成像管线（saveAndNotify）")
+                    AboutCard("拍摄后自动保存", "已开启", OkGreen, "已参与成像管线（photon GalleryManager）")
                     AboutCard("RAW MAX 锐化", "默认 0.5 · 亮度降噪 1 · 色度降噪 1", OkGreen, "已参与成像管线（RawDemosaicProcessor）")
                     AboutCard("JPEG 4:4:4 导出", "目标启用", Color(0xFFB9A15A), "未参与：待 libjpeg-turbo 4:4:4 编码集成")
                     AboutCard("降噪 / 锐化", "高质量", OkGreen, "已参与成像管线（photon NRLevel / EdgeLevel）")

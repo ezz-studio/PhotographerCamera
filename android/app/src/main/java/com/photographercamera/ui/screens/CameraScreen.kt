@@ -17,7 +17,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -124,6 +123,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.hardware.camera2.CameraCharacteristics
 import com.photographercamera.photon.viewmodel.CameraViewModel
+import com.photographercamera.photon.camera.LensType
 import com.photographercamera.photon.camera.MeteringMode
 import com.photographercamera.photon.ui.camera.CameraPreviewGL
 import com.photographercamera.photon.lut.LutManager
@@ -219,6 +219,9 @@ fun CameraScreen(navController: NavController) {
     // 同步写入并 rebind；0.3.5 迁移会把历史遗留的 true 一次性重置为关）。
     val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
     var rawOn by remember { mutableStateOf(sp.getBoolean("raw_isp_enabled", false)) }
+    // 引擎 useRaw 状态回流顶栏（上游互斥矩阵会改写 useRaw——如 RAWmax/多次曝光
+    // 联动；不回流则顶栏显示与引擎实际状态脱节）
+    LaunchedEffect(state.useRaw) { rawOn = state.useRaw }
 
     // 手动测光态：非系统默认测光模式即视为手动（用于 EV 滑块显隐）
     val meteringManual = state.meteringMode != MeteringMode.SYSTEM_DEFAULT
@@ -296,6 +299,46 @@ fun CameraScreen(navController: NavController) {
         // setVibrationEnabled，UI 层重复反馈已移除。
     }
 
+    // ---- zoom soft-snap（照搬上游 ContinuousZoomStopSettlement 语义）--------
+    // 档位源 = VM allZoomStops（镜头固有倍率 + 自定义焦段；zoomSteps 字段两边
+    // 都是死字段不可用）。软吸附：距档位 ≤0.05 才吸，绝不跨镜头切换（0.8.3
+    // 架构：HAL 自动路由物理镜头，小步吸附不会换摄；switchToLensAndSetZoomRatio
+    // 会触发 session 重建=0.8.2 乒乓灾难，吸附热路径禁用）。
+    val zoomStops = remember(state.availableCameras, state.currentCameraId) {
+        val cam = state.getCurrentCameraInfo()
+        val main = state.availableCameras.firstOrNull {
+            it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO
+        }
+        pvm.allZoomStops(pvm.calculateLensZoomStops(state.availableCameras, cam), main, cam)
+    }
+    val settleZoomStop = {
+        val snap = settleContinuousZoomStop(zoomStops, pvm.zoomRatioByMain).snapZoomStop
+        if (snap != null) pvm.setZoomRatio(snap)
+    }
+    var wasZooming by remember { mutableStateOf(false) }
+    // 捏合停手 2s 后软吸附（对齐上游 ZoomControlBar 语义：拖拽条松手立即吸，捏合停手 2s 吸）
+    LaunchedEffect(pvm.isZooming) {
+        val was = wasZooming
+        wasZooming = pvm.isZooming
+        if (was && !pvm.isZooming) {
+            delay(2000)
+            settleZoomStop()
+        }
+    }
+    // 引擎保存完成事件 → 实时刷新右下角缩略图（引擎写 DCIM/PhotonCamera，
+    // CaptureSaver.list 已修复覆盖该目录；事件驱动，无轮询）。
+    LaunchedEffect(Unit) {
+        pvm.imageSavedEvent.collect {
+            val latest = CaptureSaver.list(context).firstOrNull()
+            if (latest != null) {
+                lastCapture = latest
+                triggerCaptureFeedback()
+                thumbAnim.snapTo(0.6f)
+                thumbAnim.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+            }
+        }
+    }
+
     // Live QuickControl adjustments (WB / Grain) applied on top of the chosen preset.
     var sheetTarget by remember { mutableStateOf<String?>(null) }
     // 0.8.2 EV：AE-L 门控——开启后滑条写入 recipe.exposure（叠加在 profile 基准上）；
@@ -328,7 +371,11 @@ fun CameraScreen(navController: NavController) {
     // 写入 LutManager（按 lutId 存 DataStore），再 pvm.setLut 让预览+成片套用。
     // 原 adjEv/adjWbTemp/adjWbTint/adjGrain 滑块仅作 UI 占位（EV/WB/grain 已由 recipe 覆盖）。
     fun applyAdjustments() {
-        if (selected.isEmpty()) return
+        if (selected.isEmpty()) {
+            // 未选 profile：halation/grain 等单例通道回默认，防上一 profile 残留
+            com.photographercamera.core.photon.color.FilmParamsStore.reset()
+            return
+        }
         val profile = ProfileLoader.getProfile(selected) ?: run {
             com.photographercamera.core.debug.DebugLog.log("PROFILE", "getProfile('$selected') returned null")
             return
@@ -356,33 +403,25 @@ fun CameraScreen(navController: NavController) {
                 // lens 光学阶段参数（distortion/falloff/vignette/bloom/flare）——
                 // 预览 LutRenderer 与成片 LutImageProcessor 从单例读取
                 com.photographercamera.core.photon.lens.LensParamsStore.current = mapping.residual.lens
+                // 0.9.1 film/halation/grain 参数单例下发：halation 强度经 JSON 桥
+                // 会被上游 toJson() 强制抹零（兼容设计），film_curve 端点/grain 颗粒
+                // 度/原色矩阵/阴影饱和度在 recipe 无字段——经 FilmParamsStore 补通
+                com.photographercamera.core.photon.color.FilmParamsStore.current =
+                    com.photographercamera.core.photon.color.FilmParamsStore.FilmParams(
+                        halationStrength = mapping.residual.halationAmount,
+                        halationRadius = mapping.residual.halationRadius,
+                        halationThreshold = mapping.residual.halationThreshold,
+                        halationWarmth = mapping.residual.halationWarmth,
+                        grainSize = mapping.residual.grainSize,
+                        grainDensity = mapping.residual.grainDensity,
+                        shadowSaturation = mapping.residual.shadowSaturation,
+                        filmCurveShadowFloor = mapping.residual.filmCurveShadowFloor,
+                        filmCurveHighlightCeiling = mapping.residual.filmCurveHighlightCeiling,
+                        colorMatrix3x3 = mapping.residual.colorMatrix3x3,
+                    )
                 pvm.setLut(lutId)
             } catch (t: Throwable) {
                 com.photographercamera.core.debug.DebugLog.logError("PROFILE", "recipe inject failed for '$selected'", t)
-            }
-        }
-    }
-
-    fun saveAndNotify(bmp: Bitmap) {
-        capturing = false
-        val t0 = android.os.SystemClock.elapsedRealtime()
-        val saved = CaptureSaver.save(context, bmp)
-        (context as? ComponentActivity)?.runOnUiThread {
-            if (saved != null) {
-                DebugLog.log(
-                    "SHOT",
-                    "saved ${bmp.width}x${bmp.height} -> ${saved.name} " +
-                        "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                )
-                lastCapture = saved
-                triggerCaptureFeedback()
-                scope.launch {
-                    thumbAnim.snapTo(0.6f)
-                    thumbAnim.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
-                }
-            } else {
-                DebugLog.log("SHOT", "SAVE FAILED (${bmp.width}x${bmp.height})")
-                Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -517,10 +556,30 @@ fun CameraScreen(navController: NavController) {
         Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            // two-finger pinch zoom — cross-lens, mirrored in the in-frame HUD
+            // two-finger pinch zoom — cross-lens, mirrored in the in-frame HUD.
+            // 基准用 VM 同步值 zoomRatioByMain（上游 CameraScreen:1082 同款）：
+            // 避免 StateFlow 异步回环（zoomState 滞后 1-2 帧）在高报点率下
+            // 丢增量 → 欠冲"不跟手"。
             .pointerInput(Unit) {
                 detectTransformGestures { _, _, zoom, _ ->
-                    pvm.setZoomRatio(zoomState * zoom)
+                    if (zoom != 1f) {
+                        pvm.isZooming = true
+                        pvm.setZoomRatio(pvm.zoomRatioByMain * zoom)
+                    }
+                }
+            }
+            // 手势结束检测：双指全部抬起 → isZooming=false（上游 awaitEachGesture
+            // 同款），驱动 2s 延迟软吸附计时。
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var sawPinch = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.count { it.pressed } >= 2) sawPinch = true
+                        if (event.changes.all { !it.pressed }) break
+                    }
+                    if (sawPinch) pvm.isZooming = false
                 }
             },
     ) {
@@ -546,36 +605,22 @@ fun CameraScreen(navController: NavController) {
         val fy = topReserve + (slotH - fh)                   // anchor to slot bottom
 
         // ---- inner capture box -----------------------------------------------
-        // Hybrid zoom: up to the OPTICAL max the native preview IS the capture
-        // FOV, so the box stays full-frame (photo = what you see). PAST the
-        // optical max photon pins the sensor zoom and the extra digital reach
-        // is shown the DAZZ way — the capture box shrinks by opticalMax/zoom
-        // with a scrim outside, and the still gets the SAME centered crop.
+        // photon 预览与成片共用同一 CONTROL_ZOOM_RATIO（Camera2Controller.
+        // applyZoomRequestSettings 预览/拍照同路径），HAL 已按 zoom 裁切出图
+        // → 照片 FOV = 预览全幅 FOV，所见即所得。盒子缩放是纯装饰性的跟手
+        // 反馈：值源与下发同源（zoomState 随 state.zoomRatio 逐帧回流）、
+        // 直驱无插值——旧 spring 的 200-500ms 尾焰与"数字段二次裁切"声称
+        // （该裁切路径已死）是"取景框动画与成像不符"的根因，均已移除。
         val camInfo = state.getCurrentCameraInfo()
         val eqBase = camInfo?.focalLength35mmEquivalent?.takeIf { it in 18f..40f } ?: 26f
-        val opticalMax = camInfo?.maxZoom?.takeIf { it > 1f } ?: 1f
-        val fTarget = when {
-            // digital tail (> optical max): strict box=photo — the box shrinks
-            // by opticalMax/zoom and the still gets the same centered crop.
-            zoomState > opticalMax * 1.001f -> (opticalMax / zoomState).coerceIn(0.25f, 1f)
-            // optical zoom segment (1×..opticalMax): a SUBTLE visual shrink as a
-            // zoom indicator (≈12% at the optical limit). The still stays at the
-            // full optical frame — zero quality loss, the box is just a hair
-            // larger than the capture (a ~12% framing margin the user allows).
-            zoomState > 1.001f -> {
-                val t = ((zoomState - 1f) / (opticalMax - 1f).coerceAtLeast(0.001f))
-                    .coerceIn(0f, 1f)
-                1f - 0.12f * t
-            }
-            else -> 1f
+        val fTarget = if (zoomState > 1.001f) {
+            val t = ((zoomState - 1f) / (pvm.globalMaxZoom - 1f).coerceAtLeast(0.001f))
+                .coerceIn(0f, 1f)
+            1f - 0.12f * t
+        } else {
+            1f
         }
-        // Optimized motion: stiffer spring than the old sluggish low-stiffness —
-        // follows pinch/rotor closely, still settles smoothly.
-        val f by animateFloatAsState(
-            fTarget,
-            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
-            label = "vfBox",
-        )
+        val f = fTarget // 直驱：视觉缩放与 Camera2 下发值逐帧一致
         val bw = fw * f
         val bh = fh * f
         val bx = fx + (fw - bw) / 2f
@@ -908,6 +953,12 @@ fun CameraScreen(navController: NavController) {
             onZoom = { z ->
                 pvm.setZoomRatio(z)
             },
+            zoomBase = { pvm.zoomRatioByMain },
+            onZoomStart = { pvm.isZooming = true },
+            onZoomSettle = {
+                pvm.isZooming = false
+                settleZoomStop()
+            },
             onShutter = {
                 if (!shotPending) {
                     shotPending = true
@@ -1006,9 +1057,11 @@ fun CameraScreen(navController: NavController) {
                             )
                             AdjustSlider(
                                 value = adjWbTemp,
-                                center = 6200f,
-                                range = 2500f..9900f, // 统一固定范围（各设备一致，引擎侧仍按设备能力收口）
-                                enabled = !awbOn,
+                                center = 5000f,
+                                // 0.9.1 对齐引擎常量 AWB_TEMPERATURE_MIN/MAX = 2000..8000
+                                //（旧 2500..9900 右端 1900K 是引擎钳制死区，拖动无效）
+                                range = 2000f..8000f,
+                                enabled = !awbOn && state.canAdjustWhiteBalance,
                                 onValueChange = {
                                     adjWbTemp = it
                                     pvm.setAwbTemperature(it.roundToInt())
@@ -1024,7 +1077,7 @@ fun CameraScreen(navController: NavController) {
                                 value = adjWbTint,
                                 center = 0f,
                                 range = -20f..20f,
-                                enabled = !awbOn,
+                                enabled = !awbOn && state.canAdjustWhiteBalance,
                                 onValueChange = {
                                     adjWbTint = it
                                     pvm.setAwbTint(it.roundToInt())
@@ -1428,9 +1481,9 @@ private fun GridOverlay() {
 /**
  * iPhone-style zoom rotor: drag horizontally to change zoom. Ticks are a
  * visual ruler with even screen spacing (0.1x per tick), integer multiples
- * taller/thicker, alpha fades to both ends. NO snap on release — fractional
- * zoom stays put exactly like the pinch gesture. Lives on its own row between
- * the quick controls and the shutter row.
+ * taller/thicker, alpha fades to both ends. 拖拽基准用 zoomBase()（VM 同步值，
+ * 非 StateFlow 异步回环）；松手立即软吸附（onZoomSettle，上游 ZoomControlBar
+ * closeContinuousZoomBar 同款），连续拖拽过程中绝不吸附。
  */
 @Composable
 private fun ZoomRotor(
@@ -1438,6 +1491,9 @@ private fun ZoomRotor(
     minZoom: Float,
     maxZoom: Float,
     onZoom: (Float) -> Unit,
+    zoomBase: () -> Float,
+    onZoomStart: () -> Unit,
+    onZoomSettle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
@@ -1448,11 +1504,11 @@ private fun ZoomRotor(
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { delta ->
-                    val newZoom = (zoom - delta / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
+                    val newZoom = (zoomBase() - delta / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
                     onZoom(newZoom)
                 },
-                // NO snap on release: fractional zoom (1.4x) must stay put like the
-                // pinch gesture does. The ticks are a visual ruler, not detents.
+                onDragStarted = { onZoomStart() },
+                onDragStopped = { onZoomSettle() },
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -1521,6 +1577,10 @@ private fun BottomPanel(
     minZoom: Float,
     maxZoom: Float,
     onZoom: (Float) -> Unit,
+    // 变焦拖拽的同步基准 / 生命周期钩子（软吸附用）
+    zoomBase: () -> Float,
+    onZoomStart: () -> Unit,
+    onZoomSettle: () -> Unit,
     onShutter: () -> Unit,
     // 0.8.3 拍摄处理动画：处理中快门外圈白弧旋转
     isProcessing: Boolean = false,
@@ -1542,6 +1602,9 @@ private fun BottomPanel(
             minZoom = minZoom,
             maxZoom = maxZoom,
             onZoom = onZoom,
+            zoomBase = zoomBase,
+            onZoomStart = onZoomStart,
+            onZoomSettle = onZoomSettle,
             modifier = Modifier
                 .width(200.dp)
                 .height(40.dp),
@@ -1797,32 +1860,49 @@ private fun LastCaptureThumb(photo: SavedPhoto?, onClick: () -> Unit, scale: Flo
     }
 }
 
-/** Center-crop a bitmap to the given width/height ratio (e.g. 3:4 portrait). */
-private fun centerCropToRatio(src: Bitmap, wOverH: Float): Bitmap {
-    val cur = src.width.toFloat() / src.height
-    val cw: Int
-    val ch: Int
-    if (cur > wOverH) {
-        ch = src.height
-        cw = (src.height * wOverH).toInt().coerceAtMost(src.width)
-    } else {
-        cw = src.width
-        ch = (src.width / wOverH).toInt().coerceAtMost(src.height)
+/**
+ * 软吸附结算（照搬上游 ContinuousZoomStopSettlement，仅包名改写）：
+ * 距最近档位 ≤ snapThreshold → 吸附；> threshold → 保留分数倍率不强制吸。
+ * customZoomStop/replacedStopIndex 为上游 ZoomControlBar 临时档位显示保留，
+ * 自研 UI 无档位条，当前只消费 snapZoomStop。
+ */
+private data class ContinuousZoomStopSettlement(
+    val customZoomStop: Float?,
+    val replacedStopIndex: Int,
+    val originalStopRatio: Float,
+    val snapZoomStop: Float?,
+)
+
+private fun settleContinuousZoomStop(
+    zoomStops: List<Float>,
+    zoomRatio: Float,
+    snapThreshold: Float = 0.05f,
+): ContinuousZoomStopSettlement {
+    val closestIndex = zoomStops.indices.minByOrNull { abs(zoomStops[it] - zoomRatio) } ?: -1
+    if (closestIndex == -1) {
+        return ContinuousZoomStopSettlement(
+            customZoomStop = null,
+            replacedStopIndex = -1,
+            originalStopRatio = 0f,
+            snapZoomStop = null,
+        )
     }
-    val x = (src.width - cw) / 2
-    val y = (src.height - ch) / 2
-    return Bitmap.createBitmap(src, x, y, cw, ch)
+    val closestStop = zoomStops[closestIndex]
+    return if (abs(closestStop - zoomRatio) > snapThreshold) {
+        ContinuousZoomStopSettlement(
+            customZoomStop = zoomRatio,
+            replacedStopIndex = closestIndex,
+            originalStopRatio = closestStop,
+            snapZoomStop = null,
+        )
+    } else {
+        ContinuousZoomStopSettlement(
+            customZoomStop = null,
+            replacedStopIndex = -1,
+            originalStopRatio = 0f,
+            snapZoomStop = closestStop,
+        )
+    }
 }
 
-/**
- * DAZZ-pattern zoom crop: centered 1/zoom of the frame — the same fraction
- * the viewfinder capture box shows. Used by the preview-frame fallback path
- * (the main still path crops inside renderBitmapThroughChain).
- */
-private fun centerCropZoom(src: Bitmap, zoom: Float): Bitmap {
-    val z = zoom.coerceAtLeast(1f)
-    if (z <= 1.001f) return src
-    val cw = (src.width / z).toInt().coerceIn(64, src.width)
-    val ch = (src.height / z).toInt().coerceIn(64, src.height)
-    return Bitmap.createBitmap(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch)
-}
+

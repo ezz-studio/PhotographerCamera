@@ -4213,31 +4213,21 @@ class Camera2Controller(private val context: Context) {
             isCapture = isCapture
         )
         val resolvedGains = resolveManualMatrixGains(state.awbTemperature, resolvedAnchor, gains)
-        val tintedGains = applyAwbTintToGains(resolvedGains, state.awbTint)
+        // 0.9.1 恢复上游语义（此前 0.8.3 改写为"纯 gains 直控 + tint 折算"：
+        // COLOR_CORRECTION_MODE 非 TRANSFORM_MATRIX 时 HAL 忽略 gains → WB 按钮
+        // 在 MATRIX 路径设备上静默无效）。上游：构建 transform，失败回退 AUTO。
+        val transform = buildColorMatrixWhiteBalanceTransform(resolvedGains)
+            ?: resolvedAnchor.transform
+            ?: return applyAutoWhiteBalanceSettings(
+                builder = builder,
+                state = state.copy(awbMode = CameraMetadata.CONTROL_AWB_MODE_AUTO),
+                isCapture = isCapture
+            )
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
         builder.set(CaptureRequest.CONTROL_AWB_LOCK, false)
-        // 纯 RGGB gains 直控：不走颜色矩阵变换（transform 路径在部分设备颜色全错）
-        builder.set(
-            CaptureRequest.COLOR_CORRECTION_MODE,
-            if (isManualPostProcessingSupported) {
-                CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
-            } else {
-                CaptureRequest.COLOR_CORRECTION_MODE_FAST
-            }
-        )
-        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, tintedGains)
-    }
-
-    /** tint 折算绿色通道增益：+20 → G×0.8（品红），-20 → G×1.2（偏绿）。 */
-    private fun applyAwbTintToGains(gains: RggbChannelVector, tint: Int): RggbChannelVector {
-        if (tint == 0) return gains
-        val gScale = 1f - tint / 100f
-        return RggbChannelVector(
-            gains.red,
-            gains.greenEven * gScale,
-            gains.greenOdd * gScale,
-            gains.blue
-        )
+        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, resolvedGains)
+        builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
     }
 
     private fun buildColorMatrixWhiteBalanceTransform(gains: RggbChannelVector): ColorSpaceTransform? {
@@ -6805,10 +6795,6 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun setUseMultipleExposure(useMultipleExposure: Boolean) {
-        _state.value = _state.value.copy(useMultipleExposure = useMultipleExposure)
-    }
-
     fun onHdrBracketFramesCollected() {
         _state.value = _state.value.copy(
             hdrBracketCapturing = false,
@@ -7795,7 +7781,6 @@ class Camera2Controller(private val context: Context) {
                 !isRawCapture &&
                 !state.burstCapturing &&
                 !state.hdrBracketCapturing &&
-                !state.useMultipleExposure &&
                 !state.useLivePhoto
     }
 
