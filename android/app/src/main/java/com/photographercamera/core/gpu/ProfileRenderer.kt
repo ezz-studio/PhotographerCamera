@@ -62,6 +62,8 @@ class ProfileRenderer private constructor(
     private val progRawIsp: Int,
     private val progYuv: Int,
     private val progChroma: Int,
+    private val progLuma: Int,
+    private val progSharpen: Int,
     private val quad: Int,
 ) {
     companion object {
@@ -114,6 +116,24 @@ class ProfileRenderer private constructor(
                     "GL", "chroma_denoise program failed to build - RAW chroma NR disabled",
                 )
             }
+            // 0.4.0 YUV 直采画质补齐：亮度降噪（双边）+ 捕获锐化（unsharp）。
+            // YUV_420_888 still 绕过 HAL 多帧降噪与锐化（只在 HAL 自家 JPEG
+            // 路径激活），而 profile 的 sharpen.amount=0（风格恒定，不动），
+            // 所以成片此前既无降噪（亮度）也无任何锐化 = 用户报的"模糊有噪
+            // 点"。两个 pass 都是引擎级（不改 profile 调色语义），失败各自
+            // 降级不阻塞链路。
+            val progLuma = GLSL.program(assets, "shaders/passthrough.vert", "shaders/luma_denoise.frag")
+            if (progLuma == 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "GL", "luma_denoise program failed to build - YUV luma NR disabled",
+                )
+            }
+            val progSharpen = GLSL.program(assets, "shaders/passthrough.vert", "shaders/sharpen.frag")
+            if (progSharpen == 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "GL", "sharpen program failed to build - YUV capture sharpen disabled",
+                )
+            }
             if (progCopy == 0 || progBlit == 0) {
                 throw IllegalStateException("minimum pipeline (oes2d copy / blit) failed to build - preview impossible")
             }
@@ -124,7 +144,10 @@ class ProfileRenderer private constructor(
                 "renderer ready mode=" + (if (degraded.isEmpty()) "FULL_2PASS" else "DEGRADED") +
                     " skipped=[" + degraded.joinToString(",") + "]",
             )
-            return ProfileRenderer(assets, progCopy, progEffect, progBlit, progRawIsp, progYuv, progChroma, quad)
+            return ProfileRenderer(
+                assets, progCopy, progEffect, progBlit, progRawIsp, progYuv,
+                progChroma, progLuma, progSharpen, quad,
+            )
         }
 
         private fun makeQuad(): Int {
@@ -617,10 +640,23 @@ class ProfileRenderer private constructor(
         if (progChroma != 0) {
             filterChain.add(ChromaFilter(progChroma, tw, th, 1f))
         }
+        // 0.4.0 画质补齐（引擎级，不改 profile 语义）：
+        //  luma denoise  - 5x5 双边亮度降噪（HAL 多帧 NR 不会为 YUV still 运行）
+        //  sharpen       - 1px unsharp（HAL EDGE HQ 对 YUV still 基本不生效，
+        //                  profile.sharpen.amount=0 → 此前成片零锐化）
+        // 顺序 = 标准相机管线：降噪 → 锐化 → 风格（grain 在锐化之后加入，
+        // 不会被锐化放大）。RAW 链冻结，不加。
+        if (progLuma != 0) {
+            filterChain.add(LumaDenoiseFilter(progLuma, tw, th, 0.55f))
+        }
+        if (progSharpen != 0) {
+            filterChain.add(SharpenFilter(progSharpen, tw, th, 0.35f, 1.0f))
+        }
         filterChain.add(EffectFilter(params, timestampMs, tonePreLinear = false, vignetteWindow = null))
         filterChain.process(mainTex, finalFbo, tw, th)
         com.photographercamera.core.debug.DebugLog.log(
-            "YUV", "direct chain done (3-plane BT.601) yuv=${yuvW}x${yuvH} rot=$rot mirror=$mirror -> ${tw}x${th}",
+            "YUV", "direct chain done (3-plane BT.601) yuv=${yuvW}x${yuvH} rot=$rot mirror=$mirror -> ${tw}x${th}" +
+                " nr=[chroma=${progChroma != 0} luma=${progLuma != 0} sharpen=${progSharpen != 0}]",
         )
         // Plane row 0 uploads to texel v=0, cancelling glReadPixels' bottom-up
         // read - no flip, same convention as the RAW and bitmap paths.
@@ -860,6 +896,62 @@ class ProfileRenderer private constructor(
             GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "u_input"), 0)
             GLES30.glUniform2f(GLES30.glGetUniformLocation(prog, "u_texel"), 1f / w, 1f / h)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "u_amount"), amount)
+            // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同上）
+            GLES30.glUniform4f(GLES30.glGetUniformLocation(prog, "u_uvWin"), 1f, 1f, 0f, 0f)
+            drawQuad()
+        }
+    }
+
+    /**
+     * 0.4.0 YUV 链亮度降噪 pass（shaders/luma_denoise.frag）：5x5 双边
+     * （空间衰减 + 亮度边缘停止 + 色度边缘停止），单 pass 结构对照
+     * android-gpuimage-plus cgeBilateralBlurFilter.cpp。u_amount 0.55。
+     */
+    private inner class LumaDenoiseFilter(
+        private val prog: Int,
+        private val tw: Int,
+        private val th: Int,
+        private val amount: Float,
+    ) : GpuFilter {
+        override fun render(srcTexture: Int, dstFramebuffer: Int, w: Int, h: Int) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, dstFramebuffer)
+            GLES30.glViewport(0, 0, w, h)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            GLES30.glUseProgram(prog)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, srcTexture)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "u_input"), 0)
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(prog, "u_texel"), 1f / w, 1f / h)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "u_amount"), amount)
+            // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同上）
+            GLES30.glUniform4f(GLES30.glGetUniformLocation(prog, "u_uvWin"), 1f, 1f, 0f, 0f)
+            drawQuad()
+        }
+    }
+
+    /**
+     * 0.4.0 YUV 链捕获锐化 pass（复用 shaders/sharpen.frag）：3x3 加权
+     * unsharp（公式 c + a*(c-blur)，a=0.35、半径 1px）。HAL 对 YUV still
+     * 不做锐化且 profile.sharpen.amount=0，这是链路里唯一的锐化来源。
+     */
+    private inner class SharpenFilter(
+        private val prog: Int,
+        private val tw: Int,
+        private val th: Int,
+        private val amount: Float,
+        private val radius: Float,
+    ) : GpuFilter {
+        override fun render(srcTexture: Int, dstFramebuffer: Int, w: Int, h: Int) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, dstFramebuffer)
+            GLES30.glViewport(0, 0, w, h)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            GLES30.glUseProgram(prog)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, srcTexture)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "u_input"), 0)
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(prog, "u_texel"), 1f / w, 1f / h)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "u_amount"), amount)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "u_radius"), radius)
             // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同上）
             GLES30.glUniform4f(GLES30.glGetUniformLocation(prog, "u_uvWin"), 1f, 1f, 0f, 0f)
             drawQuad()

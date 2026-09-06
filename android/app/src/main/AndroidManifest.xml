@@ -18,6 +18,11 @@
          apps); granted via the system settings page, requested once. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+    <!-- In-app OTA update (core/update/UpdateChecker.kt): the app installs its
+         own downloaded APK through the system installer. Normal-tier, no
+         runtime prompt; the user grants "install unknown apps" once via the
+         system page on first install attempt (API 26+). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- OpenGL ES 3.0 is REQUIRED: the renderer uses #version 300 es shaders. -->
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
@@ -44,5 +49,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Shares the OTA-downloaded APK (app-private cache) with the system
+             installer; paths in res/xml/file_paths.xml. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

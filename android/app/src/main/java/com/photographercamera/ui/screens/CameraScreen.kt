@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.outlined.CenterFocusStrong
@@ -125,6 +126,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.photographercamera.core.update.UpdateChecker
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.PI
@@ -1053,6 +1055,8 @@ private fun SettingsSheet(
                 }
             }
             Spacer(Modifier.height(6.dp))
+            UpdateCheckRow()
+            Spacer(Modifier.height(6.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -1072,6 +1076,94 @@ private fun SettingsSheet(
                 Text("远程日志 ›", color = TextSecondary, fontSize = 12.sp)
             }
         }
+    }
+}
+
+/** 0.4.0 "检查更新"行状态机：IDLE→(检查)→(下载)→READY→拉起系统安装器。 */
+private enum class UpdPhase { IDLE, CHECKING, DOWNLOADING, READY }
+
+/**
+ * 设置页"检查更新"：查询更新服务器 /api/version，发现新版本直接流式下载到
+ * 应用缓存（进度实时显示），完成后再次点击拉起系统包安装器。全部逻辑走
+ * UpdateChecker（core/update），UI 只做状态呈现——符合架构功能最小 UI 入口。
+ */
+@Composable
+private fun UpdateCheckRow() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var phase by remember { mutableStateOf(UpdPhase.IDLE) }
+    var status by remember {
+        mutableStateOf("当前 v" + UpdateChecker.installedVersionName(context))
+    }
+    var apkFile by remember { mutableStateOf<File?>(null) }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = phase == UpdPhase.IDLE || phase == UpdPhase.READY) {
+                when (phase) {
+                    UpdPhase.READY -> apkFile?.let { UpdateChecker.installApk(context, it) }
+                    UpdPhase.IDLE -> scope.launch {
+                        phase = UpdPhase.CHECKING
+                        status = "检查更新中…"
+                        val info = UpdateChecker.check(context)
+                        when {
+                            info == null -> {
+                                status = "检查失败：无法连接更新服务器"
+                                phase = UpdPhase.IDLE
+                            }
+                            info.versionCode <= UpdateChecker.installedVersionCode(context) -> {
+                                status = "已是最新版本（服务器 v${info.versionName}）"
+                                phase = UpdPhase.IDLE
+                            }
+                            else -> {
+                                status = "发现新版本 v${info.versionName}，下载中…"
+                                phase = UpdPhase.DOWNLOADING
+                                val f = UpdateChecker.downloadApk(context, info) { rec, tot ->
+                                    status = if (tot > 0) {
+                                        "下载中 ${rec * 100 / tot}%"
+                                    } else {
+                                        "下载中 ${rec / 1024 / 1024}MB"
+                                    }
+                                }
+                                if (f != null) {
+                                    apkFile = f
+                                    phase = UpdPhase.READY
+                                    status = "下载完成，点击安装 v${info.versionName}"
+                                } else {
+                                    status = "下载失败，点击重试"
+                                    phase = UpdPhase.IDLE
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            .padding(vertical = 10.dp),
+    ) {
+        Icon(
+            Icons.Default.SystemUpdateAlt,
+            contentDescription = null,
+            tint = TextPrimary.copy(alpha = 0.9f),
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("检查更新", color = TextPrimary, fontSize = 14.sp)
+            Text(status, color = TextSecondary, fontSize = 11.sp)
+        }
+        Text(
+            when (phase) {
+                UpdPhase.READY -> "安装 ›"
+                UpdPhase.DOWNLOADING, UpdPhase.CHECKING -> "…"
+                else -> "›"
+            },
+            color = TextSecondary,
+            fontSize = 12.sp,
+        )
     }
 }
 

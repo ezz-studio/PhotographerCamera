@@ -59,3 +59,6 @@ studio_session/
 vendor/
 _s0*.json
 *.apk
+
+# server upload token (secret - never commit)
+server/upload.token.local
