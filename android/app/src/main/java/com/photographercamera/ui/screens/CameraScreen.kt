@@ -236,7 +236,33 @@ fun CameraScreen(navController: NavController) {
         )
     }
     // 0.8.3 冷启动同步：把持久化的开关状态灌入 photon 引擎（并发录制 + 拍摄偏好）
-    LaunchedEffect(Unit) { pvm.setUseLivePhoto(liveOn) }
+    // 0.9.0 扩展：设置页接线开关的 sp → 引擎 DataStore 幂等迁移（旧安装升级对齐）
+    LaunchedEffect(Unit) {
+        pvm.setUseLivePhoto(liveOn)
+        val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+        pvm.setShutterSoundEnabled(sp.getBoolean("shutter_sound", true))
+        pvm.setVibrationEnabled(sp.getBoolean("capture_vibrate", true))
+        pvm.setVolumeKeyAction(
+            when (sp.getString("volume_key_function", "拍照") ?: "拍照") {
+                "变焦" -> com.photographercamera.photon.data.VolumeKeyAction.ZOOM
+                "无" -> com.photographercamera.photon.data.VolumeKeyAction.NONE
+                else -> com.photographercamera.photon.data.VolumeKeyAction.CAPTURE
+            }
+        )
+        pvm.setEyeFocusEnabled(sp.getBoolean("face_focus", false))
+        pvm.setEnableLogicalMultiCameraDiscovery(
+            sp.getBoolean("logical_multi_camera_discovery", false)
+        )
+        pvm.setLensIdBlacklist(sp.getString("lens_binding_blacklist", "") ?: "")
+        sp.getString("macro_camera_id", "auto")?.let { id ->
+            pvm.setPreferredMacroCameraId(id.takeIf { it != "auto" })
+        }
+        pvm.setDefaultFocalLength(sp.getFloat("default_focal_length", 0f))
+        pvm.setUseP010(sp.getBoolean("use_p010", false))
+        pvm.setUseP3ColorSpace(sp.getBoolean("use_p3_color_space", false))
+        pvm.setSaveLocation(sp.getBoolean("save_location", false))
+        pvm.setMirrorFrontCamera(sp.getBoolean("front_mirror", false))
+    }
 
     // total zoom across lenses (mirrors photon state for recomposition)
     var zoomState by remember { mutableFloatStateOf(1f) }
@@ -247,8 +273,8 @@ fun CameraScreen(navController: NavController) {
     // self-timer: 0 = off, else seconds
     var timerSec by remember { mutableIntStateOf(0) }
     var shotPending by remember { mutableStateOf(false) }
-    // 0.6.0 系统快门音（MediaActionSound 免存储权限，null=设备不支持静默跳过）
-    val shutterSound = remember { runCatching { android.media.MediaActionSound() }.getOrNull() }
+    // 0.9.0 快门音改引擎级（ShutterSoundPlayer + capture 请求 playShutterSound，
+    // 与上游一致；设置页开关走 pvm.setShutterSoundEnabled），UI 层 MediaActionSound 移除
     // 防重入：一次快门 = 一次拍摄。即便 UI 在短时间内触发两次 doCapture，也只拍一张。
     var capturing by remember { mutableStateOf(false) }
     var countdownSec by remember { mutableIntStateOf(0) }
@@ -265,28 +291,9 @@ fun CameraScreen(navController: NavController) {
             flashAnim.snapTo(0.8f)
             flashAnim.animateTo(0f, tween(durationMillis = 220, easing = LinearOutSlowInEasing))
         }
-        // 0.6.0 快门声音 / 拍摄震动（设置页开关，默认均开）。
-        val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
-        if (sp.getBoolean("shutter_sound", true)) {
-            shutterSound?.play(android.media.MediaActionSound.SHUTTER_CLICK)
-        }
-        if (sp.getBoolean("capture_vibrate", true)) {
-            try {
-                val vib = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    val vm = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE)
-                        as? android.os.VibratorManager
-                    vm?.defaultVibrator
-                } else {
-                    @Suppress("DEPRECATION")
-                    context.getSystemService(android.content.Context.VIBRATOR_SERVICE)
-                        as? android.os.Vibrator
-                }
-                vib?.vibrate(
-                    android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE),
-                )
-            } catch (_: Throwable) {
-            }
-        }
+        // 0.9.0 快门音 + 拍摄震动均由引擎级回调（onPlayShutterSound → ShutterSoundPlayer /
+        // vibrationHelper）播放，与上游一致；设置页开关走 pvm.setShutterSoundEnabled /
+        // setVibrationEnabled，UI 层重复反馈已移除。
     }
 
     // Live QuickControl adjustments (WB / Grain) applied on top of the chosen preset.

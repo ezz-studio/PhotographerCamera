@@ -30,7 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import com.photographercamera.core.photon.stack.PLog
+import com.photographercamera.photon.utils.PLog
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL

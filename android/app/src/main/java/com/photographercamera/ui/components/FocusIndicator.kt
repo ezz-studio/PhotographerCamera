@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.photographercamera.core.photon.camera.FocusPointSource
+import com.photographercamera.photon.camera.FocusPointSource
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 

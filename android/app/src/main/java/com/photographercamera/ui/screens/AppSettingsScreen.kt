@@ -6,12 +6,16 @@
  *   对焦与镜头：自动对焦 / 镜头选择 / 默认焦段 / 相机校正 / 镜头发现 / 镜头信息
  *               （上游 autofocus + lens_selection + default_focal_length +
  *                calibration + lens_discovery 对齐；不含虚拟镜头与景深）
- *   成像与色彩：色彩映射(P3 色域) / 色调映射 / 修复预览异常 / 修复拍摄异常 /
- *               P010 10位YUV / HLG10 HDR / HLG 兼容性（全部与上游同名同默认值）
+ *   成像与色彩：色彩映射(P3 色域) / 配置文件色调映射 / P010 10位YUV
+ *               （0.9.0 移除引擎无对应物的开关：tonemap sRGB、修复预览/拍摄异常、HLG×2）
  *   维护：检查更新 / 调试日志 / 恢复内置预设
  *   关于相机：写死成像参数清单 + 每项的管线参与状态（代码级验证结论）
  * 按指导手册不包含：AI 服务、界面样式、幻影、内容管理、数据维护、多重曝光、
  * 画面比例（固定 4:3）、工具箱、构图网格。
+ *
+ * 0.9.0 接线轮：全部开关直连 photon 引擎（pvm.setXxx 双写 sp + DataStore）；
+ * 镜头绑定改黑名单制（物理黑名单，旧白名单键 lens_binding_whitelist 废弃）；
+ * CameraEngine 参数删除（旧引擎退役）。
  */
 package com.photographercamera.ui.screens
 
@@ -40,11 +44,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.photographercamera.core.camera.CameraEngine
-import com.photographercamera.core.camera.LensRef
 import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.profile.ProfileLoader
+import com.photographercamera.photon.camera.CameraInfo
 import com.photographercamera.photon.camera.LensType
+import com.photographercamera.photon.data.VolumeKeyAction
 import com.photographercamera.photon.viewmodel.CameraViewModel
 import kotlinx.coroutines.launch
 
@@ -70,8 +74,7 @@ private fun focalLabel(f: Float) = if (f <= 0f) "不设置" else "${f.toInt()}mm
 fun AppSettingsScreen(
     onDismiss: () -> Unit,
     onDebugClick: () -> Unit,
-    engine: CameraEngine? = null,
-    // 0.8.3：photon 引擎镜头源（engine 为 null 时镜头列表/微距 ID 选项从此取）
+    // 0.9.0：所有开关直连 photon 引擎（CameraEngine 已退役，参数移除）
     photonVm: CameraViewModel? = null,
 ) {
     val context = LocalContext.current
@@ -91,60 +94,49 @@ fun AppSettingsScreen(
     var volumeKeyFn by remember { mutableStateOf(sp.getString("volume_key_function", "拍照") ?: "拍照") }
     var hdrDisplay by remember { mutableStateOf(sp.getBoolean("hdr_display", false)) }
     var saveLocation by remember { mutableStateOf(sp.getBoolean("save_location", false)) }
+    // 0.9.0：前置镜像（上游 mirror_front_camera 自拍镜像；引擎级消费）
+    var frontMirror by remember { mutableStateOf(sp.getBoolean("front_mirror", false)) }
 
     // ---- 对焦与镜头组状态 ----------------------------------------------------
     var lensDiscovery by remember { mutableStateOf(sp.getBoolean("lens_discovery", false)) }
-    // 镜头发现扩展（上游 lens_discovery 组）：逻辑多摄探测 / 白名单 / 微距镜头ID
+    // 镜头发现扩展（上游 lens_discovery 组）：逻辑多摄探测 / 黑名单 / 微距镜头ID
     var logicalProbe by remember { mutableStateOf(sp.getBoolean("logical_multi_camera_discovery", false)) }
-    var lensWhitelist by remember { mutableStateOf(sp.getString("lens_binding_whitelist", "") ?: "") }
+    // 0.9.0：镜头绑定改黑名单制（引擎 setLensIdBlacklist 同语义；旧白名单键废弃）
+    var lensBlacklist by remember { mutableStateOf(sp.getString("lens_binding_blacklist", "") ?: "") }
     var macroLensId by remember { mutableStateOf(sp.getString("macro_camera_id", "auto") ?: "auto") }
-    var lenses by remember(lensDiscovery, logicalProbe, lensWhitelist, macroLensId) {
+    // 0.9.0：镜头源 = photon 引擎（订阅 state，镜头发现/黑名单变化即时反映到列表）
+    val availableCameras = photonVm?.state?.collectAsState()?.value?.availableCameras ?: emptyList()
+    val minFocusDistanceDiopters = photonVm?.state?.collectAsState()?.value?.minimumFocusDistance ?: 0f
+    val blacklistIds = remember(lensBlacklist) {
+        lensBlacklist.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+    var lenses by remember(lensDiscovery, availableCameras, blacklistIds) {
         mutableStateOf(
-            // 0.8.3：engine 为空时从 photon VM 的镜头枚举构造（修复"引擎未就绪"，
-            // 同时让微距镜头 ID 选项可弹出）
-            engine?.listLenses(
-                lensDiscovery,
-                logicalProbe = logicalProbe,
-                whitelist = lensWhitelist.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
-                macroId = macroLensId.takeIf { it != "auto" },
-            ) ?: photonVm?.state?.value?.availableCameras?.mapNotNull { cam ->
-                val eq = cam.focalLength35mmEquivalent
-                if (cam.focalLength <= 0f && eq <= 0f) return@mapNotNull null
-                LensRef(
-                    id = cam.cameraId,
-                    focal = cam.focalLength.takeIf { it > 0f } ?: (eq / 43.27f),
-                    maxDigitalZoom = cam.maxZoom.takeIf { it > 0f } ?: 1f,
-                    eqFocal = eq,
-                    isMain = cam.lensType == LensType.BACK_MAIN,
-                    isMacro = cam.lensType == LensType.BACK_MACRO,
-                )
-            } ?: emptyList()
+            // 0.9.0：直接持有 photon CameraInfo（LensRef 旧桥已随 CameraEngine 退役）
+            availableCameras
+                .filter { lensDiscovery || it.lensType != LensType.FRONT }
+                .filter { it.cameraId !in blacklistIds }
+                .filter { it.focalLength > 0f || it.focalLength35mmEquivalent > 0f }
         )
     }
-    var afEnabled by remember { mutableStateOf(engine?.manualFocusOn?.not() ?: true) }
-    var focusDiopters by remember { mutableStateOf(engine?.manualFocusDiopters ?: 0f) }
-    val maxDiopters = remember(lensDiscovery) { engine?.minFocusDistanceDiopters(null) ?: 0f }
-    var selectedLensId by remember { mutableStateOf(engine?.selectedLensId) }
+    var afEnabled by remember { mutableStateOf(photonVm?.state?.value?.isAutoFocus ?: true) }
+    var focusDiopters by remember { mutableStateOf(photonVm?.state?.value?.focusDistance ?: 0f) }
+    val maxDiopters = minFocusDistanceDiopters
+    var selectedLensId by remember { mutableStateOf(photonVm?.state?.value?.currentCameraId) }
     // 默认焦段（上游 default_focal_length，0 = 不设置；影响启动变焦）
     var defaultFocal by remember { mutableStateOf(sp.getFloat("default_focal_length", 0f)) }
-    // 人脸对焦（camera2 STATISTICS_FACE_DETECT_MODE + 最大人脸自动对焦）
+    // 人脸对焦（上游 eye focus 语义：EyeFocus 眼对焦，预览链逐帧检测）
     var faceFocus by remember { mutableStateOf(sp.getBoolean("face_focus", false)) }
     // 照片方向校正（上游 camera_orientation_offsets：按镜头 ID 存 0/90/180/270）
-    val orientationLensId = selectedLensId ?: engine?.currentCameraId ?: "0"
+    val orientationLensId = selectedLensId ?: "0"
     var orientationDeg by remember(orientationLensId) {
-        mutableStateOf(engine?.orientationOffsetFor(orientationLensId) ?: 0)
+        mutableStateOf(photonVm?.getOrientationOffset(orientationLensId) ?: 0)
     }
 
-    // ---- 成像与色彩组状态（与上游同名 key 同默认值）---------------------------
+    // ---- 成像与色彩组状态（与上游同名 key 同默认值；0.9.0 移除引擎无对应物的开关）--
     var useP3 by remember { mutableStateOf(sp.getBoolean("use_p3_color_space", false)) }
-    // 硬件色调映射模式：srgb / default（上游 TONEMAP_MODE，系统默认 vs sRGB 曲线）
-    var tonemapMode by remember { mutableStateOf(sp.getString("tonemap_mode", "default") ?: "default") }
     var useProfileToneMap by remember { mutableStateOf(sp.getBoolean("use_profile_tone_map", true)) }
-    var fixPreview by remember { mutableStateOf(sp.getBoolean("fix_preview_anomaly", false)) }
-    var fixCapture by remember { mutableStateOf(sp.getBoolean("fix_capture_anomaly", false)) }
     var useP010 by remember { mutableStateOf(sp.getBoolean("use_p010", false)) }
-    var useHlg10 by remember { mutableStateOf(sp.getBoolean("use_hlg10", false)) }
-    var hlgCompat by remember { mutableStateOf(sp.getBoolean("hlg_compatibility", false)) }
 
     // ---- 维护组状态 ----------------------------------------------------------
     var restoreMsg by remember { mutableStateOf<String?>(null) }
@@ -156,6 +148,7 @@ fun AppSettingsScreen(
         val granted = grants.values.any { it }
         saveLocation = granted
         sp.edit().putBoolean("save_location", granted).apply()
+        photonVm?.setSaveLocation(granted)
     }
 
     Column(
@@ -220,17 +213,26 @@ fun AppSettingsScreen(
             }
 
             SettingsPage.CAPTURE -> SettingsCard {
-                SwitchRow("快门声音", "拍摄时播放系统快门音", shutterSound) {
+                SwitchRow("快门声音", "拍摄时播放快门音（引擎级，与上游一致）", shutterSound) {
                     shutterSound = it
                     sp.edit().putBoolean("shutter_sound", it).apply()
+                    photonVm?.setShutterSoundEnabled(it)
                 }
                 SwitchRow("拍摄震动", "拍摄完成时短震动反馈", captureVibrate) {
                     captureVibrate = it
                     sp.edit().putBoolean("capture_vibrate", it).apply()
+                    photonVm?.setVibrationEnabled(it)
                 }
                 ChoiceRow("音量键功能", VOLUME_KEY_OPTIONS, volumeKeyFn) {
                     volumeKeyFn = it
                     sp.edit().putString("volume_key_function", it).apply()
+                    photonVm?.setVolumeKeyAction(
+                        when (it) {
+                            "变焦" -> VolumeKeyAction.ZOOM
+                            "无" -> VolumeKeyAction.NONE
+                            else -> VolumeKeyAction.CAPTURE
+                        }
+                    )
                 }
                     SwitchRow(
                         "HDR 显示",
@@ -239,6 +241,11 @@ fun AppSettingsScreen(
                     ) {
                     hdrDisplay = it
                     sp.edit().putBoolean("hdr_display", it).apply()
+                }
+                SwitchRow("前置镜像", "自拍镜像：前置镜头拍摄结果按镜像保存（与上游一致）", frontMirror) {
+                    frontMirror = it
+                    sp.edit().putBoolean("front_mirror", it).apply()
+                    photonVm?.setMirrorFrontCamera(it)
                 }
                 SwitchRow("保存地址位置", "拍摄时把 GPS 坐标写入照片 EXIF（需位置权限）", saveLocation) {
                     if (it) {
@@ -251,6 +258,7 @@ fun AppSettingsScreen(
                     } else {
                         saveLocation = false
                         sp.edit().putBoolean("save_location", false).apply()
+                        photonVm?.setSaveLocation(false)
                     }
                 }
             }
@@ -265,11 +273,12 @@ fun AppSettingsScreen(
                     ) {
                         afEnabled = it
                         if (it) {
-                            engine?.setManualFocus(false)
+                            photonVm?.setAutoFocus(true)
                         } else if (maxDiopters <= 0f) {
                             afEnabled = true
                         } else {
-                            engine?.setManualFocus(true, focusDiopters)
+                            photonVm?.setAutoFocus(false)
+                            photonVm?.setFocusDistance(focusDiopters)
                         }
                     }
                     if (!afEnabled && maxDiopters > 0f) {
@@ -282,13 +291,13 @@ fun AppSettingsScreen(
                             value = focusDiopters,
                             onValueChange = {
                                 focusDiopters = it
-                                engine?.setManualFocus(true, it)
+                                photonVm?.setFocusDistance(it)
                             },
                             valueRange = 0f..maxDiopters,
                         )
                     }
                 }
-                // 人脸对焦（上游 eye focus 组）：camera2 人脸检测 + 最大人脸自动对焦
+                // 人脸对焦（上游 eye focus 组语义：EyeFocus 眼对焦，预览链逐帧检测）
                 SettingsCard {
                     SwitchRow(
                         "人脸对焦",
@@ -297,20 +306,24 @@ fun AppSettingsScreen(
                     ) {
                         faceFocus = it
                         sp.edit().putBoolean("face_focus", it).apply()
-                        engine?.setFaceFocusEnabled(it)
+                        photonVm?.setEyeFocusEnabled(it)
                         DebugLog.log("SETTINGS", "face focus -> $it")
                     }
                 }
                 // 镜头选择（上游 lens_selection）
                 SettingsCard {
                     if (lenses.isEmpty()) {
-                        InfoRow("镜头", if (engine == null && photonVm == null) "引擎未就绪" else "未发现镜头")
+                        InfoRow("镜头", if (photonVm == null) "引擎未就绪" else "未发现镜头")
                     } else {
                         lenses.forEach { lens ->
+                            val focal = lens.focalLength.takeIf { it > 0f }
+                                ?: (lens.focalLength35mmEquivalent / 43.27f)
                             val desc = buildString {
-                                append("%.1fmm".format(lens.focal))
-                                if (lens.eqFocal > 0f) append(" · 等效${lens.eqFocal.toInt()}mm")
-                                append(" · ${lens.id}")
+                                append("%.1fmm".format(focal))
+                                if (lens.focalLength35mmEquivalent > 0f) {
+                                    append(" · 等效${lens.focalLength35mmEquivalent.toInt()}mm")
+                                }
+                                append(" · ${lens.cameraId}")
                             }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -318,13 +331,13 @@ fun AppSettingsScreen(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
-                                        selectedLensId = lens.id
-                                        engine?.selectLens(lens.id)
+                                        selectedLensId = lens.cameraId
+                                        photonVm?.switchToLens(lens.cameraId)
                                     }
                                     .padding(vertical = 10.dp),
                             ) {
                                 Text(desc, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                                if (selectedLensId == lens.id) {
+                                if (selectedLensId == lens.cameraId) {
                                     Text("使用中", color = Accent, fontSize = 12.sp)
                                 }
                             }
@@ -337,7 +350,10 @@ fun AppSettingsScreen(
                                 modifier = Modifier
                                     .clickable {
                                         selectedLensId = null
-                                        engine?.selectLens(null)
+                                        // 0.9.0：回切主摄（photon 引擎无"未选择"态，默认即主摄）
+                                        availableCameras
+                                            .firstOrNull { it.lensType == LensType.BACK_MAIN }
+                                            ?.let { photonVm?.switchToLens(it.cameraId) }
                                     }
                                     .padding(vertical = 8.dp),
                             )
@@ -354,7 +370,7 @@ fun AppSettingsScreen(
                         val v = FOCAL_OPTIONS.firstOrNull { focalLabel(it) == label } ?: 0f
                         defaultFocal = v
                         sp.edit().putFloat("default_focal_length", v).apply()
-                        engine?.applyDefaultFocal(v)
+                        photonVm?.setDefaultFocalLength(v)
                     }
                 }
                 // 照片方向校正（上游 camera_orientation_offsets）：按镜头存 0/90/180/270
@@ -366,7 +382,7 @@ fun AppSettingsScreen(
                     ) { label ->
                         val deg = label.removeSuffix("°").toIntOrNull() ?: 0
                         orientationDeg = deg
-                        engine?.setOrientationOffset(orientationLensId, deg)
+                        photonVm?.setOrientationOffset(orientationLensId, deg)
                     }
                     Text(
                         "镜头 $orientationLensId · 成片统一加转该角度",
@@ -374,7 +390,7 @@ fun AppSettingsScreen(
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
-                // 镜头发现（上游 lens_discovery：逻辑多摄探测 + 白名单 + 微距镜头ID）
+                // 镜头发现（上游 lens_discovery：逻辑多摄探测 + 黑名单 + 微距镜头ID）
                 SettingsCard {
                     SwitchRow("镜头发现", "列出设备的全部摄像头（含前置）", lensDiscovery) {
                         lensDiscovery = it
@@ -387,14 +403,16 @@ fun AppSettingsScreen(
                     ) {
                         logicalProbe = it
                         sp.edit().putBoolean("logical_multi_camera_discovery", it).apply()
+                        photonVm?.setEnableLogicalMultiCameraDiscovery(it)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
-                        Text("物理白名单", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text("物理黑名单", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
                         androidx.compose.material3.OutlinedTextField(
-                            value = lensWhitelist,
+                            value = lensBlacklist,
                             onValueChange = { s ->
-                                lensWhitelist = s
-                                sp.edit().putString("lens_binding_whitelist", s).apply()
+                                lensBlacklist = s
+                                sp.edit().putString("lens_binding_blacklist", s).apply()
+                                photonVm?.setLensIdBlacklist(s)
                             },
                             placeholder = { Text("如 0/2,0/3", color = TextSecondary, fontSize = 12.sp) },
                             singleLine = true,
@@ -405,12 +423,12 @@ fun AppSettingsScreen(
                         )
                     }
                     Text(
-                        "强制启用类似 0/2、0/3 的逻辑/物理绑定。即使自动探测关闭也会生效。",
+                        "0.9.0 改黑名单制（与引擎一致）：从镜头列表中排除这些 ID，留空不排除。",
                         color = TextSecondary, fontSize = 11.sp,
                     )
                     // 微距镜头 ID（上游 macro_camera_id）
                     val idOptions = mutableListOf("自动识别")
-                    lenses.forEach { idOptions.add(it.id) }
+                    lenses.forEach { idOptions.add(it.cameraId) }
                     ChoiceRow(
                         "微距镜头 ID",
                         idOptions,
@@ -419,6 +437,7 @@ fun AppSettingsScreen(
                         val v = if (label == "自动识别") "auto" else label
                         macroLensId = v
                         sp.edit().putString("macro_camera_id", v).apply()
+                        photonVm?.setPreferredMacroCameraId(v.takeIf { it != "auto" })
                     }
                     Text(
                         "选择一个后置相机 ID 强制作为微距镜头。自动识别会保留当前相机发现逻辑。",
@@ -428,55 +447,25 @@ fun AppSettingsScreen(
             }
 
             SettingsPage.IMAGING -> {
-                // 色彩映射（上游 use_p3_color_space）
+                // 色彩映射（上游 use_p3_color_space；0.9.0 接引擎 DataStore）
                 SettingsCard {
                     SwitchRow("P3 色域", "在支持的设备上启用 Display P3 输出。默认关闭。", useP3) {
                         useP3 = it
                         sp.edit().putBoolean("use_p3_color_space", it).apply()
+                        photonVm?.setUseP3ColorSpace(it)
                         DebugLog.log("SETTINGS", "p3 color space -> $it")
                     }
                 }
-                // 硬件色调映射（上游 TONEMAP_MODE：系统默认 vs sRGB 对比度/伽马曲线）
-                SettingsCard {
-                    ChoiceRow(
-                        "色调映射",
-                        listOf("系统默认", "sRGB"),
-                        if (tonemapMode == "srgb") "sRGB" else "系统默认",
-                    ) { label ->
-                        val v = if (label == "sRGB") "srgb" else "default"
-                        tonemapMode = v
-                        sp.edit().putString("tonemap_mode", v).apply()
-                        engine?.setSrgbToneMap(v == "srgb")
-                        DebugLog.log("SETTINGS", "hardware tonemap -> $v")
-                    }
-                    Text(
-                        "调整硬件色调映射（对比度、伽马）模式。",
-                        color = TextSecondary, fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                // 色调映射（上游 use_profile_tone_map，默认开）
+                // 配置文件色调映射（上游 use_profile_tone_map，默认开；0.9.0 接引擎 RAW 显影曲线）
                 SettingsCard {
                     SwitchRow("配置文件色调映射", "RAW 显影使用配置文件色调映射曲线", useProfileToneMap) {
                         useProfileToneMap = it
                         sp.edit().putBoolean("use_profile_tone_map", it).apply()
+                        photonVm?.setUseProfileToneMap(it)
                         DebugLog.log("SETTINGS", "profile tone map -> $it")
                     }
                 }
-                // 兼容性修复开关（全部默认关，与上游一致）
-                SettingsCard {
-                    SwitchRow("修复预览异常", "个别设备预览渲染异常时开启", fixPreview) {
-                        fixPreview = it
-                        sp.edit().putBoolean("fix_preview_anomaly", it).apply()
-                        DebugLog.log("SETTINGS", "fix preview -> $it")
-                    }
-                    SwitchRow("修复拍摄异常", "个别设备成片异常时开启", fixCapture) {
-                        fixCapture = it
-                        sp.edit().putBoolean("fix_capture_anomaly", it).apply()
-                        DebugLog.log("SETTINGS", "fix capture -> $it")
-                    }
-                }
-                // HDR / 高精度输出（上游同款）
+                // P010 10位 YUV（上游同款；0.9.0 接引擎）
                 SettingsCard {
                     SwitchRow(
                         "P010 (10位 YUV)",
@@ -485,19 +474,12 @@ fun AppSettingsScreen(
                     ) {
                         useP010 = it
                         sp.edit().putBoolean("use_p010", it).apply()
+                        photonVm?.setUseP010(it)
                         DebugLog.log("SETTINGS", "p010 -> $it")
                     }
-                    SwitchRow("HLG10 HDR", "预览与成片使用 HLG10 高动态范围", useHlg10) {
-                        useHlg10 = it
-                        sp.edit().putBoolean("use_hlg10", it).apply()
-                        DebugLog.log("SETTINGS", "hlg10 -> $it")
-                    }
-                    SwitchRow("HLG 兼容性", "HLG 输出兼容性回退（个别设备绿屏时开启）", hlgCompat) {
-                        hlgCompat = it
-                        sp.edit().putBoolean("hlg_compatibility", it).apply()
-                        DebugLog.log("SETTINGS", "hlg compat -> $it")
-                    }
                 }
+                // 0.9.0 移除（引擎无对应物）：tonemap_mode / fix_preview_anomaly /
+                // fix_capture_anomaly / use_hlg10 / hlg_compatibility（旧引擎时代遗留）
             }
 
             SettingsPage.MAINTENANCE -> SettingsCard {
@@ -549,7 +531,7 @@ fun AppSettingsScreen(
                     AboutCard("拍摄后自动保存", "已开启（写死）", OkGreen, "已参与成像管线（saveAndNotify）")
                     AboutCard("RAW MAX 锐化", "默认 0.5 · 亮度降噪 1 · 色度降噪 1", OkGreen, "已参与成像管线（RawDemosaicProcessor）")
                     AboutCard("JPEG 4:4:4 导出", "目标启用", Color(0xFFB9A15A), "未参与：待 libjpeg-turbo 4:4:4 编码集成")
-                    AboutCard("降噪 / 锐化", "高质量", Color(0xFFB9A15A), "HAL 层默认档；引擎切换后由移植管线接管")
+                    AboutCard("降噪 / 锐化", "高质量", OkGreen, "已参与成像管线（photon NRLevel / EdgeLevel）")
                     AboutCard("RAW 渲染引擎", "Adobe 曲线 · Camera2 降噪模型", OkGreen, "已参与成像管线（RawRenderingEngine.AdobeCurve）")
                 }
                 Spacer(Modifier.height(12.dp))

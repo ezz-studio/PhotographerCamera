@@ -385,6 +385,17 @@ private data class ActivePresetMatchState(
 
 private data class SettingValue<T>(val value: T)
 
+/**
+ * 用户指令：RAW 关闭时默认启用 JPEG max（YUV 多帧降噪），RAW 开启时启用 RAW max（HDR+）。
+ * Live Photo 与多帧降噪管线互斥（上游约束），显式开启 Live Photo 时 JPEG max 让位，
+ * 避免上游"JPEG max 生效即自动关闭 Live Photo"的逻辑被默认值误触发。
+ */
+internal fun resolveJpgMaxActive(
+    useRaw: Boolean,
+    useMultipleExposure: Boolean,
+    useLivePhoto: Boolean,
+): Boolean = !useRaw && !useMultipleExposure && !useLivePhoto
+
 internal fun resolveMultiFrameOutputScale(
     useJpgMax: Boolean,
     useRawMax: Boolean,
@@ -868,7 +879,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         // 专业模式与 HDR+ 是同一个拍摄能力，不再保留可独立关闭的状态。
         desiredUseRawMax = desiredUseRaw
-        val activeUseJpgMax = desiredUseJpgMax && !desiredUseRaw
+        // RAW 关闭时默认启用 JPEG max（用户指令），Live Photo 显式开启时让位。
+        val activeUseJpgMax = resolveJpgMaxActive(
+            useRaw = desiredUseRaw,
+            useMultipleExposure = desiredUseMultipleExposure,
+            useLivePhoto = prefs.useLivePhoto,
+        )
         if (activeUseJpgMax && prefs.useLivePhoto) {
             cameraController.setUseLivePhoto(false)
             userPreferencesRepository.saveUseLivePhoto(false)
@@ -2032,8 +2048,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 同步 RAW 设置到相机控制器
                 val multipleExposureEnabled = it.useMultipleExposure
                 val effectiveUseRaw = it.useRaw && !multipleExposureEnabled
-                val effectiveUseJpgMax =
-                    it.useJpgMax && !effectiveUseRaw && !multipleExposureEnabled
+                // RAW 关闭时默认启用 JPEG max（用户指令），Live Photo 显式开启时让位。
+                val effectiveUseJpgMax = resolveJpgMaxActive(
+                    useRaw = effectiveUseRaw,
+                    useMultipleExposure = multipleExposureEnabled,
+                    useLivePhoto = it.useLivePhoto,
+                )
                 val effectiveUseRawMax =
                     it.useRawMax && effectiveUseRaw && !multipleExposureEnabled
                 val effectiveMultiFrameOutputScale = resolveMultiFrameOutputScale(
@@ -2265,8 +2285,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setUseMultipleExposure(prefs.useMultipleExposure)
                 cameraController.setMultiFrameOutputScale(
                     resolveMultiFrameOutputScale(
-                        useJpgMax = prefs.useJpgMax && !prefs.useRaw &&
-                            !prefs.useMultipleExposure,
+                        useJpgMax = resolveJpgMaxActive(
+                            useRaw = prefs.useRaw,
+                            useMultipleExposure = prefs.useMultipleExposure,
+                            useLivePhoto = prefs.useLivePhoto,
+                        ),
                         useRawMax = prefs.useRawMax && prefs.useRaw &&
                             !prefs.useMultipleExposure,
                         rawMaxOutputScale = prefs.rawMaxOutputScale,
@@ -2281,7 +2304,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     prefs.hdrPlusBracketExposureEnabled
                 )
                 cameraController.setUseLivePhoto(
-                    prefs.useLivePhoto && !prefs.useRaw && !prefs.useJpgMax &&
+                    prefs.useLivePhoto && !prefs.useRaw &&
                         prefs.captureMode == CaptureMode.PHOTO
                 )
                 // 应用保存的虚拟光圈
@@ -4122,6 +4145,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** 设置页接线（0.9.0）：配置文件色调映射开关（RAW 显影曲线选择）。 */
+    fun setUseProfileToneMap(enabled: Boolean) {
+        viewModelScope.launch {
+            applyCameraFeatureUpdate(
+                CameraFeatureUpdate(
+                    rawProfileToneMapMode = SettingValue(
+                        if (enabled) RawProfileToneMapMode.Profile else RawProfileToneMapMode.Default
+                    )
+                )
+            )
+        }
+    }
+
+    /** 设置页接线（0.9.0）：按镜头保存成片方向校正（0/90/180/270）。 */
+    fun setOrientationOffset(cameraId: String, offset: Int) {
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.saveCameraOrientationOffset(cameraId, offset) }
+        }
+    }
+
+    fun getOrientationOffset(cameraId: String): Int =
+        userPreferences.value.cameraOrientationOffsets[cameraId] ?: 0
+
     fun refreshLocationOnResume() {
         if (userPreferences.value.saveLocation) {
             locationManager.requestCurrentLocation()
@@ -4542,8 +4588,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val prefs = userPreferencesRepository.userPreferences.first()
             cameraController.setMultiFrameOutputScale(
                 resolveMultiFrameOutputScale(
-                    useJpgMax = prefs.useJpgMax && !prefs.useRaw &&
-                        !prefs.useMultipleExposure,
+                    useJpgMax = resolveJpgMaxActive(
+                        useRaw = prefs.useRaw,
+                        useMultipleExposure = prefs.useMultipleExposure,
+                        useLivePhoto = prefs.useLivePhoto,
+                    ),
                     useRawMax = prefs.useRawMax && prefs.useRaw &&
                         !prefs.useMultipleExposure,
                     rawMaxOutputScale = normalizedScale,
