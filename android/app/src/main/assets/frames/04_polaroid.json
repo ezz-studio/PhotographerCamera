@@ -1,0 +1,26 @@
+{
+    "id": "polaroid",
+    "name": {
+        "en": "Polaroid",
+        "zh": "拍立得"
+    },
+    "version": 1,
+    "editable": true,
+    "layout": {
+        "position": "BORDER",
+        "height": 120,
+        "borderWidth": 24,
+        "backgroundColor": "#FFFEF8",
+        "padding": 24
+    },
+    "elements": [
+        {
+            "type": "text",
+            "textType": "DATE",
+            "alignment": "CENTER",
+            "fontSize": 14,
+            "color": "#666666",
+            "format": "yyyy.MM.dd HH:mm"
+        }
+    ]
+}

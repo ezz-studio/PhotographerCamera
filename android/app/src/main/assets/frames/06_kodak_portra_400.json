@@ -1,0 +1,13 @@
+{
+    "id": "portra_400",
+    "name": {
+        "en": "PORTRA 400",
+        "zh": "炮塔400"
+    },
+    "version": 1,
+    "layout": {
+        "position": "IMAGE",
+        "imageResName": "frame_portra_400"
+    },
+    "elements": []
+}

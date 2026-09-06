@@ -125,6 +125,9 @@ object GalleryManager {
     private const val INTERNAL_HEIC_QUALITY = 100
     private const val HDR_FILE = "original_hdr.bin"
     private const val VIDEO_FILE = "video.mp4"
+    // Max wait for the Live Photo video callback before saving the still photo
+    // without motion video (recorder buffer = 1.5s pre + 1.5s post + 500ms slack)
+    private const val LIVE_PHOTO_VIDEO_TIMEOUT_MS = 8_000L
     private const val DNG_FILE = "original.dng"
     private const val AI_DENOISE_FILE = "ai_denoise.jpg"
     private const val THUMBNAIL_FILE = "thumbnail.jpg"
@@ -1933,7 +1936,16 @@ object GalleryManager {
     ) {
         val photoDir = getPhotoDir(context, photoId, true)
         val videoFile = File(photoDir, VIDEO_FILE)
-        val livePhotoResult = livePhotoVideoDeferred?.await()
+        // Defensive timeout: the deferred is completed by the Live Photo recorder
+        // callback. If the recorder never responds (encoder failure, missing
+        // samples, etc.), awaiting forever would leak the captured Image and
+        // permanently stall isCapturing — blocking ALL subsequent captures.
+        val livePhotoResult = livePhotoVideoDeferred?.let { deferred ->
+            withTimeoutOrNull(LIVE_PHOTO_VIDEO_TIMEOUT_MS) { deferred.await() } ?: run {
+                PLog.e(TAG, "Live Photo video not available within ${LIVE_PHOTO_VIDEO_TIMEOUT_MS}ms, continuing without video")
+                null
+            }
+        }
         livePhotoResult?.first?.let { cacheVideoFile ->
             if (cacheVideoFile.exists()) {
                 try {

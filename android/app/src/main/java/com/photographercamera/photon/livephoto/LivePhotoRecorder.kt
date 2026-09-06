@@ -361,6 +361,7 @@ class LivePhotoRecorder(
                 val currentAudioSamples = circularAudioRecorder.snapshot()
                 if (currentVideoSamples.isEmpty()) {
                     PLog.e(TAG, "No video samples in buffer")
+                    onCaptured(File("error"), 0L) // Notify failure to prevent hang: callers await this callback to close the captured image
                     isCapturing = false
                     return@launch
                 }

@@ -612,6 +612,7 @@ fun CameraScreen(navController: NavController) {
                 },
                 onLongPress = { x, y, w, h -> pvm.lockFocusOnPoint(x, y, w, h) },
                 onGLSurfaceViewReady = { pvm.glSurfaceView = it },
+                livePhotoRecorder = pvm.livePhotoRecorder,
                 isAutoFocus = state.isAutoFocus,
                 modifier = Modifier.fillMaxSize(),
             )
