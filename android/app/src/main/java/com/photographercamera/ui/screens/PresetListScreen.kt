@@ -1,5 +1,7 @@
 package com.photographercamera.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,12 +17,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -55,6 +59,7 @@ import com.photographercamera.ui.theme.SurfaceDark
 import com.photographercamera.ui.theme.TextPrimary
 import com.photographercamera.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
@@ -75,9 +80,64 @@ fun PresetListScreen(
     val context = LocalContext.current
     val profiles = remember { mutableStateListOf<String>() }
     var selected by remember { mutableStateOf("") }
-    // edit mode: tap an imported preset to delete it (bundled ones protected)
+    // edit mode: tap a preset to delete it — ALL presets deletable (bundled ones
+    // are hidden via the persisted deleted_bundled_presets set)
     var editing by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // SAF import of a Studio-generated profile JSON, then an optional icon
+    // image — both land in the app-private profiles dir (icon as <id>.<ext>).
+    var pendingIconFor by remember { mutableStateOf<String?>(null) }
+    val iconLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { iconUri ->
+        val id = pendingIconFor
+        pendingIconFor = null
+        if (iconUri != null && id != null) {
+            scope.launch(Dispatchers.IO) {
+                val ok = ProfileLoader.importIcon(context, iconUri, id)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    if (ok) {
+                        // bump list so the item recomposes and reloads its icon
+                        val profiles2 = ProfileLoader.listProfiles()
+                        profiles.clear(); profiles.addAll(profiles2)
+                        android.widget.Toast.makeText(
+                            context, "图标已设置", android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            runCatching { ProfileLoader.import(context, uri) }
+                .onSuccess { id ->
+                    val profiles2 = ProfileLoader.listProfiles()
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        profiles.clear(); profiles.addAll(profiles2)
+                        android.widget.Toast.makeText(
+                            context, "已导入「$id」", android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        // 第二步：立即让用户选一张同款风格图作为预设图标（可取消）
+                        pendingIconFor = id
+                        iconLauncher.launch("image/*")
+                    }
+                }
+                .onFailure { e ->
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            context, "导入失败：${e.message ?: "文件格式无效"}",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+        }
+    }
 
     LaunchedEffect(Unit) {
         runBlocking {
@@ -98,8 +158,7 @@ fun PresetListScreen(
             ?: ""
     }
 
-    val entries: List<Triple<String, String, String>> = if (profiles.isNotEmpty()) {
-        profiles.map { id ->
+    val entries: List<Triple<String, String, String>> = if (profiles.isNotEmpty()) {        profiles.map { id ->
             val p = ProfileLoader.getProfile(id)
             // display.name / display.intro come from Studio ("滤镜名称/简介");
             // fall back to the file name, which IS the preset identity.
@@ -163,18 +222,16 @@ fun PresetListScreen(
             ) {
                 items(entries, key = { it.first }) { (id, title, subtitle) ->
                     val isSelected = id == selected
-                    val bundled = remember(id) { ProfileLoader.isBundled(id, context) }
                     PresetItem(
                         id = id,
                         title = title,
                         subtitle = subtitle,
                         selected = isSelected,
                         editing = editing,
-                        deletable = !bundled,
+                        deletable = true,
                         onClick = {
                             if (editing) {
-                                // edit mode: tap selects for deletion (bundled protected)
-                                if (!bundled) deleteTarget = id
+                                deleteTarget = id
                             } else {
                                 selected = id
                                 navController.previousBackStackEntry
@@ -185,16 +242,44 @@ fun PresetListScreen(
                         },
                     )
                 }
+                if (editing) {
+                    // 导入入口放在列表末尾（跟随滚动，不遮挡任何选项）：
+                    // 第一步选配置 JSON，第二步可选导入一张图标图。
+                    item(key = "import_entry") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(AccentOrange.copy(alpha = 0.15f))
+                                .border(1.dp, AccentOrange, RoundedCornerShape(14.dp))
+                                .clickable { importLauncher.launch("*/*") }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.AddAPhoto,
+                                contentDescription = null,
+                                tint = AccentOrange,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                "导入配置文件",
+                                color = AccentOrange,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                }
             }
 
             if (editing) {
                 Text(
-                    "点击已导入的滤镜可删除 · 内置滤镜不可删除",
+                    "点击滤镜可删除 · 导入含配置与图标两步",
                     color = TextSecondary,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(bottom = 6.dp),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
             Text(

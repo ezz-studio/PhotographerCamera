@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#111111</color>
+<color name="widget_text_primary_light">#1E293B</color>
+<color name="widget_text_secondary_light">#64748B</color>
+<color name="widget_text_primary">@color/widget_text_primary_light</color>
+<color name="widget_accent">#FF6B35</color>
+<color name="widget_text_secondary">@color/widget_text_secondary_light</color>
+<color name="widget_text_secondary_dark">#80FFFFFF</color>
+<color name="widget_text_primary_dark">#FFFFFF</color>
+<color name="widget_recent_accent">#34B0F1</color>
+<color name="widget_background">@color/widget_background_light</color>
+<color name="widget_button_secondary">@color/widget_button_secondary_light</color>
+<color name="widget_button_capture">@color/widget_button_capture_light</color>
+<color name="widget_button_secondary_light">#EDF2F7</color>
+<color name="widget_background_light">#F8FAFC</color>
+<color name="widget_button_capture_light">#E2E8F0</color>
 </resources>

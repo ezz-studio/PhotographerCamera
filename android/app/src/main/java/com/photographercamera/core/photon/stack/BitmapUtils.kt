@@ -5,6 +5,8 @@
  */
 package com.photographercamera.core.photon.stack
 
+import com.photographercamera.core.photon.camera.AspectRatio
+
 import android.graphics.*
 import android.util.Log
 import java.io.ByteArrayOutputStream

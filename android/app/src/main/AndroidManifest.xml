@@ -34,6 +34,10 @@
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
 
+    <!-- heifwriter (photon 引擎拉入) 要求 minSdk 28，本项目 minSdk 26；
+         HEIF 编解码仅在新设备运行，旧设备运行时不会触及，override 安全。 -->
+    <uses-sdk tools:overrideLibrary="androidx.heifwriter" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

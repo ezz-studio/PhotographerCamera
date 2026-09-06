@@ -26,4 +26,7 @@ class RawFrame(
     val rotDeg: Int,
     val calib: RawCalibration,
     val asShotGains: FloatArray? = null,
+    /** 0.7.2: 全量 DNG 存档路径（DngCreator+TotalCaptureResult 直出）。
+     *  非空时成片开发走移植的 PhotonCamera RawDemosaicProcessor 管线。 */
+    val dngPath: String? = null,
 )

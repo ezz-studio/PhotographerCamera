@@ -36,6 +36,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
@@ -46,6 +47,9 @@ import android.util.Size
 import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.Camera
@@ -75,6 +79,7 @@ class LensRef(
     val maxDigitalZoom: Float,
     val eqFocal: Float,      // 35mm-equivalent focal at 1x
     val isMain: Boolean,
+    val isMacro: Boolean = false,  // 微距镜头 ID 强制识别（上游 macro_camera_id）
 )
 
 class CameraEngine(
@@ -184,11 +189,11 @@ class CameraEngine(
     /**
      * 多帧堆栈采集（0.5.0，PhotonCamera 管线移植）：YUV 直采主通道上叠加
      * 连续 N 帧连拍（每帧独立 takePicture，HAL ISP YUV 输出不变），交给
-     * GlesYuvStacker 对齐合并降噪 = 我方的 "JPEG MAX" 主通道。0.6.0 起对齐
-     * 仓库 MAX 帧数默认 4（filesDir/pc_burst.txt 可改帧数，<2 视为关闭）；
+     * GlesYuvStacker 对齐合并降噪 = 我方的 "JPEG MAX" 主通道。对齐用户规格
+     * 默认 6 帧（filesDir/pc_burst.txt 可改帧数，<2 视为关闭）；
      * filesDir/pc_burst_off.txt 应急后门。闪光模式自动回退单帧。
      */
-    @Volatile private var burstCount: Int = 4
+    @Volatile private var burstCount: Int = 6
 
     private val burstOptOut: Boolean by lazy {
         File(appContext.filesDir, "pc_burst_off.txt").exists()
@@ -223,6 +228,98 @@ class CameraEngine(
      */
     @Volatile var lastAsShotGains: FloatArray? = null
         private set
+
+    /**
+     * 0.7.2: 静态拍摄对应的 TotalCaptureResult（camera2 interop session
+     * capture callback），DngCreator 与 EXIF 拍摄参数的数据源。
+     */
+    @Volatile var lastStillResult: android.hardware.camera2.TotalCaptureResult? = null
+        private set
+
+    /**
+     * 0.7.2: 静态拍摄的 EXIF 元数据（移植的 PhotonCamera CaptureInfo 语义）。
+     * 曝光/ISO/光圈/焦距取自 TotalCaptureResult，等效焦距由传感器物理尺寸换算。
+     */
+    fun captureInfo(): com.photographercamera.core.photon.camera.CaptureInfo? = try {
+        val r = lastStillResult
+        val chars = rawCharacteristics() ?: return null
+        val focal = r?.get(android.hardware.camera2.CaptureResult.LENS_FOCAL_LENGTH)
+            ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                ?.firstOrNull()
+        val phys = chars.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+        val f35 = if (focal != null && phys != null) {
+            val diag = kotlin.math.sqrt(phys.width * phys.width + phys.height * phys.height)
+            kotlin.math.round(focal * 43.27f / diag).toInt()
+        } else null
+        val aeStep = chars.get(
+            android.hardware.camera2.CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP,
+        )?.toFloat() ?: (1f / 3f)
+        com.photographercamera.core.photon.camera.CaptureInfo(
+            exposureTime = r?.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME),
+            iso = r?.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY),
+            aperture = r?.get(android.hardware.camera2.CaptureResult.LENS_APERTURE)
+                ?: chars.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)
+                    ?.firstOrNull(),
+            focalLength = focal,
+            focalLength35mm = f35,
+            exposureBias = r?.get(android.hardware.camera2.CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)
+                ?.toFloat()?.times(aeStep),
+            whiteBalance = when (r?.get(android.hardware.camera2.CaptureResult.CONTROL_AWB_MODE)) {
+                // AWB OFF = 手动白平衡（Camera2 无 MANUAL 常量）
+                android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_OFF -> 1
+                android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO -> 0
+                else -> null
+            },
+        )
+    } catch (t: Throwable) {
+        DebugLog.log("CAM", "captureInfo build failed: ${t.message}")
+        null
+    }
+
+    /** 主镜头 characteristics（与 RAW 校准同一选镜逻辑）。 */
+    private fun rawCharacteristics(): android.hardware.camera2.CameraCharacteristics? = try {
+        val mainId = lenses.firstOrNull { it.isMain }?.id ?: lenses.firstOrNull()?.id
+        mainId?.let { cameraManager.getCameraCharacteristics(it) }
+    } catch (t: Throwable) {
+        null
+    }
+
+    /**
+     * 0.7.2: 把 RAW_SENSOR 帧全量写成 DNG（DngCreator + TotalCaptureResult），
+     * 供移植的 PhotonCamera RawDemosaicProcessor 管线开发。必须 ImageProxy
+     * 未关闭时调用。[rotDeg] = buffer→upright 顺时针角度。
+     */
+    private fun writeDngFile(imageProxy: androidx.camera.core.ImageProxy, rotDeg: Int): String? = try {
+        val chars = rawCharacteristics() ?: return null
+        val ai = imageProxy.imageInfo
+        // DngCreator 的 metadata 参数在当前 CameraX/AGP 注解下视为非空——
+        // session 回调在 RAW 模式必发 TotalCaptureResult，取不到直接放弃 DNG。
+        val res = lastStillResult ?: return null
+        val creator = android.hardware.camera2.DngCreator(chars, res)
+        // 照片方向校正（上游 camera_orientation_offsets）：DNG 方向叠加用户偏移，
+        // 与 RAW 开发端的 rotation=(rotDeg+offset) 保持一致。
+        val effRot = ((rotDeg + currentOrientationOffset()) % 360 + 360) % 360
+        creator.setOrientation(
+            when (effRot) {
+                90 -> 6   // EXIF rotate 90 CW
+                180 -> 3  // EXIF rotate 180
+                270 -> 8  // EXIF rotate 90 CCW
+                else -> 1
+            },
+        )
+        val dng = java.io.File(appContext.cacheDir, "raw_capture.dng")
+        dng.outputStream().use { out ->
+            val img = imageProxy.image
+                ?: throw IllegalStateException("RAW ImageProxy has no android.media.Image")
+            creator.writeImage(out, img)
+        }
+        creator.close()
+        DebugLog.log("SHOT", "DNG archived: ${dng.length() / 1024}KB rot=$rotDeg")
+        dng.absolutePath
+    } catch (t: Throwable) {
+        DebugLog.logError("SHOT", "DNG write failed", t)
+        null
+    }
 
     /**
      * Static RAW calibration from the main lens' characteristics: CFA layout,
@@ -285,7 +382,7 @@ class CameraEngine(
         try {
             val f = File(appContext.filesDir, "pc_burst.txt")
             if (f.exists()) {
-                burstCount = f.readText().trim().toIntOrNull() ?: 4
+                burstCount = f.readText().trim().toIntOrNull() ?: 6
             }
         } catch (_: Throwable) {
         }
@@ -356,9 +453,18 @@ class CameraEngine(
 
         val selector = CameraSelector.Builder()
             .requireLensFacing(facing)
+            .apply {
+                // "对焦与镜头"菜单手动指定镜头（0.7.3）：按 camera2 id 过滤
+                if (selectedLensId != null) {
+                    addCameraFilter { infos ->
+                        infos.filter { runCatching { Camera2CameraInfo.from(it).cameraId == selectedLensId }.getOrDefault(false) }
+                            .ifEmpty { infos }
+                    }
+                }
+            }
             .build()
 
-        val newPreview = Preview.Builder()
+        val previewBuilder = Preview.Builder()
             // 4:3 (sensor-native): the GL surface is exactly 3:4 portrait, and a
             // rotated 4:3 buffer fills it perfectly — the Zoom Box geometry and
             // the tap mapping both rely on this. A resolution strategy is REQUIRED:
@@ -376,7 +482,10 @@ class CameraEngine(
                     )
                     .build(),
             )
-            .build()
+        // 人脸优先对焦：session 捕获回调挂在 Preview interop 上（faceFocusOn 时生效）
+        androidx.camera.camera2.interop.Camera2Interop.Extender<Preview>(previewBuilder)
+            .setSessionCaptureCallback(faceCaptureCallback)
+        val newPreview = previewBuilder.build()
         newPreview.setSurfaceProvider { request ->
             providePreviewSurface(request)
         }
@@ -530,6 +639,8 @@ class CameraEngine(
                                             g.blue / green,
                                         )
                                     }
+                                    // 0.7.2: DngCreator / EXIF 元数据源
+                                    lastStillResult = result
                                 }
                             },
                         )
@@ -665,6 +776,8 @@ class CameraEngine(
         }
         bound = true
         bindPending = false
+        // rebind 后重放全部 camera2 interop 选项（手动对焦/色调映射/人脸检测）
+        applyInteropOptions()
 
         // Native zoom window from the bound camera (CONTROL_ZOOM_RATIO pipeline).
         val zs = camera?.cameraInfo?.zoomState?.value
@@ -805,6 +918,19 @@ class CameraEngine(
 
     /** 35mm-equivalent focal length of the CURRENT zoom (top HUD). */
     fun currentEqFocal(): Float = mainEq() * zoomRatio
+
+    /**
+     * 默认焦段（上游 default_focal_length 语义）：eq=0 表示不设置；
+     * 否则换算成变焦倍数并立即应用到预览/拍摄（重启后由 UI 再调一次）。
+     */
+    fun applyDefaultFocal(equivFocal: Float) {
+        if (equivFocal <= 0f) return
+        val target = (equivFocal / wideEq()).coerceIn(minZoom(), maxZoom())
+        if (abs(target - zoomRatio) > 1e-3f) {
+            setZoom(target)
+            DebugLog.log("LENS", "default focal ${equivFocal}mm -> zoom %.2f".format(target))
+        }
+    }
 
     // ---- zoom -------------------------------------------------------------------
 
@@ -976,7 +1102,7 @@ class CameraEngine(
                             // HAL sensorOrientation) is the authoritative upright
                             // rotation for THIS buffer.
                             val bmp = (try {
-                                decodeJpegUpright(bytes, rotDeg)
+                                decodeJpegUpright(bytes, rotDeg + currentOrientationOffset())
                             } catch (t: Throwable) {
                                 DebugLog.logError("SHOT", "JPEG decode failed", t)
                                 null
@@ -1081,6 +1207,7 @@ class CameraEngine(
                         var rot = image.imageInfo.rotationDegrees
                         var buf: java.nio.ByteBuffer? = null
                         var stride = 0
+                        var dngPath: String? = null
                         try {
                             val pl = image.planes.getOrNull(0)
                             if (format == android.graphics.ImageFormat.RAW_SENSOR && pl != null) {
@@ -1095,6 +1222,9 @@ class CameraEngine(
                                         .order(java.nio.ByteOrder.nativeOrder())
                                     buf.put(src)
                                     buf.position(0)
+                                    // 0.7.2: 全量 DNG 存档（ImageProxy 关闭前），
+                                    // 成片开发交给移植的 RawDemosaicProcessor 管线
+                                    dngPath = writeDngFile(image, rot)
                                 }
                             } else {
                                 DebugLog.log("SHOT", "unexpected RAW-ISP capture format=$format")
@@ -1124,7 +1254,11 @@ class CameraEngine(
                             "raw frame ${w}x${h} stride=$stride rot=$rot ${buf.capacity() / 1024}KB " +
                                 "(capture ${t1 - t0}ms)",
                         )
-                        val frame = RawFrame(w, h, stride, buf, rot, queryRawCalibration(), lastAsShotGains)
+                        val frame = RawFrame(
+                            w, h, stride, buf,
+                            (rot + currentOrientationOffset()) % 360,
+                            queryRawCalibration(), lastAsShotGains, dngPath,
+                        )
                         mainHandler.post {
                             if (onRawFrame != null) onRawFrame(frame)
                             else onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
@@ -1191,7 +1325,8 @@ class CameraEngine(
                             "yuv capture frame ${image.width}x${image.height} rot=$rot mirror=$mirror " +
                                 "(capture ${SystemClock.elapsedRealtime() - t1}ms)",
                         )
-                        mainHandler.post { cb(image, rot, mirror) }
+                        // 照片方向校正：交付端 rot 统一叠加用户偏移（YUV/堆栈链）
+                        mainHandler.post { cb(image, (rot + currentOrientationOffset()) % 360, mirror) }
                     }
 
                     override fun onError(exception: ImageCaptureException) {
@@ -1230,7 +1365,7 @@ class CameraEngine(
                     "burst done: ${frames.size}/$n frames ${frames[0].width}x${frames[0].height} " +
                         "rot=$rot mirror=$mirror in ${total}ms",
                 )
-                mainHandler.post { onStack(frames, rot, mirror) }
+                mainHandler.post { onStack(frames, (rot + currentOrientationOffset()) % 360, mirror) }
             }
 
             fun shootNext() {
@@ -1554,6 +1689,237 @@ class CameraEngine(
     }
 
     // ---- misc controls --------------------------------------------------------------
+
+    // ---- 对焦与镜头菜单接线（0.7.3，上游 lens_selection / autofocus 对齐）----
+
+    /** 手动指定的 camera2 镜头 id；null = 跟随 facing 默认。open() 的 selector filter 消费。 */
+    @Volatile var selectedLensId: String? = null
+        private set
+
+    /** 手动对焦开关状态（diopters 滑块值同步维护，供设置页回显）。 */
+    @Volatile var manualFocusOn: Boolean = false
+        private set
+    @Volatile var manualFocusDiopters: Float = 0f
+        private set
+
+    /**
+     * 枚举镜头。discovery=true（"手动镜头发现"开）时列出全部摄像头
+     * （含前置与逻辑多摄的物理成员）；否则只列出当前 facing 的摄像头。
+     * 直接读 CameraManager——设置页在引擎未 bind 时也可用。
+     */
+    fun listLenses(discovery: Boolean): List<LensRef> =
+        listLenses(discovery, logicalProbe = false, whitelist = emptySet(), macroId = null)
+
+    /**
+     * 完整镜头发现（对齐上游 lens_discovery 组）：
+     * @param discovery   列出全部摄像头（含前置）
+     * @param logicalProbe 逻辑多摄探测：枚举逻辑多摄 ID 暴露的物理镜头
+     * @param whitelist    逻辑/物理摄像头白名单（强制加入，如 "0/2"）
+     * @param macroId      微距镜头 ID：强制把该相机识别为微距镜头
+     */
+    fun listLenses(
+        discovery: Boolean,
+        logicalProbe: Boolean,
+        whitelist: Set<String>,
+        macroId: String?,
+    ): List<LensRef> {
+        val out = mutableListOf<LensRef>()
+        val seen = mutableSetOf<String>()
+        fun addId(id: String, isLogicalPhysical: Boolean) {
+            if (!seen.add(id)) return
+            runCatching {
+                // 组合 id（"逻辑/物理"）用逻辑相机的特征做候选；物理成员无法
+                // 通过 CameraX 单独打开，选中时由 selectLens 记录并回退。
+                val lookupId = if (isLogicalPhysical && id.contains('/')) id.substringBefore('/') else id
+                val c = cameraManager.getCameraCharacteristics(lookupId) ?: return
+                val facingVal = c.get(CameraCharacteristics.LENS_FACING) ?: return
+                if (!discovery && facingVal != facing) return
+                val focal = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 0f
+                val phys = c.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                val eq = if (phys != null && phys.width > 0f && focal > 0f) focal * 43.27f / kotlin.math.hypot(phys.width, phys.height) else 0f
+                val zr = c.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.upper ?: 1f
+                val maxZoom = if (zr > 1f) zr else c.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+                out.add(LensRef(id, focal, maxZoom, eq, out.isEmpty() && !isLogicalPhysical, id == macroId))
+            }
+        }
+        runCatching {
+            cameraManager.cameraIdList.forEach { id ->
+                addId(id, isLogicalPhysical = false)
+                // 逻辑多摄探测（对齐上游 CameraDiscovery）：枚举逻辑多摄
+                // CameraCharacteristics.physicalCameraIds 暴露的物理镜头（API 30+）
+                if (logicalProbe && android.os.Build.VERSION.SDK_INT >= 30) {
+                    runCatching {
+                        val chars = cameraManager.getCameraCharacteristics(id)
+                        val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                        val isLogical = caps?.contains(
+                            CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA,
+                        ) == true
+                        if (isLogical) {
+                            @Suppress("UsePropertyAccessSyntax")
+                            chars.getPhysicalCameraIds().forEach { physId ->
+                                addId("$id/$physId", isLogicalPhysical = true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 白名单：强制加入（即使探测关闭也生效，对齐上游语义）
+        whitelist.forEach { addId(it, isLogicalPhysical = true) }
+        return out.sortedBy { if (it.focal <= 0f) Float.MAX_VALUE else it.focal }
+    }
+
+    /** 逻辑/物理绑定探测：id 是否存在于 CameraManager（白名单校验用）。 */
+    fun cameraIdExists(id: String): Boolean = runCatching {
+        cameraManager.getCameraCharacteristics(id)
+        true
+    }.getOrDefault(false)
+
+    /**
+     * 照片方向校正（上游 camera_orientation_offsets）：按镜头 ID 存旋转偏移，
+     * 成片统一加转。sp 格式 "id=deg,id2=deg2"。
+     */
+    fun orientationOffsetFor(id: String?): Int {
+        if (id == null) return 0
+        val raw = appContext.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+            .getString("camera_orientation_offsets", "") ?: ""
+        return raw.split(',').firstOrNull { it.startsWith("$id=") }
+            ?.substringAfter('=')?.toIntOrNull() ?: 0
+    }
+
+    fun setOrientationOffset(id: String, deg: Int) {
+        val sp = appContext.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+        val raw = sp.getString("camera_orientation_offsets", "") ?: ""
+        val kept = raw.split(',').filter { it.isNotBlank() && !it.startsWith("$id=") }
+        val next = (kept + "$id=$deg").joinToString(",")
+        sp.edit().putString("camera_orientation_offsets", next).apply()
+        DebugLog.log("CAM", "orientation offset $id -> $deg")
+    }
+
+    /** 当前镜头应加的方向偏移（成片统一应用点）。 */
+    fun currentOrientationOffset(): Int = orientationOffsetFor(currentCameraId ?: selectedLensId)
+
+    /** 指定镜头并 rebind（id=null 回退 facing 默认）。 */
+    fun selectLens(id: String?) {
+        selectedLensId = id
+        DebugLog.log("CAM", "selectLens -> $id (rebind)")
+        open()
+    }
+
+    /** 最小对焦距离（diopters）；id=null 用当前绑定镜头。0 = 定焦不可手动。 */
+    fun minFocusDistanceDiopters(id: String? = null): Float {
+        val target = id ?: selectedLensId
+        return runCatching {
+            val ids = if (target != null) arrayOf(target) else cameraManager.cameraIdList
+            ids.maxOf { cid ->
+                val c = cameraManager.getCameraCharacteristics(cid)
+                val fc = c.get(CameraCharacteristics.LENS_FACING)
+                if (id == null && fc != facing) return@maxOf 0f
+                c.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            }
+        }.getOrDefault(0f)
+    }
+
+    // ---- camera2 interop 统一选项（手动对焦 + 硬件色调映射 + 人脸检测）----------
+
+    /** 硬件色调映射 sRGB 模式（上游 TONEMAP_MODE：系统默认 vs sRGB 对比度/伽马曲线）。 */
+    @Volatile var srgbToneMapOn: Boolean = false
+    /** 人脸优先自动对焦（camera2 STATISTICS_FACE_DETECT_MODE + 最大人脸自动对焦）。 */
+    @Volatile var faceFocusOn: Boolean = false
+
+    @Volatile private var lastFaceFocusMs = 0L
+
+    /**
+     * 组合并下发全部 interop 选项。任何一项变化或 rebind 后都走这里，
+     * 保证 AF 模式、TONEMAP、FACE_DETECT 互相不覆盖。
+     */
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun applyInteropOptions() {
+        val cam = camera ?: return
+        val b = CaptureRequestOptions.Builder()
+        if (manualFocusOn) {
+            b.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            b.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, manualFocusDiopters)
+        } else {
+            b.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        }
+        if (srgbToneMapOn) {
+            // 硬件 sRGB 对比度/伽马曲线（API 23+ PRESET_CURVE，minSdk 26 全覆盖）
+            b.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_PRESET_CURVE)
+            b.setCaptureRequestOption(CaptureRequest.TONEMAP_PRESET_CURVE, CaptureRequest.TONEMAP_PRESET_CURVE_SRGB)
+        }
+        if (faceFocusOn) {
+            // FULL 优先（人脸姿态/置信度更全），设备不支持时 HAL 自行降级到 SIMPLE
+            b.setCaptureRequestOption(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CaptureRequest.STATISTICS_FACE_DETECT_MODE_FULL)
+        } else {
+            b.setCaptureRequestOption(CaptureRequest.STATISTICS_FACE_DETECT_MODE, CaptureRequest.STATISTICS_FACE_DETECT_MODE_OFF)
+        }
+        runCatching {
+            Camera2CameraControl.from(cam.cameraControl).setCaptureRequestOptions(b.build())
+        }.onFailure {
+            DebugLog.log("CAM", "interop options failed: ${it.message}")
+        }
+    }
+
+    /** 手动对焦：AF 关 + diopters；关闭则恢复连续对焦。走 camera2 interop。 */
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun setManualFocus(enabled: Boolean, diopters: Float = 0f) {
+        manualFocusOn = enabled
+        manualFocusDiopters = diopters
+        applyInteropOptions()
+        DebugLog.log("CAM", "manualFocus -> $enabled diopters=$diopters")
+    }
+
+    /** 硬件色调映射模式：true = sRGB（对比度/伽马硬件曲线），false = 系统默认。 */
+    fun setSrgbToneMap(on: Boolean) {
+        srgbToneMapOn = on
+        applyInteropOptions()
+        DebugLog.log("CAM", "srgb tonemap -> $on")
+    }
+
+    /**
+     * 人脸优先自动对焦：开启后预览 session 的 TotalCaptureResult 携带
+     * STATISTICS_FACES，取最大人脸中心自动触发对焦（上游 eye focus 的
+     * camera2 等价实现，无需 ML 运行时）。
+     */
+    fun setFaceFocusEnabled(on: Boolean) {
+        faceFocusOn = on
+        applyInteropOptions()
+        DebugLog.log("CAM", "face focus -> $on")
+    }
+
+    /** 预览 session 捕获回调：解析人脸并驱动自动对焦（挂在 Preview interop 上）。 */
+    private val faceCaptureCallback = object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: android.hardware.camera2.CameraCaptureSession,
+            request: android.hardware.camera2.CaptureRequest,
+            result: android.hardware.camera2.TotalCaptureResult,
+        ) {
+            if (!faceFocusOn) return
+            val faces = result.get(android.hardware.camera2.CaptureResult.STATISTICS_FACES) ?: return
+            if (faces.isEmpty()) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastFaceFocusMs < 1500) return
+            val largest = faces.maxByOrNull { it.bounds.width() * it.bounds.height() } ?: return
+            val active = runCatching {
+                cameraManager.getCameraCharacteristics(currentCameraId ?: selectedLensId ?: "0")
+                    .get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            }.getOrNull() ?: return
+            if (active.width() <= 0 || active.height() <= 0) return
+            val b = largest.bounds
+            val nx = (b.exactCenterX() - active.left) / active.width().toFloat()
+            val ny = (b.exactCenterY() - active.top) / active.height().toFloat()
+            if (nx in 0f..1f && ny in 0f..1f) {
+                lastFaceFocusMs = now
+                DebugLog.log("CAM", "face AF -> (%.2f, %.2f)".format(nx, ny))
+                tapFocusAndMeter(nx, ny)
+            }
+        }
+    }
+
+    /** 当前绑定 camera 的 id（人脸/方向等按镜头读取特征用）。 */
+    val currentCameraId: String?
+        get() = runCatching { Camera2CameraInfo.from(camera!!.cameraInfo).cameraId }.getOrNull()
 
     /** Current flash mode: ImageCapture.FLASH_MODE_OFF / ON / AUTO. */
     fun flashMode(): Int = flashModeState

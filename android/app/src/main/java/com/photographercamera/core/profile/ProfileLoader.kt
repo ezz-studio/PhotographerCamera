@@ -53,10 +53,13 @@ object ProfileLoader {
         }
         registry.clear()
         gpuCache.clear()
+        val hiddenBundled = deletedBundledSet(context)
         val am = context.assets
         runCatching {
             am.list("profiles")?.forEach { name ->
-                if (name.endsWith(".json", ignoreCase = true)) {
+                if (name.endsWith(".json", ignoreCase = true) &&
+                    name.removeSuffix(".json") !in hiddenBundled
+                ) {
                     val text = am.open("profiles/$name").bufferedReader().use { it.readText() }
                     // Each profile may fail independently — log it (never throw, so one
                     // bad preset can't blank out the whole list on a real device).
@@ -140,6 +143,28 @@ object ProfileLoader {
         } ?: throw IllegalArgumentException("Cannot write $uri")
     }
 
+    /**
+     * Import a user-picked icon image (SAF uri) for a profile. Saved as
+     * `<id>.<png|jpg|webp>` in the private profiles dir — the same location
+     * iconPath()/deleteProfile already manage.
+     */
+    suspend fun importIcon(context: Context, uri: Uri, id: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val ext = when (context.contentResolver.getType(uri)) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+            runCatching {
+                val dest = File(profilesCacheDir(context), "$id.$ext")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { input.copyTo(it) }
+                } ?: return@withContext false
+                DebugLog.log("PROFILE", "icon imported for '$id' -> ${dest.name}")
+                true
+            }.getOrDefault(false)
+        }
+
     // ---- Public inbox import / delete ---------------------------------------
 
     /**
@@ -201,14 +226,20 @@ object ProfileLoader {
             .getOrDefault(false)
 
     /**
-     * Delete a user-imported profile: removes its JSON + icon from the private
-     * dir and drops it from the registry. Bundled (assets) profiles are
-     * protected and return false.
+     * Delete a profile: removes its JSON + icon from the private dir and drops
+     * it from the registry. Bundled (assets) profiles cannot have their files
+     * removed, so they are persisted to a "deleted bundled" set (sp) and
+     * filtered from the registry on every init — the user sees them gone.
      */
     suspend fun deleteProfile(context: Context, id: String): Boolean = withContext(Dispatchers.IO) {
         if (isBundled(id, context)) {
-            DebugLog.log("PROFILE", "delete '$id' refused (bundled)")
-            return@withContext false
+            deletedBundledPrefs(context).edit()
+                .putStringSet("deleted_bundled_presets", deletedBundledSet(context) + id)
+                .apply()
+            registry.remove(id)
+            gpuCache.keys.removeAll { it.startsWith("$id|") }
+            DebugLog.log("PROFILE", "delete '$id' -> bundled hidden")
+            return@withContext true
         }
         val dir = profilesCacheDir(context)
         var removed = false
@@ -222,6 +253,20 @@ object ProfileLoader {
         DebugLog.log("PROFILE", "delete '$id' -> removed=$removed")
         removed
     }
+
+    /** Restore all bundled presets hidden by deleteProfile (settings "restore" path). */
+    suspend fun restoreBundled(context: Context) = withContext(Dispatchers.IO) {
+        deletedBundledPrefs(context).edit()
+            .putStringSet("deleted_bundled_presets", emptySet())
+            .apply()
+    }
+
+    /** SharedPreferences-backed set of bundled profile ids the user deleted. */
+    private fun deletedBundledPrefs(context: Context) =
+        context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+
+    private fun deletedBundledSet(context: Context): Set<String> =
+        deletedBundledPrefs(context).getStringSet("deleted_bundled_presets", emptySet()) ?: emptySet()
 
     private fun profilesCacheDir(context: Context): File {
         val dir = File(context.filesDir, "profiles")

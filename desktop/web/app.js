@@ -557,22 +557,29 @@ async function exportLut() {
   }
 }
 
-async function exportAndroid() {
-  if (!state.profile) return setStatus("没有可导出的风格", "err");
+// Save the trained profile to the STUDIO profiles directory under the name
+// entered before training. The JSON is written as <name>.json and the picked
+// icon (PNG/JPG/WebP) is written next to it as <name>.<ext> — the App preset
+// list pairs <id>.json with <id>.<ext>, so a PNG import yields a same-named PNG.
+async function saveProfile() {
+  if (!state.profile) return setStatus("没有可保存的风格", "err");
   const name = safeName();
-  const payload = { profile: { ...state.profile }, name };
+  const payload = {
+    profile: { ...state.profile },
+    path: `profiles/studio/${name}.json`,
+  };
   const d = collectDisplay();
   if (d) payload.profile.display = d;
   if (state.icon) payload.icon = state.icon;
-  setStatus("写入 Android 资产…", "busy");
+  setStatus("保存 Profile…", "busy");
   try {
-    const r = await api("/api/export_android", {
+    const r = await api("/api/save", {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setStatus("已写入 " + r.path + (r.icon_path ? " + 图标" : ""), "ok");
+    setStatus("已保存 " + r.path + (r.icon_path ? " + 同名图标" : "（未选图标）"), "ok");
   } catch (e) {
-    setStatus("导出失败: " + e.message, "err");
+    setStatus("保存失败: " + e.message, "err");
   }
 }
 
@@ -645,8 +652,8 @@ async function init() {
   };
 
   $("#btnGenerate").onclick = generate;
+  $("#btnSaveProfile").onclick = saveProfile;
   $("#btnSave").onclick = exportLut;
-  $("#btnExportAndroid").onclick = exportAndroid;
   $("#btnBatch").onclick = batchRender;
   $("#btnReset").onclick = () => {
     if (!state.baseline) return;

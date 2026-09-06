@@ -1,8 +1,8 @@
 {
   "schema": "lens_model/v1",
-  "n_images": 12,
-  "vignette": 0.001,
-  "chromatic_aberration": 0.2004,
+  "n_images": 780,
+  "vignette": 0.2674,
+  "chromatic_aberration": 0.0973,
   "sharpness_falloff": 0.0,
   "distortion": 0.0,
   "bloom": 0.0,

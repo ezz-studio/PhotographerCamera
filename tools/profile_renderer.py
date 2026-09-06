@@ -121,13 +121,6 @@ _HUE_RANGES = {
 }
 
 
-def _hue_name(hd):
-    for n, (a, b) in _HUE_RANGES.items():
-        if a <= hd < b or (n == "red" and (hd >= 345 or hd < 15)):
-            return n
-    return "red"
-
-
 def apply_hsl(rgb, hsl: dict):
     # hsl: {hue_name: {hue_shift, saturation, lightness}}
     if not hsl:
@@ -189,13 +182,25 @@ def apply_hsl(rgb, hsl: dict):
     return _clip(rgb_new)
 
 
+def _rel_scale(rgb) -> float:
+    """Resolution-relative kernel scale.
+
+    The GPU chain expresses effect radii in *texels* (uv-relative), so a
+    radius=1 looks identical at any preview size. The CPU kernels are in
+    pixels - scale them by image size (400px reference) so slider response
+    is resolution-independent and visible at 1600px previews.
+    """
+    return float(min(6.0, max(1.0, max(rgb.shape[0], rgb.shape[1]) / 400.0)))
+
+
 def apply_sharpen(rgb, amount=0.0, radius=1.0):
     if amount <= 0.0 or cv2 is None:
         return rgb
-    ksz = max(3, int(round(2 * radius + 1)) | 1)
+    sigma = max(0.5, 0.6 * radius * _rel_scale(rgb))
+    ksz = max(3, int(round(sigma * 2.5)) | 1)
     blur = np.zeros_like(rgb)
     for c in range(3):
-        blur[..., c] = cv2.GaussianBlur(rgb[..., c], (ksz, ksz), 0)
+        blur[..., c] = cv2.GaussianBlur(rgb[..., c], (ksz, ksz), sigma)
     return _clip(rgb + amount * (rgb - blur))
 
 
@@ -216,7 +221,7 @@ def apply_halation(rgb, amount=0.0, threshold=0.9, radius=1.0, warmth=1.0):
         return rgb
     lum = rgb.mean(axis=2)
     bright = np.clip(lum - threshold, 0, 1) / max(1e-4, 1 - threshold)
-    ksz = max(3, int(round(8 * radius)) | 1)
+    ksz = max(3, int(round(8 * radius * _rel_scale(rgb))) | 1)
     glow = cv2.GaussianBlur(bright, (ksz, ksz), 0)
     glow = cv2.GaussianBlur(glow, (ksz, ksz), 0)
     out = rgb.copy()
@@ -281,6 +286,107 @@ def apply_vignette(rgb, amount=0.0, radius=1.0, feather=0.5, center=(0.5, 0.5)):
     return _clip(rgb * mask[..., None])
 
 
+def _radial_maps(h, w):
+    """Normalized radial coordinate maps centered on the optical axis."""
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    nx = (xx + 0.5) / w * 2.0 - 1.0
+    ny = (yy + 0.5) / h * 2.0 - 1.0
+    return nx, ny
+
+
+def apply_lens(rgb, lens: dict):
+    """Optical lens simulation stage (schema `lens.*`).
+
+    Physically-first stage: happens BEFORE all stylization, like light
+    passing through glass before it hits the sensor. Desktop-reference
+    implementation; the Android GPU chain needs an equivalent stage
+    (see docs/HANDOFF_android_lens.md).
+      distortion        barrel (+) / pincushion (-) radial warp
+      chromatic_aberration  radial per-channel magnification split (R in, B out)
+      sharpness_falloff radial blur mix towards corners
+      vignette          natural optical corner falloff (pre-style, multiplicative)
+      bloom             soft optical glow around highlights (wide, low-gain)
+      flare             horizontal streak + warm glow from the brightest spots
+    """
+    lens = lens or {}
+    if not any((lens.get(k) or 0.0) != 0.0 for k in
+               ("distortion", "chromatic_aberration", "sharpness_falloff",
+                "vignette", "bloom", "flare")):
+        return rgb
+    h, w = rgb.shape[:2]
+    cx, cy = w / 2.0, h / 2.0
+
+    # 1. distortion - radial warp (barrel + / pincushion -)
+    k = float(lens.get("distortion") or 0.0)
+    if abs(k) > 1e-4 and cv2 is not None:
+        nx, ny = _radial_maps(h, w)
+        r2 = nx * nx + ny * ny
+        f = 1.0 + 0.35 * k * r2
+        map_x = nx * f * cx + cx
+        map_y = ny * f * cy + cy
+        rgb = cv2.remap(rgb, map_x, map_y, cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_REFLECT)
+
+    # 2. chromatic aberration - R pulled in, B pushed out radially
+    ca = float(lens.get("chromatic_aberration") or 0.0)
+    if ca > 1e-4 and cv2 is not None:
+        nx, ny = _radial_maps(h, w)
+        out = np.empty_like(rgb)
+        for ch, sc in ((0, 1.0 - 0.015 * ca), (2, 1.0 + 0.015 * ca)):
+            mx = nx * sc * cx + cx
+            my = ny * sc * cy + cy
+            out[..., ch] = cv2.remap(rgb[..., ch], mx, my, cv2.INTER_LINEAR,
+                                     borderMode=cv2.BORDER_REFLECT)
+        out[..., 1] = rgb[..., 1]
+        rgb = out
+
+    # 3. sharpness falloff - corners go soft
+    fo = float(lens.get("sharpness_falloff") or 0.0)
+    if fo > 1e-4 and cv2 is not None:
+        nx, ny = _radial_maps(h, w)
+        r = np.sqrt(nx * nx + ny * ny) / 1.4142
+        wgt = np.clip(fo * 1.2 * np.clip(r - 0.25, 0, 1), 0, 0.85)
+        wgt = wgt[..., None].astype(np.float32)
+        ksz = max(3, int(round(4 * _rel_scale(rgb))) | 1)
+        blur = np.empty_like(rgb)
+        for c in range(3):
+            blur[..., c] = cv2.GaussianBlur(rgb[..., c], (ksz, ksz), 0)
+        rgb = rgb * (1.0 - wgt) + blur * wgt
+
+    # 4. optical vignette - natural falloff (multiplicative, pre-style)
+    vg = float(lens.get("vignette") or 0.0)
+    if vg > 1e-4:
+        nx, ny = _radial_maps(h, w)
+        r = np.sqrt(nx * nx + ny * ny) / 1.4142
+        fall = np.clip(r - 0.3, 0, 1) ** 1.5
+        rgb = rgb * (1.0 - vg * 0.75 * fall)[..., None]
+
+    # 5. lens bloom - wide soft glow around highlights
+    lb = float(lens.get("bloom") or 0.0)
+    if lb > 1e-4 and cv2 is not None:
+        bright = np.clip(rgb - 0.82, 0, 1) / 0.18
+        ksz = max(3, int(round(14 * _rel_scale(rgb))) | 1)
+        glow = np.empty_like(rgb)
+        for c in range(3):
+            glow[..., c] = cv2.GaussianBlur(bright[..., c], (ksz, ksz), 0)
+        rgb = _clip(rgb + lb * 0.8 * glow)
+
+    # 6. flare - horizontal anamorphic streak + warm core glow
+    fl = float(lens.get("flare") or 0.0)
+    if fl > 1e-4 and cv2 is not None:
+        lum = rgb.mean(axis=2)
+        bright = np.clip(lum - 0.9, 0, 1) / 0.1
+        ksz_s = max(3, int(round(4 * _rel_scale(rgb))) | 1)
+        ksz_l = max(3, int(round(36 * _rel_scale(rgb))) | 1)
+        glow = cv2.GaussianBlur(bright, (ksz_s, ksz_s), 0)
+        streak = cv2.GaussianBlur(bright, (ksz_l, ksz_s), 0)
+        rgb = _clip(rgb + fl * (0.55 * glow[..., None]
+                                * np.array([1.0, 0.92, 0.8], np.float32)
+                                + 0.45 * streak[..., None]
+                                * np.array([0.85, 0.92, 1.0], np.float32)))
+    return _clip(rgb)
+
+
 def apply_film_curve(rgb, shadow_floor=8.0, highlight_ceiling=248.0):
     """Output-consistency stage (LAST pass, mirrors shaders/film_curve.frag).
 
@@ -312,14 +418,17 @@ def render(rgb: np.ndarray, profile: dict, seed: int | None = 0) -> np.ndarray:
 
     Chain order synced with effect.frag v0.3.0 (Unified Image Engine, the
     user-defined authoritative order):
-      exposure -> WB -> color matrix -> highlight -> shadow
-      -> film curve (Contrast/BW) -> tone curve (independent) -> HSL
+      lens (optical, desktop reference) -> exposure -> WB -> color matrix
+      -> highlight -> shadow -> film curve (Contrast/BW)
+      -> tone curve (independent) -> HSL
       -> vignette -> bloom -> halation
       -> grain (light-aware) -> noise -> sharpen (always LAST)
     The 3D LUT stage is Android-only (sampler3D; no CPU equivalent here).
     """
     rgb = rgb.astype(np.float32)
     p = profile or {}
+    # -- Stage 0: optical lens simulation (before any stylization) --
+    rgb = apply_lens(rgb, p.get("lens", {}))
     rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
     wb = p.get("white_balance", {})
     rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))

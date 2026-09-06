@@ -5,6 +5,8 @@
  */
 package com.photographercamera.core.photon.color
 
+import com.photographercamera.core.photon.raw.ColorSpace
+
 import android.content.Context
 import android.opengl.GLES30
 

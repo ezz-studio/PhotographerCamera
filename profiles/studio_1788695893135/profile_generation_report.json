@@ -1,0 +1,68 @@
+{
+  "schema": "profile_generation_report/v1",
+  "name": "光月定大青蛙",
+  "decisions": [
+    {
+      "param": "exposure.bias",
+      "value": -0.020626650589957895,
+      "reason": "mean_brightness=0.507 -> pull toward 0.5",
+      "confidence": "high"
+    },
+    {
+      "param": "white_balance.temperature_bias",
+      "value": 0.34665,
+      "reason": "Lab b_mean=6.93",
+      "confidence": "high"
+    },
+    {
+      "param": "white_balance.tint_bias",
+      "value": -0.10361499999999998,
+      "reason": "Lab a_mean=2.07",
+      "confidence": "high"
+    },
+    {
+      "param": "color_matrix",
+      "value": "gray-world estimate",
+      "reason": "from color_matrix.json",
+      "confidence": "high"
+    },
+    {
+      "param": "tone_curve",
+      "value": "empirical CDF",
+      "reason": "from tone_curve_initial.json",
+      "confidence": "high"
+    },
+    {
+      "param": "highlight_rolloff.threshold",
+      "value": 0.8308,
+      "reason": "from 90th percentile",
+      "confidence": "high"
+    },
+    {
+      "param": "shadow.black_point",
+      "value": 0.0884,
+      "reason": "from 2nd percentile",
+      "confidence": "high"
+    },
+    {
+      "param": "hsl",
+      "value": "per-hue saturation factors",
+      "reason": "from hsl_mapping.json",
+      "confidence": "high"
+    },
+    {
+      "param": "vignette.amount",
+      "value": 0.2674,
+      "reason": "from lens geometry",
+      "confidence": "high"
+    },
+    {
+      "param": "noise/grain",
+      "value": "from smooth-region noise estimate",
+      "reason": "texture_model.json",
+      "confidence": "high"
+    }
+  ],
+  "warnings": [],
+  "schema_valid": true
+}

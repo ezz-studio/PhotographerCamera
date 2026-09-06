@@ -1,13 +1,13 @@
 {
   "schema": "tone_statistics/v1",
-  "n_images": 12,
-  "black_point": 0.3359,
-  "shadow": 0.4837,
-  "midtone": 0.5569,
-  "highlight": 0.6092,
-  "white_point": 0.6889,
-  "global_contrast": 0.3046,
-  "local_contrast": 9.9138,
-  "highlight_compression": 0.0,
-  "shadow_compression": 0.0
+  "n_images": 780,
+  "black_point": 0.0588,
+  "shadow": 0.2706,
+  "midtone": 0.5111,
+  "highlight": 0.7346,
+  "white_point": 0.9843,
+  "global_contrast": 0.8418,
+  "local_contrast": 42.8836,
+  "highlight_compression": 0.0757,
+  "shadow_compression": 0.0601
 }

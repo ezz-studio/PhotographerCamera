@@ -5,6 +5,9 @@
  */
 package com.photographercamera.core.photon.color
 
+import com.google.gson.Gson
+import com.google.gson.JsonParser
+
 import androidx.annotation.Keep
 
 /**
@@ -268,7 +271,36 @@ data class ColorRecipeParams(
                 (blueCurvePoints === other.blueCurvePoints || blueCurvePoints?.contentEquals(other.blueCurvePoints) == true)
     }
 
+    /**
+     * 序列化为 JSON 字符串（0.7.0 补齐：上游同款，LutManager 参数持久化依赖）
+     */
+    fun toJson(): String = gson.toJson(copy(halation = 0f))
+
     companion object {
+        private val gson = Gson()
+
+        /**
+         * 从 JSON 字符串反序列化（上游同款，halation 恒 0、gradingBlending 兼容旧档）
+         */
+        fun fromJson(json: String): ColorRecipeParams {
+            return try {
+                val root = JsonParser.parseString(json)
+                val parsed = gson.fromJson(root, ColorRecipeParams::class.java) ?: return DEFAULT
+                parsed.copy(
+                    halation = 0f,
+                    gradingBlending = if (
+                        root.isJsonObject && root.asJsonObject.has("gradingBlending")
+                    ) {
+                        parsed.gradingBlending
+                    } else {
+                        DEFAULT.gradingBlending
+                    }
+                )
+            } catch (_: Exception) {
+                DEFAULT
+            }
+        }
+
         /**
          * 默认参数（无调整）
          */

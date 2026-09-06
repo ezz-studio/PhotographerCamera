@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
         installCrashLog()
         enableEdgeToEdge()
         maybeRequestAllFilesAccess()
+        applyPreferredWindowColorMode()
         setContent {
             PhotographerCameraTheme {
                 Surface(
@@ -55,6 +56,33 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * HDR 显示 / P3 色域（上游 applyPreferredWindowColorMode 照搬）：
+     * HDR 模式 = Android 14+ 且屏幕支持 HDR 且非鸿蒙设备；否则 P3 宽色域；
+     * 都不支持时回退默认 sRGB。
+     */
+    private fun applyPreferredWindowColorMode() {
+        val sp = getSharedPreferences("pc_settings", MODE_PRIVATE)
+        val useHdrScreenMode = sp.getBoolean("hdr_display", false)
+        val useP3ColorSpace = sp.getBoolean("use_p3_color_space", false)
+        val configuration = resources.configuration
+        window.colorMode = when {
+            useHdrScreenMode &&
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                !com.photographercamera.core.device.DeviceUtil.isHarmonyOS &&
+                configuration.isScreenHdr -> android.content.pm.ActivityInfo.COLOR_MODE_HDR
+            useP3ColorSpace && configuration.isScreenWideColorGamut ->
+                android.content.pm.ActivityInfo.COLOR_MODE_WIDE_COLOR_GAMUT
+            else -> android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从设置页返回后即时生效（HDR 显示 / P3 色域开关）
+        applyPreferredWindowColorMode()
     }
 
     /**

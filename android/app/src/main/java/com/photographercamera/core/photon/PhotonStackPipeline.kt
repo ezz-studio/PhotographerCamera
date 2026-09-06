@@ -10,6 +10,8 @@
  */
 package com.photographercamera.core.photon
 
+import com.photographercamera.core.photon.camera.SafeImage
+
 import android.graphics.Bitmap
 import android.graphics.ColorSpace
 import androidx.camera.core.ImageProxy
@@ -17,8 +19,7 @@ import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.gpu.GpuParams
 import com.photographercamera.core.photon.color.LutImageProcessor
 import com.photographercamera.core.photon.color.ProfileToRecipeMapper
-import com.photographercamera.core.photon.stack.PhotonMultiFrameStacker
-import com.photographercamera.core.photon.stack.SafeImage
+import com.photographercamera.core.photon.stack.MultiFrameStacker
 
 object PhotonStackPipeline {
 
@@ -42,12 +43,12 @@ object PhotonStackPipeline {
 
         // ---- 1) 多帧堆栈（PhotonCamera GlesYuvStacker）-----------------------
         val images = proxies.map { SafeImage(it.image ?: return null) }
-        val stacked = PhotonMultiFrameStacker.processBurst(
+        val stacked = MultiFrameStacker.processBurst(
             images = images,
             rotation = rotDeg,
             aspectRatio = null,
             enableSuperResolution = false,
-            colorSpace = srgb,
+            colorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB),
         ) ?: run {
             DebugLog.log("PHOTON", "stack failed (${proxies.size} frames)")
             return null

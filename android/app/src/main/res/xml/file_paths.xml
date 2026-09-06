@@ -5,4 +5,9 @@
 <paths>
     <external-cache-path name="update_apk" path="." />
     <cache-path name="cache_apk" path="." />
+    <!-- DownloadManager 落盘目录：getExternalFilesDir(DIRECTORY_DOWNLOADS)
+         = Android/data/<pkg>/files/Download —— 0.7.3 前缺失此声明导致
+         FileProvider.getUriForFile 抛 IllegalArgumentException（安装闪退根因）-->
+    <external-files-path name="update_apk_ext_files" path="." />
+    <files-path name="update_apk_files" path="." />
 </paths>

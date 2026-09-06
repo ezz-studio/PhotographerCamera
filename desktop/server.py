@@ -305,8 +305,12 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/load_profile":
                 rel = unquote(q.get("path", [""])[0])
                 fp = rel if os.path.isabs(rel) else os.path.join(WORK, rel)
-                if not os.path.isfile(fp):
+                # Fallback to bundled profiles (e.g. profiles/demo shipped in the
+                # frozen exe). Only meaningful for relative paths — absolute paths
+                # are user-supplied and never resolve under BUNDLE.
+                if not os.path.isfile(fp) and not os.path.isabs(rel):
                     fp = os.path.join(BUNDLE, rel)
+                if not os.path.isfile(fp):
                     return self._json({"error": f"no such profile: {rel}"}, 404)
                 with open(fp, encoding="utf-8") as f:
                     prof = json.load(f)

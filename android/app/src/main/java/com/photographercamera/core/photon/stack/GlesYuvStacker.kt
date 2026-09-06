@@ -5,6 +5,9 @@
  */
 package com.photographercamera.core.photon.stack
 
+import com.photographercamera.core.photon.camera.SafeImage
+
+
 import android.graphics.Bitmap
 import android.graphics.ColorSpace
 import android.graphics.ImageFormat

@@ -44,14 +44,6 @@ def extract_features(rgb: np.ndarray) -> dict:
     }
 
 
-def feature_vector(f: dict) -> np.ndarray:
-    return np.array([
-        f["mean_r"], f["mean_g"], f["mean_b"], f["lum_mean"], f["lum_p5"],
-        f["lum_p50"], f["lum_p95"], f["sat_mean"], f["clip_high"],
-        f["corr_rg"], f["corr_rb"], f["corr_gb"],
-    ], dtype=np.float32)
-
-
 _DEFAULT_WEIGHTS = {
     "color": 1.0, "tone": 1.0, "histogram": 0.5, "hsl": 0.5,
     "highlight": 1.0, "shadow": 1.0, "texture": 0.3,

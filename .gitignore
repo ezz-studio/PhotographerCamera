@@ -62,3 +62,4 @@ _s0*.json
 
 # server upload token (secret - never commit)
 server/upload.token.local
+build2/

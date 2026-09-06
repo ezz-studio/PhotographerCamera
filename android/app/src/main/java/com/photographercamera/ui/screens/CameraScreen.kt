@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.SurfaceTexture
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdateAlt
@@ -76,7 +78,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.camera.core.ImageCapture
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -113,13 +114,18 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
-import com.photographercamera.core.camera.CameraEngine
-import com.photographercamera.core.camera.StillFrame
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.viewmodel.compose.viewModel
+import android.hardware.camera2.CameraCharacteristics
+import com.photographercamera.photon.viewmodel.CameraViewModel
+import com.photographercamera.photon.camera.MeteringMode
+import com.photographercamera.photon.ui.camera.CameraPreviewGL
+import com.photographercamera.photon.lut.LutManager
+import com.photographercamera.core.photon.color.ProfileToRecipeMapper
 import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.profile.ProfileLoader
 import com.photographercamera.core.storage.CaptureSaver
 import com.photographercamera.core.storage.CaptureSaver.SavedPhoto
-import com.photographercamera.ui.CameraPreviewView
 import com.photographercamera.ui.theme.AccentOrange
 import com.photographercamera.ui.theme.DarkBackground
 import com.photographercamera.ui.theme.ShutterRing
@@ -142,6 +148,28 @@ import kotlin.math.roundToInt
 fun CameraScreen(navController: NavController) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // ---- photon 引擎接线（CameraViewModel + Camera2Controller）------------
+    val pvm: CameraViewModel = viewModel()
+    val state by pvm.state.collectAsState()
+    val isCameraInitialized by pvm.isInitialized.collectAsState()
+    val currentLutId by pvm.currentLutId.collectAsState()
+    val currentRecipeParams by pvm.currentRecipeParams.collectAsState()
+    val currentBaselineRecipeParams by pvm.currentBaselineRecipeParams.collectAsState()
+    val calibrationOffset by pvm.getCameraOrientationOffset(state.currentCameraId)
+        .collectAsState(initial = 0)
+
+    // SurfaceTexture → openCamera 接线（照搬上游 CameraScreen 模式）
+    var previewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
+    var isCameraPrepared by remember { mutableStateOf(false) }
+    LaunchedEffect(isCameraInitialized) {
+        isCameraPrepared = isCameraInitialized && pvm.prepareCamera()
+    }
+    LaunchedEffect(isCameraInitialized, isCameraPrepared, previewSurfaceTexture) {
+        val st = previewSurfaceTexture ?: return@LaunchedEffect
+        if (!isCameraInitialized || !isCameraPrepared) return@LaunchedEffect
+        pvm.openCamera(st)
+    }
 
     // CAMERA is mandatory; on legacy devices (API <= 28) MediaStore saving also
     // needs READ/WRITE_EXTERNAL_STORAGE — requested together, camera gate wins.
@@ -166,8 +194,6 @@ fun CameraScreen(navController: NavController) {
 
     val profiles = remember { mutableStateListOf<String>() }
     var selected by remember { mutableStateOf("") }
-    var previewRef by remember { mutableStateOf<CameraPreviewView?>(null) }
-    var engine by remember { mutableStateOf<CameraEngine?>(null) }
     var lastCapture by remember { mutableStateOf<SavedPhoto?>(null) }
     var showGrid by remember {
         // Persisted: the grid survives cold starts (the quick-control icon is
@@ -179,8 +205,8 @@ fun CameraScreen(navController: NavController) {
     var showDebug by remember { mutableStateOf(false) }
     // 设置面板（顶栏齿轮）
     var showSettings by remember { mutableStateOf(false) }
-    // 闪光灯三态（顶栏循环切换：关 -> 开 -> 自动）
-    var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) }
+    // 闪光灯三态：0=关 1=开 2=手电（由 photon state.flashMode 驱动）
+    val flashMode = state.flashMode
 
     // RAW ISP 开关（实验性功能，0.3.5 起默认关；目标架构：设备支持 RAW_SENSOR
     // 才显示该键）。持久化在 pc_settings.raw_isp_enabled（CameraEngine.setRawIspEnabled
@@ -188,26 +214,28 @@ fun CameraScreen(navController: NavController) {
     val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
     var rawOn by remember { mutableStateOf(sp.getBoolean("raw_isp_enabled", false)) }
 
-    // Manual metering state, mirrored from CameraEngine via onMeteringChanged.
-    // Default = whole-frame average metering; a tap on the frame switches to
-    // tap-to-focus+meter, a long press cancels back to average.
-    var meteringManual by remember { mutableStateOf(false) }
+    // 手动测光态：非系统默认测光模式即视为手动（用于 EV 滑块显隐）
+    val meteringManual = state.meteringMode != MeteringMode.SYSTEM_DEFAULT
 
     // 0.6.0 测光模式（顶栏图标循环切换，引擎侧同步应用 AE 区域）。
-    var meteringMode by remember { mutableStateOf(CameraEngine.MeteringMode.SYSTEM_DEFAULT) }
+    val meteringMode = state.meteringMode
 
-    // total zoom across lenses (mirrors engine state for recomposition)
+    // LIVE 图开关（0.7.3，指导手册 #2）：顶栏开关，持久化 sp.use_live_photo。
+    // 功能接线（LivePhotoRecorder 并发录制）随引擎切换轮落地；本开关先占位，
+    // 打开时 toast 提示"将在下版生效"。
+    var liveOn by remember {
+        mutableStateOf(
+            context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                .getBoolean("use_live_photo", false),
+        )
+    }
+
+    // total zoom across lenses (mirrors photon state for recomposition)
     var zoomState by remember { mutableFloatStateOf(1f) }
-    // bumped by the engine when lenses are (re)enumerated — recomposes the
-    // viewfinder geometry + focal readout with REAL lens data (they are plain
-    // engine calls, not Compose state, and the engine fills in asynchronously)
-    var lensEpoch by remember { mutableIntStateOf(0) }
-    // follow the engine's zoom whenever lenses (re)load: the default zoom is
-    // the WIDE lens base (0.5x on multi-lens devices, 1x on single-lens)
-    LaunchedEffect(lensEpoch) { engine?.let { zoomState = it.zoomRatio } }
-    // RAW capability = probe result for the current lens (engine fills
-    // rawCapable during lens enumeration; lensEpoch triggers recomposition)
-    val rawCapable = remember(engine, lensEpoch) { engine?.rawCapable ?: false }
+    // 跟随 photon state.zoomRatio（镜头枚举由 photon 内部完成，state 已含真实数据）
+    LaunchedEffect(state.zoomRatio) { zoomState = state.zoomRatio }
+    // RAW 能力 = photon 当前镜头是否支持 RAW_SENSOR
+    val rawCapable = state.isRawSupported
     // self-timer: 0 = off, else seconds
     var timerSec by remember { mutableIntStateOf(0) }
     var shotPending by remember { mutableStateOf(false) }
@@ -267,27 +295,35 @@ fun CameraScreen(navController: NavController) {
 
     val sheetState = rememberModalBottomSheetState()
 
+    // 风格注入：把选中的 profile 通过 ProfileToRecipeMapper 映射到 ColorRecipeParams，
+    // 写入 LutManager（按 lutId 存 DataStore），再 pvm.setLut 让预览+成片套用。
+    // 原 adjEv/adjWbTemp/adjWbTint/adjGrain 滑块仅作 UI 占位（EV/WB/grain 已由 recipe 覆盖）。
     fun applyAdjustments() {
         if (selected.isEmpty()) return
-        val params = try {
-            ProfileLoader.toGpuParams(selected, aspect = 1.0f)
-        } catch (t: Throwable) {
-            // an unknown/invalid profile must never kill the camera screen
-            com.photographercamera.core.debug.DebugLog.logError("PROFILE", "toGpuParams('$selected') failed", t)
+        val profile = ProfileLoader.getProfile(selected) ?: run {
+            com.photographercamera.core.debug.DebugLog.log("PROFILE", "getProfile('$selected') returned null")
             return
         }
-        val applied = params.withAdjustments(adjEv, adjWbTemp, adjWbTint, adjGrain)
-        // proves the chain params actually reach the renderer (the "all filters
-        // look identical" symptom must be attributable from the log alone)
+        val mapping = ProfileToRecipeMapper.map(profile)
+        val lutId = "profile:$selected"
         com.photographercamera.core.debug.DebugLog.log(
             "PROFILE",
-            "applied '$selected' exposure=${applied.exposure} wb=(${applied.wbTemp},${applied.wbTint}) " +
-                "cm=${applied.colorMatrixGL.joinToString() { "%.2f".format(it) }} " +
-                "sharpen=${applied.sharpenAmount} bloom=${applied.bloomAmount} halation=${applied.halationAmount} " +
-                "grain=${applied.grainVec[0]} noise=(${applied.noiseVec[0]},${applied.noiseVec[1]}) " +
-                "vignette=${applied.vignetteAmount} film=${applied.filmEnabled}",
+            "inject '$selected' -> lut=$lutId grain=${mapping.recipe.filmGrain} " +
+                "wb=(${mapping.recipe.temperature},${mapping.recipe.tint}) ev=${mapping.recipe.exposure}",
         )
-        previewRef?.setProfile(applied)
+        scope.launch {
+            try {
+                val lm = LutManager(context)
+                // 类型转换：core.photon.color.ColorRecipeParams → photon.model.ColorRecipeParams
+                // 两者字段完全一致（同源移植），用 JSON 序列化桥接。
+                val photonRecipe = com.photographercamera.photon.model.ColorRecipeParams
+                    .fromJson(mapping.recipe.toJson())
+                lm.saveColorRecipeParams(lutId, photonRecipe)
+                pvm.setLut(lutId)
+            } catch (t: Throwable) {
+                com.photographercamera.core.debug.DebugLog.logError("PROFILE", "recipe inject failed for '$selected'", t)
+            }
+        }
     }
 
     fun saveAndNotify(bmp: Bitmap) {
@@ -309,7 +345,6 @@ fun CameraScreen(navController: NavController) {
                 }
             } else {
                 DebugLog.log("SHOT", "SAVE FAILED (${bmp.width}x${bmp.height})")
-                // failure is an exceptional path — keep a visible notice
                 Toast.makeText(context, "保存失败", Toast.LENGTH_SHORT).show()
             }
         }
@@ -329,94 +364,19 @@ fun CameraScreen(navController: NavController) {
                 capturing = false
             }
         }
-        val eng = engine
-        val t0 = android.os.SystemClock.elapsedRealtime()
-        DebugLog.log("SHOT", "shutter pressed (zoom=${eng?.zoomRatio}, focal=${eng?.currentEqFocal()})")
-        // Digital-tail factor: past the optical max the still comes back at the
-        // OPTICAL FOV (engine pins native zoom there) and must be center-cropped
-        // by zoom/opticalMax to match the shrunken viewfinder box.
-        val opticalMaxV = eng?.opticalMaxZoom() ?: 1f
-        val digitalFactor = ((eng?.zoomRatio ?: 1f) / opticalMaxV).coerceAtLeast(1f)
-        // 统一成片入口（目标架构）：RAW / ISP 两路都在 StillFrame 收敛，之后
-        // 共用同一个 GPU 动态计算引擎 + 风格链 → JPEG。任一路失败退预览帧。
-        val saveProcessed: (Bitmap) -> Unit = { processed ->
-            saveAndNotify(centerCropZoom(centerCropToRatio(processed, 3f / 4f), digitalFactor))
-        }
-        val fallBackToPreview: () -> Unit = {
-            DebugLog.log("SHOT", "still unavailable — falling back to preview frame")
-            previewRef?.captureCurrentFrame {
-                saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), digitalFactor))
+        DebugLog.log("SHOT", "shutter pressed (zoom=${state.zoomRatio}, focal=${state.getCurrentCameraInfo()?.focalLength35mmEquivalent ?: 26f})")
+        // photon 引擎全链路拍照：多帧融合/RAW 开发/色彩配方/MediaStore 保存
+        // 全部由 CameraViewModel.capture() 内部完成，UI 仅触发快门动画。
+        scope.launch {
+            try {
+                pvm.capture()
+                triggerCaptureFeedback()
+            } catch (t: Throwable) {
+                DebugLog.logError("SHOT", "photon capture failed", t)
+            } finally {
+                kotlinx.coroutines.delay(1200)
+                capturing = false
             }
-        }
-        val issued = eng?.captureStill(
-            onBitmap = { bmp ->
-                if (bmp.width > 1 && bmp.height > 1) {
-                    // The still was taken with NATIVE zoom (HAL lens calling around
-                    // the shutter), so it already has the user-zoomed FOV at full
-                    // sensor resolution - NO CPU crop here (crop would throw away
-                    // resolution; the old crop-on-CPU path produced 374x499 stills
-                    // at 5.8x).
-                    previewRef?.renderStill(StillFrame.Isp(bmp)) { processed ->
-                        DebugLog.log(
-                            "SHOT",
-                            "GPU chain done (ISP): ${processed.width}x${processed.height} " +
-                                "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                        )
-                        if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
-                        else fallBackToPreview()
-                    }
-                } else {
-                    fallBackToPreview()
-                }
-            },
-            // RAW ISP mode: the untouched Bayer frame is developed on OUR GPU
-            // (raw_isp.frag) then the SAME unified engine applies. Any failure
-            // inside the RAW path degrades to the 1x1-bitmap fallback below.
-            onRawFrame = { frame ->
-                previewRef?.renderStill(StillFrame.Raw(frame)) { processed ->
-                    DebugLog.log(
-                        "SHOT",
-                        "GPU chain done (RAW): ${processed.width}x${processed.height} " +
-                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                    )
-                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
-                    else fallBackToPreview()
-                }
-            },
-            // YUV 直采（禁止 JPEG 主通道）：HAL 后 ISP YUV 帧零拷贝进 GPU，
-            // 同一统一引擎出片。proxy 生命周期由渲染端收尾。
-            onYuvFrame = { proxy, rot, mirror ->
-                previewRef?.renderStill(StillFrame.Yuv(proxy, rot, mirror)) { processed ->
-                    DebugLog.log(
-                        "SHOT",
-                        "GPU chain done (YUV): ${processed.width}x${processed.height} " +
-                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                    )
-                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
-                    else fallBackToPreview()
-                }
-            },
-            // 0.5.0 多帧堆栈（PhotonCamera 管线移植）：引擎连拍 N 张 YUV，
-            // GlesYuvStacker 对齐合并降噪后走统一风格链。UI/动效零改动；
-            // 堆栈不可用时回调 1x1 位图 → 预览帧兜底。
-            onStackFrame = { proxies, rot, mirror ->
-                previewRef?.renderStill(StillFrame.Stack(proxies, rot, mirror)) { processed ->
-                    DebugLog.log(
-                        "SHOT",
-                        "GPU chain done (Stack): ${processed.width}x${processed.height} " +
-                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                    )
-                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
-                    else fallBackToPreview()
-                }
-            },
-        ) ?: false
-        if (!issued) {
-            // Fallback: grab the current preview frame through the GL chain.
-            DebugLog.log("SHOT", "captureStill not issued — preview frame fallback")
-            previewRef?.captureCurrentFrame {
-                    saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), digitalFactor))
-                }
         }
     }
 
@@ -426,11 +386,9 @@ fun CameraScreen(navController: NavController) {
     DisposableEffect(Unit) {
         com.photographercamera.core.util.VolumeKeyBus.onCapture = { doCapture() }
         com.photographercamera.core.util.VolumeKeyBus.onZoomStep = { zoomIn ->
-            val eng = engine
-            val cur = eng?.zoomRatio ?: zoomState
+            val cur = zoomState
             val next = if (zoomIn) cur * 1.2f else (cur / 1.2f)
-            eng?.setZoom(next)
-            zoomState = eng?.zoomRatio ?: next
+            pvm.setZoomRatio(next)
         }
         onDispose {
             com.photographercamera.core.util.VolumeKeyBus.onCapture = null
@@ -490,13 +448,8 @@ fun CameraScreen(navController: NavController) {
         }
     }
 
-    // Keyed on previewRef AND profiles.size: on cold start this effect used to
-    // run BEFORE the AndroidView factory created the preview (previewRef null →
-    // setProfile silently dropped), and BEFORE the async ProfileLoader.init
-    // finished (toGpuParams threw "Unknown profile"). With both as keys the
-    // effect re-runs the moment the view exists AND the moment the profile
-    // list lands — every cold-start race converges to a successful apply.
-    LaunchedEffect(selected, previewRef, profiles.size) {
+    // Keyed on isCameraInitialized AND profiles.size: photon 引擎就绪后即可注入风格。
+    LaunchedEffect(selected, isCameraInitialized, profiles.size) {
         if (selected.isNotEmpty()) {
             context
                 .getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
@@ -516,8 +469,8 @@ fun CameraScreen(navController: NavController) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            // release the camera BEFORE the GL view tears down its SurfaceTexture
-            engine?.close()
+            // release the camera — photon VM owns the Camera2Controller lifecycle
+            pvm.closeCamera()
         }
     }
 
@@ -528,9 +481,7 @@ fun CameraScreen(navController: NavController) {
             // two-finger pinch zoom — cross-lens, mirrored in the in-frame HUD
             .pointerInput(Unit) {
                 detectTransformGestures { _, _, zoom, _ ->
-                    val eng = engine ?: return@detectTransformGestures
-                    eng.setZoom(eng.zoomRatio * zoom)
-                    zoomState = eng.zoomRatio
+                    pvm.setZoomRatio(zoomState * zoom)
                 }
             },
     ) {
@@ -558,14 +509,12 @@ fun CameraScreen(navController: NavController) {
         // ---- inner capture box -----------------------------------------------
         // Hybrid zoom: up to the OPTICAL max the native preview IS the capture
         // FOV, so the box stays full-frame (photo = what you see). PAST the
-        // optical max the engine pins the sensor zoom (see CameraEngine.setZoom)
-        // and the extra digital reach is shown the DAZZ way — the capture box
-        // shrinks by opticalMax/zoom with a scrim outside, and the still gets
-        // the SAME centered crop, so box and photo can never disagree.
-        val eqBase = remember(lensEpoch) {
-            engine?.mainEq()?.takeIf { it in 18f..40f } ?: 26f
-        }
-        val opticalMax = remember(engine, lensEpoch) { engine?.opticalMaxZoom() ?: 1f }
+        // optical max photon pins the sensor zoom and the extra digital reach
+        // is shown the DAZZ way — the capture box shrinks by opticalMax/zoom
+        // with a scrim outside, and the still gets the SAME centered crop.
+        val camInfo = state.getCurrentCameraInfo()
+        val eqBase = camInfo?.focalLength35mmEquivalent?.takeIf { it in 18f..40f } ?: 26f
+        val opticalMax = camInfo?.maxZoom?.takeIf { it > 1f } ?: 1f
         val fTarget = when {
             // digital tail (> optical max): strict box=photo — the box shrinks
             // by opticalMax/zoom and the still gets the same centered crop.
@@ -593,17 +542,8 @@ fun CameraScreen(navController: NavController) {
         val bx = fx + (fw - bw) / 2f
         val by = fy + (fh - bh) / 2f
 
-        // keep the GL vignette aligned with the capture box (uv window relative
-        // to the GL surface = default frame), so the vignette darkens the
-        // CAPTURE range exactly like the saved photo
-        LaunchedEffect(fx, fy, fw, fh, bx, by, bw, bh) {
-            previewRef?.setVignetteWindow(
-                ((bx - fx) + bw / 2f) / fw,
-                ((by - fy) + bh / 2f) / fh,
-                (bw / fw).coerceAtLeast(1e-4f),
-                (bh / fh).coerceAtLeast(1e-4f),
-            )
-        }
+        // vignette 由 photon CameraPreviewGL 内部 GL 管线处理（ColorRecipeParams.vignette），
+        // 不再需要外部 setVignetteWindow 调用。
 
         // ---- preview surface container = the default viewfinder frame -------
         Box(
@@ -611,26 +551,36 @@ fun CameraScreen(navController: NavController) {
                 .offset { IntOffset(fx.roundToInt(), fy.roundToInt()) }
                 .size(with(density) { fw.toDp() }, with(density) { fh.toDp() }),
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    CameraPreviewView(ctx).also { view ->
-                        // Bind the camera to the NAV BACK STACK ENTRY lifecycle (not the
-                        // activity): leaving this screen releases the camera immediately
-                        // (no leaked devices, no open/close churn, indicator dot off).
-                        val eng = CameraEngine(ctx, lifecycleOwner)
-                        eng.onMeteringChanged = { manual -> meteringManual = manual }
-                        eng.onLensesChanged = { lensEpoch++ }
-                        engine = eng
-                        view.setCameraEngine(eng)
-                        previewRef = view
-                        // The first LaunchedEffect(selected) run may execute
-                        // BEFORE this factory (previewRef still null →
-                        // setProfile silently dropped). Re-apply now that the
-                        // view exists — without this, the first open showed an
-                        // unstyled preview until the profile was re-selected.
-                        applyAdjustments()
-                    }
+            CameraPreviewGL(
+                aspectRatio = state.getPreviewAspectRatio(),
+                previewSize = state.currentPreviewSize,
+                captureSize = state.currentCaptureSize,
+                captureMode = state.captureMode,
+                sensorOrientation = state.getCurrentCameraInfo()?.sensorOrientation ?: 0,
+                lensFacing = if (state.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_FRONT) 0 else 1,
+                calibrationOffset = calibrationOffset,
+                baselineLut = pvm.currentBaselineLutConfig,
+                currentLut = pvm.currentLutConfig,
+                baselineColorRecipeParams = currentBaselineRecipeParams,
+                colorRecipeParams = currentRecipeParams,
+                focusPoint = state.focusPoint,
+                focusPointSource = state.focusPointSource,
+                isFocusLocked = state.isFocusLocked,
+                isFocusing = state.isFocusing,
+                focusSuccess = state.focusSuccess,
+                meteringMode = state.meteringMode,
+                onSurfaceTextureReady = { previewSurfaceTexture = it },
+                onSurfaceDestroyed = {
+                    if (previewSurfaceTexture === it) previewSurfaceTexture = null
+                    pvm.closeCamera(it)
                 },
+                onTap = { x, y, w, h ->
+                    if (state.isFocusLocked) pvm.unlockFocus()
+                    else pvm.focusOnPoint(x, y, w, h)
+                },
+                onLongPress = { x, y, w, h -> pvm.lockFocusOnPoint(x, y, w, h) },
+                onGLSurfaceViewReady = { pvm.glSurfaceView = it },
+                isAutoFocus = state.isAutoFocus,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -675,13 +625,13 @@ fun CameraScreen(navController: NavController) {
                                 val nx = (off.x / size.width).coerceIn(0f, 1f)
                                 val ny = (off.y / size.height).coerceIn(0f, 1f)
                                 ringPos = Pair(nx, ny)
-                                engine?.tapFocusAndMeter(nx, ny)
-                                // new tap: EV restarts from the middle (0 EV)
-                                engine?.setExposureCompensationIndex(0)
+                                // photon 对焦：像素坐标 + 视口尺寸
+                                pvm.focusOnPoint(off.x, off.y, size.width, size.height)
+                                pvm.setExposureCompensation(0)
                                 evFrac = 0f
-                                evRange = engine?.exposureCompensationRange()
+                                evRange = state.getExposureCompensationRange().let { Pair(it.lower, it.upper) }
                             },
-                            onLongPress = { engine?.cancelManualMetering() },
+                            onLongPress = { pvm.unlockFocus() },
                         )
                     }
                     .drawBehind {
@@ -717,12 +667,12 @@ fun CameraScreen(navController: NavController) {
             // EXACTLY on the ring's horizontal center line; +EV (brighter) goes
             // UP. The old version had no rail and the sun drifted off-line.
             if (meteringManual && ringPos != null && evRange != null &&
-                (engine?.exposureCompensationSupported() == true)
+                (evRange?.let { it.second - it.first > 0 } == true)
             ) {
                 val ring = ringPos!!
                 val range = evRange ?: Pair(0, 0)
                 val span = range.second - range.first
-                val evStep = engine?.exposureCompensationStep() ?: 0f
+                val evStep = state.getExposureCompensationStep()
                 val trackH = with(density) { 156.dp.toPx() }   // rail height = 3× the 52dp focus ring
                 val containerW = with(density) { 48.dp.toPx() }
                 val sunSize = with(density) { 36.dp.toPx() }
@@ -747,7 +697,7 @@ fun CameraScreen(navController: NavController) {
                                 change.consume()
                                 if (span > 0) {
                                     evFrac = (evFrac - dragAmount / sunRange).coerceIn(-1f, 1f)
-                                    engine?.setExposureCompensationIndex((evFrac * span / 2f).roundToInt())
+                                    pvm.setExposureCompensation((evFrac * span / 2f).roundToInt())
                                 }
                             }
                         }
@@ -833,21 +783,15 @@ fun CameraScreen(navController: NavController) {
             rawCapable = rawCapable,
             rawOn = rawOn,
             meteringMode = meteringMode,
+            liveOn = liveOn,
             onFlashToggle = {
-                val next = when (flashMode) {
-                    ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
-                    ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_AUTO
-                    else -> ImageCapture.FLASH_MODE_OFF
-                }
-                flashMode = next
-                engine?.setFlashMode(next)
+                pvm.toggleFlash()
             },
             onEvClick = { sheetTarget = "EV" },
             onRawToggle = {
                 rawOn = !rawOn
                 sp.edit().putBoolean("raw_isp_enabled", rawOn).apply()
-                // OUTPUT_FORMAT 是 bind 时属性 → engine 内部走 rebind 生效
-                engine?.setRawIspEnabled(rawOn)
+                pvm.setUseRaw(rawOn)
                 Toast.makeText(
                     context,
                     if (rawOn) "RAW（实验性功能）已开启" else "RAW 已关闭",
@@ -855,10 +799,26 @@ fun CameraScreen(navController: NavController) {
                 ).show()
             },
             onMeteringClick = {
-                engine?.cycleMeteringMode()?.let { next ->
-                    meteringMode = next
-                    Toast.makeText(context, "测光：${meteringLabel(next)}", Toast.LENGTH_SHORT).show()
-                }
+                // 循环测光模式（对齐 photon MeteringMode 枚举）
+                val order = listOf(
+                    MeteringMode.SYSTEM_DEFAULT,
+                    MeteringMode.CENTER_WEIGHTED,
+                    MeteringMode.SPOT,
+                    MeteringMode.AVERAGE,
+                    MeteringMode.HIGHLIGHT_PRIORITY,
+                )
+                val next = order[(order.indexOf(state.meteringMode) + 1) % order.size]
+                pvm.setMeteringMode(next)
+                Toast.makeText(context, "测光：${meteringLabel(next)}", Toast.LENGTH_SHORT).show()
+            },
+            onLiveToggle = {
+                liveOn = !liveOn
+                sp.edit().putBoolean("use_live_photo", liveOn).apply()
+                Toast.makeText(
+                    context,
+                    if (liveOn) "动态照片已开启（录制将在下版生效）" else "动态照片已关闭",
+                    Toast.LENGTH_SHORT,
+                ).show()
             },
             onSettingsClick = { showSettings = true },
             modifier = Modifier
@@ -878,8 +838,8 @@ fun CameraScreen(navController: NavController) {
             )
         }
 
-        val minZoom = remember(engine, lensEpoch) { engine?.minZoom() ?: 1f }
-        val maxZoom = remember(engine, lensEpoch) { engine?.maxZoom() ?: 5f }
+        val minZoom = state.getMinZoom()
+        val maxZoom = state.getMaxZoom()
         BottomPanel(
             selected = selected,
             onPresetClick = { navController.navigate("presets") },
@@ -887,7 +847,7 @@ fun CameraScreen(navController: NavController) {
             onSheetTarget = { sheetTarget = it },
             timerSec = timerSec,
             onTimerToggle = { timerSec = when (timerSec) { 0 -> 3; 3 -> 10; else -> 0 } },
-            onFlip = { engine?.switchFacing() },
+            onFlip = { pvm.switchCamera() },
             lastCapture = lastCapture,
             thumbScale = thumbAnim.value,
             shutterScale = shutterAnim.value,
@@ -902,12 +862,8 @@ fun CameraScreen(navController: NavController) {
             zoomX = zoomState,
             minZoom = minZoom,
             maxZoom = maxZoom,
-            // engine stores the UNCLAMPED total zoom (native part clamps at
-            // opticalMax, the digital tail is the UI crop) → rotor readout and
-            // viewfinder box stay consistent past the optical limit
             onZoom = { z ->
-                engine?.setZoom(z)
-                zoomState = engine?.zoomRatio ?: z
+                pvm.setZoomRatio(z)
             },
             onShutter = {
                 if (!shotPending) {
@@ -1008,6 +964,11 @@ fun CameraScreen(navController: NavController) {
 
         // 0.6.0 全屏设置页（PhotonCamera 风格）替代底部半透明弹层；
         // RAW 开关已迁至顶栏，构图网格开关移除（功能重复）。
+        // 0.7.2: 系统返回键拦截——设置/调试层打开时返回只关闭当前层，
+        // 不再把整个 APP 退回桌面。
+        androidx.activity.compose.BackHandler(enabled = showSettings) {
+            showSettings = false
+        }
         if (showSettings) {
             AppSettingsScreen(
                 onDismiss = { showSettings = false },
@@ -1015,7 +976,10 @@ fun CameraScreen(navController: NavController) {
             )
         }
 
-        if (showDebug) DebugConnectDialog(onDismiss = { showDebug = false })
+        if (showDebug) {
+            androidx.activity.compose.BackHandler(enabled = true) { showDebug = false }
+            DebugConnectDialog(onDismiss = { showDebug = false })
+        }
     }
 }
 
@@ -1038,20 +1002,20 @@ private fun PermissionGate(onRequest: () -> Unit) {
  * and the settings entry. Evenly spaced, per the target UI.
  */
 /** 0.6.0 测光模式 → 图标/文案（循环切换用，语义对齐仓库测光设置）。 */
-private fun meteringIcon(mode: CameraEngine.MeteringMode) = when (mode) {
-    CameraEngine.MeteringMode.SYSTEM_DEFAULT -> Icons.Outlined.CenterFocusWeak      // 系统默认
-    CameraEngine.MeteringMode.CENTER_WEIGHTED -> Icons.Default.Adjust               // 中央重点
-    CameraEngine.MeteringMode.AVERAGE -> Icons.Default.BlurOn                       // 平均测光
-    CameraEngine.MeteringMode.HIGHLIGHT_PRIORITY -> Icons.Default.WbSunny           // 高光优先
-    CameraEngine.MeteringMode.SPOT -> Icons.Default.MyLocation                      // 点测光
+private fun meteringIcon(mode: MeteringMode) = when (mode) {
+    MeteringMode.SYSTEM_DEFAULT -> Icons.Outlined.CenterFocusWeak      // 系统默认
+    MeteringMode.CENTER_WEIGHTED -> Icons.Default.Adjust               // 中央重点
+    MeteringMode.AVERAGE -> Icons.Default.BlurOn                       // 平均测光
+    MeteringMode.HIGHLIGHT_PRIORITY -> Icons.Default.WbSunny           // 高光优先
+    MeteringMode.SPOT -> Icons.Default.MyLocation                      // 点测光
 }
 
-private fun meteringLabel(mode: CameraEngine.MeteringMode) = when (mode) {
-    CameraEngine.MeteringMode.SYSTEM_DEFAULT -> "系统默认"
-    CameraEngine.MeteringMode.CENTER_WEIGHTED -> "中央重点"
-    CameraEngine.MeteringMode.AVERAGE -> "平均测光"
-    CameraEngine.MeteringMode.HIGHLIGHT_PRIORITY -> "高光优先"
-    CameraEngine.MeteringMode.SPOT -> "点测光"
+private fun meteringLabel(mode: MeteringMode) = when (mode) {
+    MeteringMode.SYSTEM_DEFAULT -> "系统默认"
+    MeteringMode.CENTER_WEIGHTED -> "中央重点"
+    MeteringMode.AVERAGE -> "平均测光"
+    MeteringMode.HIGHLIGHT_PRIORITY -> "高光优先"
+    MeteringMode.SPOT -> "点测光"
 }
 
 @Composable
@@ -1059,11 +1023,13 @@ private fun TopBar(
     flashMode: Int,
     rawCapable: Boolean,
     rawOn: Boolean,
-    meteringMode: CameraEngine.MeteringMode,
+    meteringMode: MeteringMode,
+    liveOn: Boolean,
     onFlashToggle: () -> Unit,
     onEvClick: () -> Unit,
     onRawToggle: () -> Unit,
     onMeteringClick: () -> Unit,
+    onLiveToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1083,12 +1049,13 @@ private fun TopBar(
             )
         }
         IconButton(onClick = onFlashToggle, modifier = Modifier.size(40.dp)) {
+            // photon flashMode: 0=关, 1=开, 2=手电
             val icon = when (flashMode) {
-                ImageCapture.FLASH_MODE_ON -> Icons.Default.FlashOn
-                ImageCapture.FLASH_MODE_AUTO -> Icons.Default.FlashAuto
+                1 -> Icons.Default.FlashOn
+                2 -> Icons.Default.FlashAuto
                 else -> Icons.Default.FlashOff
             }
-            val tint = if (flashMode == ImageCapture.FLASH_MODE_OFF) {
+            val tint = if (flashMode == 0) {
                 TextPrimary.copy(alpha = 0.9f)
             } else AccentOrange
             Icon(icon, contentDescription = "闪光灯", tint = tint, modifier = Modifier.size(22.dp))
@@ -1104,12 +1071,21 @@ private fun TopBar(
                 )
             }
         }
+        // 0.7.3 LIVE 图开关（指导手册 #2）：拍摄同时录制动态照片短视频
+        IconButton(onClick = onLiveToggle, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.MotionPhotosOn,
+                contentDescription = "动态照片",
+                tint = if (liveOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
+                modifier = Modifier.size(22.dp),
+            )
+        }
         // 0.6.0 测光模式：点击循环切换（系统默认→中央重点→平均→高光优先→点测）
         IconButton(onClick = onMeteringClick, modifier = Modifier.size(40.dp)) {
             Icon(
                 meteringIcon(meteringMode),
                 contentDescription = "测光：${meteringLabel(meteringMode)}",
-                tint = if (meteringMode == CameraEngine.MeteringMode.SYSTEM_DEFAULT) {
+                tint = if (meteringMode == MeteringMode.SYSTEM_DEFAULT) {
                     TextPrimary.copy(alpha = 0.85f)
                 } else AccentOrange,
                 modifier = Modifier.size(22.dp),
@@ -1144,6 +1120,45 @@ internal fun UpdateCheckRow() {
     }
     var apkFile by remember { mutableStateOf<File?>(null) }
 
+    // 0.7.1: DownloadManager 托管下载——进程被杀/黑屏后重进本页时续接状态。
+    LaunchedEffect(Unit) {
+        val (id, code) = UpdateChecker.pendingDownload(context) ?: return@LaunchedEffect
+        if (code <= UpdateChecker.installedVersionCode(context)) {
+            UpdateChecker.clearDownloadState(context)
+            return@LaunchedEffect
+        }
+        phase = UpdPhase.DOWNLOADING
+        status = "恢复下载（系统下载器接管）…"
+        val st = UpdateChecker.queryDownload(context, id)
+        when {
+            st == null -> { UpdateChecker.clearDownloadState(context); phase = UpdPhase.IDLE }
+            st.status == android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                apkFile = UpdateChecker.downloadedFileNow(context, id)
+                if (apkFile != null) {
+                    phase = UpdPhase.READY
+                    status = "下载完成，点击安装"
+                } else {
+                    UpdateChecker.clearDownloadState(context); phase = UpdPhase.IDLE
+                }
+            }
+            st.status == android.app.DownloadManager.STATUS_FAILED -> {
+                UpdateChecker.clearDownloadState(context); phase = UpdPhase.IDLE
+                status = "下载失败，点击重试"
+            }
+            else -> scope.launch {
+                val f = UpdateChecker.awaitDownload(context, id) { rec, tot ->
+                    status = if (tot > 0) "下载中 ${rec * 100 / tot}%" else "下载中 ${rec / 1024 / 1024}MB"
+                }
+                if (f != null) {
+                    apkFile = f; phase = UpdPhase.READY; status = "下载完成，点击安装"
+                } else {
+                    UpdateChecker.clearDownloadState(context)
+                    phase = UpdPhase.IDLE; status = "下载失败，点击重试"
+                }
+            }
+        }
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1168,7 +1183,10 @@ internal fun UpdateCheckRow() {
                             else -> {
                                 status = "发现新版本 v${info.versionName}，下载中…"
                                 phase = UpdPhase.DOWNLOADING
-                                val f = UpdateChecker.downloadApk(context, info) { rec, tot ->
+                                // 0.7.1: 系统 DownloadManager 托管——黑屏/退后台/进程
+                                // 被杀都不断，这里只做轻量进度轮询。
+                                val id = UpdateChecker.startDownload(context, info)
+                                val f = UpdateChecker.awaitDownload(context, id) { rec, tot ->
                                     status = if (tot > 0) {
                                         "下载中 ${rec * 100 / tot}%"
                                     } else {
@@ -1180,6 +1198,7 @@ internal fun UpdateCheckRow() {
                                     phase = UpdPhase.READY
                                     status = "下载完成，点击安装 v${info.versionName}"
                                 } else {
+                                    UpdateChecker.clearDownloadState(context)
                                     status = "下载失败，点击重试"
                                     phase = UpdPhase.IDLE
                                 }

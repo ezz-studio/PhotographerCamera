@@ -4,28 +4,28 @@
   "name": "Smoke Look",
   "validation_status": "validated",
   "exposure": {
-    "bias": -0.018972255512993717
+    "bias": -0.07799920311223679
   },
   "white_balance": {
-    "temperature_bias": 0.1586508592181749,
-    "tint_bias": -0.35822330366170574
+    "temperature_bias": 0.00602996600409575,
+    "tint_bias": -0.13629214314255775
   },
   "color_matrix": {
     "matrix_3x3": [
       [
-        1.1194926596861186,
+        1.2578357872556891,
         0.0,
         0.0
       ],
       [
         0.0,
-        1.4997818676802466,
+        1.1693746121719826,
         0.0
       ],
       [
         0.0,
         0.0,
-        1.4283658962858568
+        1.2541678144062898
       ]
     ],
     "input_gamut": "sRGB",
@@ -142,11 +142,11 @@
   },
   "highlight_rolloff": {
     "threshold": 0.7,
-    "strength": 0.8998444692317066,
+    "strength": 4.130370461985383e-06,
     "saturation": 1.0
   },
   "shadow": {
-    "black_point": 0.002370136195256769,
+    "black_point": 9.375490574942988e-06,
     "compression": 0.0,
     "tint": [
       0.2585,
@@ -165,13 +165,13 @@
     "flare": 0.0
   },
   "grain": {
-    "amount": 5.9608609865491405e-06,
+    "amount": 0.008451630998395325,
     "size": 1.0,
     "density": 1.0
   },
   "noise": {
-    "luma": 0.0028996534367628575,
-    "chroma": 0.008363796474429365
+    "luma": 0.009492565884439145,
+    "chroma": 0.25990019777403783
   },
   "halation": {
     "amount": 0.0,
@@ -185,7 +185,7 @@
     "threshold": 0.9
   },
   "vignette": {
-    "amount": 0.19135989947340934,
+    "amount": 0.28757080847892763,
     "radius": 1.0,
     "feather": 0.5,
     "center": [

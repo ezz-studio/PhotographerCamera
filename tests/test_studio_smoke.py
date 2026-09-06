@@ -142,8 +142,22 @@ def main() -> int:
         v = _req("/api/validate", {"profile": prof})
         print(f"[8] schema check  ok={v['ok']} errors={v['errors'][:2]}")
 
-        saved = _req("/api/save", {"profile": tuned, "path": "profiles/studio_smoke/tuned.json"})
-        print(f"[9] save          {saved['path']}")
+        # save WITH a PNG icon -> the icon must land next to the JSON under the
+        # SAME base name (App preset list pairs <id>.json with <id>.png).
+        import base64, io as _io
+        _icon_buf = _io.BytesIO()
+        Image.fromarray(np.zeros((16, 16, 3), dtype=np.uint8), "RGB").save(_icon_buf, format="PNG")
+        _icon_data = "data:image/png;base64," + base64.b64encode(_icon_buf.getvalue()).decode()
+        saved = _req("/api/save", {
+            "profile": tuned,
+            "path": "profiles/studio_smoke/tuned.json",
+            "icon": {"ext": "png", "data": _icon_data},
+        })
+        assert os.path.isfile(saved["path"]), "profile json not saved"
+        assert saved.get("icon_path") and os.path.isfile(saved["icon_path"]), "same-named icon not saved"
+        assert os.path.splitext(saved["path"])[0] == os.path.splitext(saved["icon_path"])[0], \
+            "profile/icon name mismatch"
+        print(f"[9] save+icon     {os.path.basename(saved['path'])} + {os.path.basename(saved['icon_path'])}")
 
         exp = _req("/api/export_android", {"profile": prof, "name": "smoke_look"})
         print(f"[10] android      {exp['path']}")

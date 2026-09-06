@@ -5,6 +5,8 @@
  */
 package com.photographercamera.core.photon.color
 
+import com.photographercamera.core.photon.raw.ColorSpace
+
 
 internal object LutShaderMappings {
     fun transferCurveId(curve: TransferCurve?): Int {

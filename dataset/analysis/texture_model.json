@@ -1,8 +1,8 @@
 {
   "schema": "texture_model/v1",
-  "n_images": 12,
-  "luma_noise": 9.8316,
-  "chroma_noise": 51.3429,
+  "n_images": 780,
+  "luma_noise": 11.2188,
+  "chroma_noise": 34.7903,
   "noise_frequency": "high",
   "grain_size": 1.0,
   "grain_density": 1.0,

@@ -1,12 +1,12 @@
 {
-  "overall_test_loss": 0.57877,
+  "overall_test_loss": 0.93963,
   "components": {
-    "color": 0.17312,
-    "tone": 0.19471,
-    "histogram": 0.04688,
-    "hsl": 0.0468,
-    "highlight": 0.0,
-    "shadow": 0.07102,
-    "texture": 0.31025
+    "color": 0.08882,
+    "tone": 0.15754,
+    "histogram": 0.03628,
+    "hsl": 0.26279,
+    "highlight": 0.29396,
+    "shadow": 0.13324,
+    "texture": 0.38844
   }
 }

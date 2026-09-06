@@ -1,0 +1,209 @@
+{
+  "version": 2,
+  "schema_version": 1,
+  "name": "光月定大青蛙",
+  "validation_status": "validated",
+  "exposure": {
+    "bias": 0.17633789776692926
+  },
+  "white_balance": {
+    "temperature_bias": 0.24,
+    "tint_bias": -0.14
+  },
+  "color_matrix": {
+    "matrix_3x3": [
+      [
+        0.8819626648351018,
+        0,
+        0
+      ],
+      [
+        0,
+        0.932181289297508,
+        0
+      ],
+      [
+        0,
+        0,
+        1.1280053428144374
+      ]
+    ],
+    "input_gamut": "sRGB",
+    "output_gamut": "sRGB"
+  },
+  "hsl": {
+    "red": {
+      "hue_shift": 0,
+      "saturation": 1.0722,
+      "lightness": 1
+    },
+    "orange": {
+      "hue_shift": 0,
+      "saturation": 1.14,
+      "lightness": 1
+    },
+    "yellow": {
+      "hue_shift": 0,
+      "saturation": 0.7969,
+      "lightness": 1
+    },
+    "green": {
+      "hue_shift": 0,
+      "saturation": 0.9033,
+      "lightness": 1
+    },
+    "cyan": {
+      "hue_shift": 0,
+      "saturation": 0.7651,
+      "lightness": 1
+    },
+    "blue": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1
+    },
+    "purple": {
+      "hue_shift": 0,
+      "saturation": 0.7,
+      "lightness": 1
+    }
+  },
+  "tone_curve": {
+    "points": [
+      [
+        0,
+        0.0001
+      ],
+      [
+        0.0625,
+        0.0224
+      ],
+      [
+        0.125,
+        0.0881
+      ],
+      [
+        0.1875,
+        0.1591
+      ],
+      [
+        0.25,
+        0.2284
+      ],
+      [
+        0.3125,
+        0.2953
+      ],
+      [
+        0.375,
+        0.3582
+      ],
+      [
+        0.4375,
+        0.4225
+      ],
+      [
+        0.5,
+        0.4879
+      ],
+      [
+        0.5625,
+        0.5547
+      ],
+      [
+        0.625,
+        0.6247
+      ],
+      [
+        0.6875,
+        0.6948
+      ],
+      [
+        0.75,
+        0.7678
+      ],
+      [
+        0.8125,
+        0.8369
+      ],
+      [
+        0.875,
+        0.9005
+      ],
+      [
+        0.9375,
+        0.9532
+      ],
+      [
+        1,
+        1
+      ]
+    ]
+  },
+  "highlight_rolloff": {
+    "threshold": 0.92,
+    "strength": 0.39,
+    "saturation": 1
+  },
+  "shadow": {
+    "black_point": 0.007548255848368265,
+    "compression": 0.05,
+    "tint": [
+      0.3,
+      0.3,
+      0.3
+    ],
+    "saturation": 1,
+    "contrast": 1
+  },
+  "lens": {
+    "vignette": 0,
+    "chromatic_aberration": 0.0973,
+    "sharpness_falloff": 0,
+    "distortion": 0,
+    "bloom": 0,
+    "flare": 0
+  },
+  "grain": {
+    "amount": 0.24423945260458146,
+    "size": 1,
+    "density": 1
+  },
+  "noise": {
+    "luma": 0.08,
+    "chroma": 0.08
+  },
+  "halation": {
+    "amount": 0,
+    "radius": 1,
+    "threshold": 0.9,
+    "warmth": 1
+  },
+  "bloom": {
+    "amount": 0,
+    "radius": 1,
+    "threshold": 0.9
+  },
+  "vignette": {
+    "amount": 0.16,
+    "radius": 1,
+    "feather": 0.5,
+    "center": [
+      0.5,
+      0.5
+    ]
+  },
+  "sharpen": {
+    "amount": 0,
+    "radius": 1
+  },
+  "film_curve": {
+    "shadow_floor": 8,
+    "highlight_ceiling": 248
+  },
+  "display": {
+    "name": "光月定大青蛙",
+    "intro": "小麦色白皙皮肤加胶片风格",
+    "icon": "jpg"
+  }
+}
