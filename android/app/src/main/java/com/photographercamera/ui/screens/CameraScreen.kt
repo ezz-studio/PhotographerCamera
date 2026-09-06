@@ -49,12 +49,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Adjust
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Grain
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
@@ -86,6 +90,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -188,6 +193,9 @@ fun CameraScreen(navController: NavController) {
     // tap-to-focus+meter, a long press cancels back to average.
     var meteringManual by remember { mutableStateOf(false) }
 
+    // 0.6.0 测光模式（顶栏图标循环切换，引擎侧同步应用 AE 区域）。
+    var meteringMode by remember { mutableStateOf(CameraEngine.MeteringMode.SYSTEM_DEFAULT) }
+
     // total zoom across lenses (mirrors engine state for recomposition)
     var zoomState by remember { mutableFloatStateOf(1f) }
     // bumped by the engine when lenses are (re)enumerated — recomposes the
@@ -203,6 +211,8 @@ fun CameraScreen(navController: NavController) {
     // self-timer: 0 = off, else seconds
     var timerSec by remember { mutableIntStateOf(0) }
     var shotPending by remember { mutableStateOf(false) }
+    // 0.6.0 系统快门音（MediaActionSound 免存储权限，null=设备不支持静默跳过）
+    val shutterSound = remember { runCatching { android.media.MediaActionSound() }.getOrNull() }
     // 防重入：一次快门 = 一次拍摄。即便 UI 在短时间内触发两次 doCapture，也只拍一张。
     var capturing by remember { mutableStateOf(false) }
     var countdownSec by remember { mutableIntStateOf(0) }
@@ -219,6 +229,28 @@ fun CameraScreen(navController: NavController) {
             flashAnim.snapTo(0.8f)
             flashAnim.animateTo(0f, tween(durationMillis = 220, easing = LinearOutSlowInEasing))
         }
+        // 0.6.0 快门声音 / 拍摄震动（设置页开关，默认均开）。
+        val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+        if (sp.getBoolean("shutter_sound", true)) {
+            shutterSound?.play(android.media.MediaActionSound.SHUTTER_CLICK)
+        }
+        if (sp.getBoolean("capture_vibrate", true)) {
+            try {
+                val vib = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    val vm = context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE)
+                        as? android.os.VibratorManager
+                    vm?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(android.content.Context.VIBRATOR_SERVICE)
+                        as? android.os.Vibrator
+                }
+                vib?.vibrate(
+                    android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE),
+                )
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     // Live QuickControl adjustments (WB / Grain) applied on top of the chosen preset.
@@ -226,6 +258,9 @@ fun CameraScreen(navController: NavController) {
     var adjEv by remember { mutableFloatStateOf(0f) }
     var adjWbTemp by remember { mutableFloatStateOf(0f) }
     var adjWbTint by remember { mutableFloatStateOf(0f) }
+    // 0.6.0 AWB 开关：开启=相机自动白平衡，色温/色调滑块灰置不可调；
+    // 关闭=用户接管（GPU 后段相对调整），滑块可用。持久化到 pc_settings。
+    var awbOn by remember { mutableStateOf(sp.getBoolean("awb_on", true)) }
     // Grain is a MULTIPLIER on the profile's own grain amount: 1.0 = keep the
     // preset's grain character unchanged, 0 = no grain, 2 = double it.
     var adjGrain by remember { mutableFloatStateOf(1f) }
@@ -382,6 +417,24 @@ fun CameraScreen(navController: NavController) {
             previewRef?.captureCurrentFrame {
                     saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), digitalFactor))
                 }
+        }
+    }
+
+    // 0.6.0 音量键：MainActivity 经 VolumeKeyBus 派发（拍照=doCapture 全语义，
+    // 含连拍守卫/计时器；变焦=乘除 1.2 步进）。doCapture 闭包捕获的均为
+    // remember 的稳定 State 引用，读取即时值，无陈旧闭包问题。
+    DisposableEffect(Unit) {
+        com.photographercamera.core.util.VolumeKeyBus.onCapture = { doCapture() }
+        com.photographercamera.core.util.VolumeKeyBus.onZoomStep = { zoomIn ->
+            val eng = engine
+            val cur = eng?.zoomRatio ?: zoomState
+            val next = if (zoomIn) cur * 1.2f else (cur / 1.2f)
+            eng?.setZoom(next)
+            zoomState = eng?.zoomRatio ?: next
+        }
+        onDispose {
+            com.photographercamera.core.util.VolumeKeyBus.onCapture = null
+            com.photographercamera.core.util.VolumeKeyBus.onZoomStep = null
         }
     }
 
@@ -773,11 +826,13 @@ fun CameraScreen(navController: NavController) {
             }
         }
 
-        // top bar: EV / flash / metering indicator / settings — sits in the
+        // top bar: EV / flash / RAW / metering / settings — sits in the
         // reserved strip ABOVE the viewfinder frame
         TopBar(
-            meteringManual = meteringManual,
             flashMode = flashMode,
+            rawCapable = rawCapable,
+            rawOn = rawOn,
+            meteringMode = meteringMode,
             onFlashToggle = {
                 val next = when (flashMode) {
                     ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
@@ -788,6 +843,23 @@ fun CameraScreen(navController: NavController) {
                 engine?.setFlashMode(next)
             },
             onEvClick = { sheetTarget = "EV" },
+            onRawToggle = {
+                rawOn = !rawOn
+                sp.edit().putBoolean("raw_isp_enabled", rawOn).apply()
+                // OUTPUT_FORMAT 是 bind 时属性 → engine 内部走 rebind 生效
+                engine?.setRawIspEnabled(rawOn)
+                Toast.makeText(
+                    context,
+                    if (rawOn) "RAW（实验性功能）已开启" else "RAW 已关闭",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+            onMeteringClick = {
+                engine?.cycleMeteringMode()?.let { next ->
+                    meteringMode = next
+                    Toast.makeText(context, "测光：${meteringLabel(next)}", Toast.LENGTH_SHORT).show()
+                }
+            },
             onSettingsClick = { showSettings = true },
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -873,18 +945,49 @@ fun CameraScreen(navController: NavController) {
                             Text("${"%.2f".format(adjEv)} EV", color = TextSecondary, fontSize = 13.sp)
                         }
                         "WB" -> {
-                            Text("色温", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "AWB 自动白平衡",
+                                    color = TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = awbOn,
+                                    onCheckedChange = {
+                                        awbOn = it
+                                        sp.edit().putBoolean("awb_on", it).apply()
+                                    },
+                                )
+                            }
+                            Text(
+                                "色温",
+                                color = if (awbOn) TextSecondary else TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
                             AdjustSlider(
                                 value = adjWbTemp,
                                 center = 0f,
                                 range = -1f..1f,
+                                enabled = !awbOn,
                                 onValueChange = { adjWbTemp = it; applyAdjustments() },
                             )
-                            Text("色调", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                "色调",
+                                color = if (awbOn) TextSecondary else TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
                             AdjustSlider(
                                 value = adjWbTint,
                                 center = 0f,
                                 range = -1f..1f,
+                                enabled = !awbOn,
                                 onValueChange = { adjWbTint = it; applyAdjustments() },
                             )
                         }
@@ -903,26 +1006,12 @@ fun CameraScreen(navController: NavController) {
             }
         }
 
-        // settings sheet: grid toggle + debug log entry (kept OUT of the main
-        // UI — the old floating button pushed the whole bottom panel up)
+        // 0.6.0 全屏设置页（PhotonCamera 风格）替代底部半透明弹层；
+        // RAW 开关已迁至顶栏，构图网格开关移除（功能重复）。
         if (showSettings) {
-            SettingsSheet(
-                gridOn = showGrid,
-                onGridToggle = {
-                    showGrid = !showGrid
-                    context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
-                        .edit().putBoolean("show_grid", showGrid).apply()
-                },
-                rawCapable = rawCapable,
-                rawOn = rawOn,
-                onRawToggle = {
-                    rawOn = !rawOn
-                    sp.edit().putBoolean("raw_isp_enabled", rawOn).apply()
-                    // OUTPUT_FORMAT 是 bind 时属性 → engine 内部走 rebind 生效
-                    engine?.setRawIspEnabled(rawOn)
-                },
-                onDebugClick = { showSettings = false; showDebug = true },
+            AppSettingsScreen(
                 onDismiss = { showSettings = false },
+                onDebugClick = { showSettings = false; showDebug = true },
             )
         }
 
@@ -948,12 +1037,33 @@ private fun PermissionGate(onRequest: () -> Unit) {
  * indicator (STATUS ONLY — average = outline icon, manual tap = filled orange)
  * and the settings entry. Evenly spaced, per the target UI.
  */
+/** 0.6.0 测光模式 → 图标/文案（循环切换用，语义对齐仓库测光设置）。 */
+private fun meteringIcon(mode: CameraEngine.MeteringMode) = when (mode) {
+    CameraEngine.MeteringMode.SYSTEM_DEFAULT -> Icons.Outlined.CenterFocusWeak      // 系统默认
+    CameraEngine.MeteringMode.CENTER_WEIGHTED -> Icons.Default.Adjust               // 中央重点
+    CameraEngine.MeteringMode.AVERAGE -> Icons.Default.BlurOn                       // 平均测光
+    CameraEngine.MeteringMode.HIGHLIGHT_PRIORITY -> Icons.Default.WbSunny           // 高光优先
+    CameraEngine.MeteringMode.SPOT -> Icons.Default.MyLocation                      // 点测光
+}
+
+private fun meteringLabel(mode: CameraEngine.MeteringMode) = when (mode) {
+    CameraEngine.MeteringMode.SYSTEM_DEFAULT -> "系统默认"
+    CameraEngine.MeteringMode.CENTER_WEIGHTED -> "中央重点"
+    CameraEngine.MeteringMode.AVERAGE -> "平均测光"
+    CameraEngine.MeteringMode.HIGHLIGHT_PRIORITY -> "高光优先"
+    CameraEngine.MeteringMode.SPOT -> "点测光"
+}
+
 @Composable
 private fun TopBar(
-    meteringManual: Boolean,
     flashMode: Int,
+    rawCapable: Boolean,
+    rawOn: Boolean,
+    meteringMode: CameraEngine.MeteringMode,
     onFlashToggle: () -> Unit,
     onEvClick: () -> Unit,
+    onRawToggle: () -> Unit,
+    onMeteringClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -983,12 +1093,25 @@ private fun TopBar(
             } else AccentOrange
             Icon(icon, contentDescription = "闪光灯", tint = tint, modifier = Modifier.size(22.dp))
         }
-        // metering status indicator (not clickable)
-        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        // 0.6.0 RAW 开关从设置迁入顶栏（仅 RAW-capable 设备显示）
+        if (rawCapable) {
+            IconButton(onClick = onRawToggle, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Default.Camera,
+                    contentDescription = "RAW",
+                    tint = if (rawOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        // 0.6.0 测光模式：点击循环切换（系统默认→中央重点→平均→高光优先→点测）
+        IconButton(onClick = onMeteringClick, modifier = Modifier.size(40.dp)) {
             Icon(
-                if (meteringManual) Icons.Outlined.CenterFocusStrong else Icons.Outlined.CenterFocusWeak,
-                contentDescription = if (meteringManual) "手动测光" else "平均测光",
-                tint = if (meteringManual) AccentOrange else TextPrimary.copy(alpha = 0.85f),
+                meteringIcon(meteringMode),
+                contentDescription = "测光：${meteringLabel(meteringMode)}",
+                tint = if (meteringMode == CameraEngine.MeteringMode.SYSTEM_DEFAULT) {
+                    TextPrimary.copy(alpha = 0.85f)
+                } else AccentOrange,
                 modifier = Modifier.size(22.dp),
             )
         }
@@ -1003,96 +1126,6 @@ private fun TopBar(
     }
 }
 
-/** Settings sheet: grid toggle + remote debug log entry. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SettingsSheet(
-    gridOn: Boolean,
-    onGridToggle: () -> Unit,
-    rawCapable: Boolean,
-    rawOn: Boolean,
-    onRawToggle: () -> Unit,
-    onDebugClick: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        dragHandle = {},
-        containerColor = SurfaceDark.copy(alpha = 0.92f),
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 28.dp),
-        ) {
-            Text("设置", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(14.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    Icons.Default.GridOn,
-                    contentDescription = null,
-                    tint = TextPrimary.copy(alpha = 0.9f),
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Text("构图网格", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Switch(checked = gridOn, onCheckedChange = { onGridToggle() })
-            }
-            // RAW ISP 开关（RAW-capable 设备才显示）：从快捷行迁入设置页——
-            // 目标 UI 图的快捷行固定 5 项，RAW 属于进阶拍摄选项。
-            if (rawCapable) {
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(
-                        Icons.Default.PhotoCamera,
-                        contentDescription = null,
-                        tint = TextPrimary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("RAW（实验性功能）", color = TextPrimary, fontSize = 14.sp)
-                        Text(
-                            if (rawOn) "已开启：GPU RAW ISP 直出 Bayer 开发" else "默认关闭：YUV 直采（无 JPEG 压缩）",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                        )
-                    }
-                    Switch(checked = rawOn, onCheckedChange = { onRawToggle() })
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            UpdateCheckRow()
-            Spacer(Modifier.height(6.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onDebugClick)
-                    .padding(vertical = 10.dp),
-            ) {
-                Icon(
-                    Icons.Default.BugReport,
-                    contentDescription = null,
-                    tint = TextPrimary.copy(alpha = 0.9f),
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(12.dp))
-                Text("调试日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text("远程日志 ›", color = TextSecondary, fontSize = 12.sp)
-            }
-        }
-    }
-}
-
 /** 0.4.0 "检查更新"行状态机：IDLE→(检查)→(下载)→READY→拉起系统安装器。 */
 private enum class UpdPhase { IDLE, CHECKING, DOWNLOADING, READY }
 
@@ -1102,7 +1135,7 @@ private enum class UpdPhase { IDLE, CHECKING, DOWNLOADING, READY }
  * UpdateChecker（core/update），UI 只做状态呈现——符合架构功能最小 UI 入口。
  */
 @Composable
-private fun UpdateCheckRow() {
+internal fun UpdateCheckRow() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var phase by remember { mutableStateOf(UpdPhase.IDLE) }
@@ -1193,6 +1226,7 @@ private fun AdjustSlider(
     range: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val density = LocalDensity.current
     val span = range.endInclusive - range.start
@@ -1202,8 +1236,10 @@ private fun AdjustSlider(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.35f)
             .height(34.dp)
-            .pointerInput(Unit) {
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val now = System.currentTimeMillis()

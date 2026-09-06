@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Single source of truth for the app version: defaultConfig.versionName AND the
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
-val APP_VERSION_NAME = "0.5.0"
-val APP_VERSION_CODE = 18
+val APP_VERSION_NAME = "0.6.0"
+val APP_VERSION_CODE = 19
 
 plugins {
     id("com.android.application")
@@ -80,6 +80,7 @@ androidComponents {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     // androidx.lifecycle.compose.LocalLifecycleOwner lives here (the old
     // androidx.compose.ui.platform.LocalLifecycleOwner is deprecated)

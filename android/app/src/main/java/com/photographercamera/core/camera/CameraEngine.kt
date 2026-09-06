@@ -184,11 +184,11 @@ class CameraEngine(
     /**
      * 多帧堆栈采集（0.5.0，PhotonCamera 管线移植）：YUV 直采主通道上叠加
      * 连续 N 帧连拍（每帧独立 takePicture，HAL ISP YUV 输出不变），交给
-     * GlesYuvStacker 对齐合并降噪。filesDir/pc_burst.txt 可改帧数（默认 6，
-     * <2 视为关闭）；filesDir/pc_burst_off.txt 应急后门。闪光模式自动回退
-     * 单帧（precapture 联动与多帧连拍冲突）。
+     * GlesYuvStacker 对齐合并降噪 = 我方的 "JPEG MAX" 主通道。0.6.0 起对齐
+     * 仓库 MAX 帧数默认 4（filesDir/pc_burst.txt 可改帧数，<2 视为关闭）；
+     * filesDir/pc_burst_off.txt 应急后门。闪光模式自动回退单帧。
      */
-    @Volatile private var burstCount: Int = 6
+    @Volatile private var burstCount: Int = 4
 
     private val burstOptOut: Boolean by lazy {
         File(appContext.filesDir, "pc_burst_off.txt").exists()
@@ -285,7 +285,7 @@ class CameraEngine(
         try {
             val f = File(appContext.filesDir, "pc_burst.txt")
             if (f.exists()) {
-                burstCount = f.readText().trim().toIntOrNull() ?: 6
+                burstCount = f.readText().trim().toIntOrNull() ?: 4
             }
         } catch (_: Throwable) {
         }
@@ -625,6 +625,12 @@ class CameraEngine(
                                 "YUV analysis alive ${proxy.width}x${proxy.height} " +
                                     "(direct no-JPEG capture ready)",
                             )
+                        }
+                        // 高光优先测光：每 10 帧做一次最亮区域扫描（轻量 CPU，
+                        // 32x24 网格 ~2.3k 采样点，yuvExecutor 上跑不占 GL 线程）
+                        frameCounter++
+                        if (frameCounter % 10 == 0) {
+                            scanHighlight(proxy)
                         }
                     }
                 }
@@ -1350,6 +1356,123 @@ class CameraEngine(
     }
 
     // ---- focus / metering ---------------------------------------------------------
+
+    /**
+     * 测光模式（0.6.0，语义对齐仓库 MeteringMode，CameraX FocusMeteringAction 实现）：
+     * SYSTEM_DEFAULT=清除自定义区域交给系统；AVERAGE=全画面 AE 区域；
+     * CENTER_WEIGHTED=中心 0.25；SPOT=中心 0.06；HIGHLIGHT_PRIORITY=高亮区域
+     * （分析流每 10 帧做一次 Y 平面降采样亮度扫描，位移 >8% 才重设区域，
+     * 参考 Camera2Controller.updateHighlightPoint 的去抖策略）。
+     */
+    enum class MeteringMode { SYSTEM_DEFAULT, CENTER_WEIGHTED, AVERAGE, HIGHLIGHT_PRIORITY, SPOT }
+
+    @Volatile var meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT
+        private set
+
+    /** 高光优先：最新扫描出的最亮区域（归一化 buffer 坐标），null=尚未扫描。 */
+    @Volatile private var highlightPoint: Pair<Float, Float>? = null
+    private var frameCounter = 0
+
+    fun cycleMeteringMode(): MeteringMode {
+        val values = MeteringMode.entries
+        val next = values[(values.indexOf(meteringMode) + 1) % values.size]
+        setMeteringMode(next)
+        return next
+    }
+
+    fun setMeteringMode(mode: MeteringMode) {
+        meteringMode = mode
+        DebugLog.log("CAM", "metering mode -> $mode")
+        when (mode) {
+            MeteringMode.SYSTEM_DEFAULT -> cancelManualMetering()
+            else -> applyMeteringRegion(mode, useHighlight = mode == MeteringMode.HIGHLIGHT_PRIORITY)
+        }
+    }
+
+    /** 按模式设置 AE 区域（AF 不动——测光模式不应改变对焦）。 */
+    private fun applyMeteringRegion(mode: MeteringMode, useHighlight: Boolean) {
+        val cam = camera ?: return
+        try {
+            val factory = androidx.camera.core.SurfaceOrientedMeteringPointFactory(1f, 1f)
+            // 高光扫描产出的 buffer 归一化坐标 -> 显示归一化坐标（tap 映射的逆变换：
+            // buffer x = display y, buffer y = 1 - display x ⇒ display x = 1 - buffer y,
+            // display y = buffer x）。中心模式直接 (0.5, 0.5)。
+            val (bx, by) = if (useHighlight) {
+                highlightPoint ?: return // 尚无高光数据，等下一帧扫描
+            } else {
+                0.5f to 0.5f
+            }
+            val dx = 1f - by
+            val dy = bx
+            val sizeRatio = when (mode) {
+                MeteringMode.SPOT -> 0.06f
+                MeteringMode.CENTER_WEIGHTED -> 0.25f
+                MeteringMode.HIGHLIGHT_PRIORITY -> 0.08f
+                else -> 1f // AVERAGE：全画面
+            }
+            val point = factory.createPoint(dx, dy, sizeRatio)
+            val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AE)
+                .disableAutoCancel()
+                .build()
+            cam.cameraControl.startFocusAndMetering(action)
+        } catch (e: Exception) {
+            DebugLog.logError("CAM", "applyMeteringRegion($mode) failed", e)
+        }
+    }
+
+    /**
+     * 高光扫描（分析流每 10 帧）：Y 平面 32x24 网格降采样，取最亮块中心，
+     * 归一化 buffer 坐标。位移超过 8% 才更新（防 AE 抖动）。
+     */
+    private fun scanHighlight(proxy: androidx.camera.core.ImageProxy) {
+        try {
+            val plane = proxy.planes[0]
+            val buf = plane.buffer
+            val rowStride = plane.rowStride
+            val pxStride = plane.pixelStride
+            val w = proxy.width
+            val h = proxy.height
+            val gx = 32
+            val gy = 24
+            var bestSum = -1L
+            var bestX = 0
+            var bestY = 0
+            for (by in 0 until gy) {
+                val yy = (by * h / gy).coerceIn(0, h - 1)
+                for (bx in 0 until gx) {
+                    val xx = (bx * w / gx).coerceIn(0, w - 1)
+                    var sum = 0L
+                    // 每格采 3x3 个点（同块内小步进，遇 stride 边界 clamp）
+                    for (dy in -1..1) {
+                        val sy = (yy + dy).coerceIn(0, h - 1)
+                        for (dx in -1..1) {
+                            val sx = (xx + dx).coerceIn(0, w - 1)
+                            val v = buf.get(sy * rowStride + sx * pxStride).toInt() and 0xFF
+                            sum += v
+                        }
+                    }
+                    if (sum > bestSum) {
+                        bestSum = sum
+                        bestX = bx
+                        bestY = by
+                    }
+                }
+            }
+            val nx = ((bestX + 0.5f) / gx)
+            val ny = ((bestY + 0.5f) / gy)
+            val old = highlightPoint
+            if (old == null || kotlin.math.abs(old.first - nx) > 0.08f ||
+                kotlin.math.abs(old.second - ny) > 0.08f
+            ) {
+                highlightPoint = nx to ny
+                if (meteringMode == MeteringMode.HIGHLIGHT_PRIORITY) {
+                    mainHandler.post { applyMeteringRegion(MeteringMode.HIGHLIGHT_PRIORITY, true) }
+                }
+            }
+        } catch (_: Throwable) {
+            // 扫描失败不影响采集链
+        }
+    }
 
     /**
      * Tap-to-focus + meter at display-normalized (nx, ny) in [0,1]². The tap is

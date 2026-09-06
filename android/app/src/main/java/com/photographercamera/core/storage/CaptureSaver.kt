@@ -35,8 +35,10 @@ object CaptureSaver {
 
     /** Save a bitmap into the system gallery. Returns null (with a log) on failure;
      *  any MediaStore row created along the way is DELETED, so a failed save never
-     *  leaves a 0-byte ghost entry (those showed up as thumbless, unopenable photos). */
-    fun save(context: Context, bmp: Bitmap): SavedPhoto? {
+     *  leaves a 0-byte ghost entry (those showed up as thumbless, unopenable photos).
+     *  0.6.0: [gps] 非空时写入 EXIF GPS（"保存地址位置"开关，默认关；权限未授予
+     *  时上层取不到坐标，直接跳过）。 */
+    fun save(context: Context, bmp: Bitmap, gps: Pair<Double, Double>? = null): SavedPhoto? {
         val t0 = android.os.SystemClock.elapsedRealtime()
         var pendingUri: Uri? = null
         return runCatching {
@@ -75,6 +77,9 @@ object CaptureSaver {
             resolver.update(uri, values, null, null)
         }
         pendingUri = null // committed — the row now owns a valid image
+        if (gps != null) {
+            writeGpsExif(context, uri, gps.first, gps.second)
+        }
         Log.i("CaptureSaver", "saved $uri")
         com.photographercamera.core.debug.DebugLog.log(
             "SAVE",
@@ -89,6 +94,22 @@ object CaptureSaver {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
         }.getOrNull()
+    }
+
+    /** EXIF GPS 写入（DMS 度分秒格式）。失败只记日志，不回滚保存。 */
+    private fun writeGpsExif(context: Context, uri: Uri, lat: Double, lon: Double) {
+        runCatching {
+            val pfd = context.contentResolver.openFileDescriptor(uri, "rw") ?: return
+            pfd.use {
+                val exif = androidx.exifinterface.media.ExifInterface(it.fileDescriptor)
+                exif.setLatLong(lat, lon)
+                exif.saveAttributes()
+            }
+            Log.i("CaptureSaver", "gps exif written $lat,$lon")
+        }.onFailure {
+            Log.e("CaptureSaver", "gps exif failed", it)
+            com.photographercamera.core.debug.DebugLog.logError("SAVE", "gps exif failed", it)
+        }
     }
 
     /** List this app's captures (newest first) from MediaStore. */

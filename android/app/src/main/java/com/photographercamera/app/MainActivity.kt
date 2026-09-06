@@ -78,6 +78,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 0.6.0 音量键功能（设置页可选：拍照/变焦/无，默认拍照）。
+     * 经 VolumeKeyBus 派发到前台 CameraScreen；相机页未注册回调时放行系统音量。
+     */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+        ) {
+            val fn = getSharedPreferences("pc_settings", MODE_PRIVATE)
+                .getString("volume_key_function", "拍照") ?: "拍照"
+            when (fn) {
+                "拍照" -> {
+                    com.photographercamera.core.util.VolumeKeyBus.onCapture?.invoke()
+                    return true // 吞掉按键：拍照场景不应触发音量
+                }
+                "变焦" -> {
+                    com.photographercamera.core.util.VolumeKeyBus.onZoomStep
+                        ?.invoke(keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP)
+                    return true
+                }
+                // "无" → fall through，系统音量
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onStart() {
         super.onStart()
         com.photographercamera.core.debug.DebugLog.log("LIFECYCLE", "app foreground (onStart)")

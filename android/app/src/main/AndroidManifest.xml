@@ -23,6 +23,11 @@
          runtime prompt; the user grants "install unknown apps" once via the
          system page on first install attempt (API 26+). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 0.6.0 "保存地址位置"开关（默认关）：EXIF GPS 写入用。运行时权限由
+         系统设置页授予（开关开启时引导），未授权时静默跳过 GPS。 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- OpenGL ES 3.0 is REQUIRED: the renderer uses #version 300 es shaders. -->
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
