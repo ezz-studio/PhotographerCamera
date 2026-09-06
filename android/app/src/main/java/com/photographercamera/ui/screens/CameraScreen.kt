@@ -22,6 +22,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.Orientation
@@ -47,10 +49,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.FlashAuto
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.outlined.CenterFocusStrong
@@ -58,11 +65,13 @@ import androidx.compose.material.icons.outlined.CenterFocusWeak
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Slider
+import androidx.camera.core.ImageCapture
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -87,7 +96,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
@@ -99,6 +108,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.photographercamera.core.camera.CameraEngine
+import com.photographercamera.core.camera.StillFrame
 import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.profile.ProfileLoader
 import com.photographercamera.core.storage.CaptureSaver
@@ -110,12 +120,14 @@ import com.photographercamera.ui.theme.ShutterRing
 import com.photographercamera.ui.theme.SurfaceDark
 import com.photographercamera.ui.theme.TextPrimary
 import com.photographercamera.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.min
+import kotlin.math.PI
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -150,7 +162,24 @@ fun CameraScreen(navController: NavController) {
     var previewRef by remember { mutableStateOf<CameraPreviewView?>(null) }
     var engine by remember { mutableStateOf<CameraEngine?>(null) }
     var lastCapture by remember { mutableStateOf<SavedPhoto?>(null) }
-    var showGrid by remember { mutableStateOf(false) }
+    var showGrid by remember {
+        // Persisted: the grid survives cold starts (the quick-control icon is
+        // the primary toggle now, users expect it to remember their choice).
+        val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+        mutableStateOf(sp.getBoolean("show_grid", false))
+    }
+    // 远程调试日志连接入口（默认关闭，不影响任何功能；从设置面板进入）
+    var showDebug by remember { mutableStateOf(false) }
+    // 设置面板（顶栏齿轮）
+    var showSettings by remember { mutableStateOf(false) }
+    // 闪光灯三态（顶栏循环切换：关 -> 开 -> 自动）
+    var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) }
+
+    // RAW ISP 开关（实验性功能，0.3.5 起默认关；目标架构：设备支持 RAW_SENSOR
+    // 才显示该键）。持久化在 pc_settings.raw_isp_enabled（CameraEngine.setRawIspEnabled
+    // 同步写入并 rebind；0.3.5 迁移会把历史遗留的 true 一次性重置为关）。
+    val sp = context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+    var rawOn by remember { mutableStateOf(sp.getBoolean("raw_isp_enabled", false)) }
 
     // Manual metering state, mirrored from CameraEngine via onMeteringChanged.
     // Default = whole-frame average metering; a tap on the frame switches to
@@ -166,9 +195,14 @@ fun CameraScreen(navController: NavController) {
     // follow the engine's zoom whenever lenses (re)load: the default zoom is
     // the WIDE lens base (0.5x on multi-lens devices, 1x on single-lens)
     LaunchedEffect(lensEpoch) { engine?.let { zoomState = it.zoomRatio } }
+    // RAW capability = probe result for the current lens (engine fills
+    // rawCapable during lens enumeration; lensEpoch triggers recomposition)
+    val rawCapable = remember(engine, lensEpoch) { engine?.rawCapable ?: false }
     // self-timer: 0 = off, else seconds
     var timerSec by remember { mutableIntStateOf(0) }
     var shotPending by remember { mutableStateOf(false) }
+    // 防重入：一次快门 = 一次拍摄。即便 UI 在短时间内触发两次 doCapture，也只拍一张。
+    var capturing by remember { mutableStateOf(false) }
     var countdownSec by remember { mutableIntStateOf(0) }
 
     // Capture feedback animations (replaced the old Toast):
@@ -213,12 +247,14 @@ fun CameraScreen(navController: NavController) {
             "applied '$selected' exposure=${applied.exposure} wb=(${applied.wbTemp},${applied.wbTint}) " +
                 "cm=${applied.colorMatrixGL.joinToString() { "%.2f".format(it) }} " +
                 "sharpen=${applied.sharpenAmount} bloom=${applied.bloomAmount} halation=${applied.halationAmount} " +
-                "grain=${applied.grainVec[0]} vignette=${applied.vignetteAmount} film=${applied.filmEnabled}",
+                "grain=${applied.grainVec[0]} noise=(${applied.noiseVec[0]},${applied.noiseVec[1]}) " +
+                "vignette=${applied.vignetteAmount} film=${applied.filmEnabled}",
         )
         previewRef?.setProfile(applied)
     }
 
     fun saveAndNotify(bmp: Bitmap) {
+        capturing = false
         val t0 = android.os.SystemClock.elapsedRealtime()
         val saved = CaptureSaver.save(context, bmp)
         (context as? ComponentActivity)?.runOnUiThread {
@@ -243,54 +279,84 @@ fun CameraScreen(navController: NavController) {
     }
 
     fun doCapture() {
+        if (capturing) {
+            DebugLog.log("SHOT", "capture already in progress — ignored (double-shutter guard)")
+            return
+        }
+        capturing = true
+        // 安全兜底：若某条回调丢失导致 capturing 卡死，8s 后自动复位，避免再也拍不了。
+        scope.launch {
+            kotlinx.coroutines.delay(8000)
+            if (capturing) {
+                DebugLog.log("SHOT", "capture guard timeout — auto reset")
+                capturing = false
+            }
+        }
         val eng = engine
         val t0 = android.os.SystemClock.elapsedRealtime()
         DebugLog.log("SHOT", "shutter pressed (zoom=${eng?.zoomRatio}, focal=${eng?.currentEqFocal()})")
-        // ISP-encoded full-resolution JPEG through the SAME GPU chain as the
-        // preview: the camera's own demosaic/WB runs in hardware (fast, correct
-        // on every device), the film look is applied by the profile chain.
-        val onStill: (Bitmap) -> Unit = { bmp ->
-            if (bmp.width > 1 && bmp.height > 1) {
-                // The still was taken with NATIVE zoom (HAL lens calling around
-                // the shutter), so it already has the user-zoomed FOV at full
-                // sensor resolution - NO CPU crop here (crop would throw away
-                // resolution; the old crop-on-CPU path produced 374x499 stills
-                // at 5.8x).
-                previewRef?.renderBitmapThroughChain(bmp, 1f) { processed ->
-                    DebugLog.log(
-                        "SHOT",
-                        "GPU chain done: ${processed.width}x${processed.height} " +
-                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
-                    )
-                    saveAndNotify(centerCropToRatio(processed, 3f / 4f))
-                }
-            } else {
-                DebugLog.log("SHOT", "still unavailable — falling back to preview frame")
-                previewRef?.captureCurrentFrame {
-                    saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), eng?.zoomRatio ?: 1f))
-                }
+        // Digital-tail factor: past the optical max the still comes back at the
+        // OPTICAL FOV (engine pins native zoom there) and must be center-cropped
+        // by zoom/opticalMax to match the shrunken viewfinder box.
+        val opticalMaxV = eng?.opticalMaxZoom() ?: 1f
+        val digitalFactor = ((eng?.zoomRatio ?: 1f) / opticalMaxV).coerceAtLeast(1f)
+        // 统一成片入口（目标架构）：RAW / ISP 两路都在 StillFrame 收敛，之后
+        // 共用同一个 GPU 动态计算引擎 + 风格链 → JPEG。任一路失败退预览帧。
+        val saveProcessed: (Bitmap) -> Unit = { processed ->
+            saveAndNotify(centerCropZoom(centerCropToRatio(processed, 3f / 4f), digitalFactor))
+        }
+        val fallBackToPreview: () -> Unit = {
+            DebugLog.log("SHOT", "still unavailable — falling back to preview frame")
+            previewRef?.captureCurrentFrame {
+                saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), digitalFactor))
             }
         }
         val issued = eng?.captureStill(
-            onBitmap = onStill,
+            onBitmap = { bmp ->
+                if (bmp.width > 1 && bmp.height > 1) {
+                    // The still was taken with NATIVE zoom (HAL lens calling around
+                    // the shutter), so it already has the user-zoomed FOV at full
+                    // sensor resolution - NO CPU crop here (crop would throw away
+                    // resolution; the old crop-on-CPU path produced 374x499 stills
+                    // at 5.8x).
+                    previewRef?.renderStill(StillFrame.Isp(bmp)) { processed ->
+                        DebugLog.log(
+                            "SHOT",
+                            "GPU chain done (ISP): ${processed.width}x${processed.height} " +
+                                "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
+                        )
+                        if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
+                        else fallBackToPreview()
+                    }
+                } else {
+                    fallBackToPreview()
+                }
+            },
             // RAW ISP mode: the untouched Bayer frame is developed on OUR GPU
-            // (raw_isp.frag) then the same recipe chain applies. Any failure
+            // (raw_isp.frag) then the SAME unified engine applies. Any failure
             // inside the RAW path degrades to the 1x1-bitmap fallback below.
             onRawFrame = { frame ->
-                previewRef?.renderRawThroughChain(frame) { processed ->
+                previewRef?.renderStill(StillFrame.Raw(frame)) { processed ->
                     DebugLog.log(
                         "SHOT",
                         "GPU chain done (RAW): ${processed.width}x${processed.height} " +
                             "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
                     )
-                    if (processed.width > 1 && processed.height > 1) {
-                        saveAndNotify(centerCropToRatio(processed, 3f / 4f))
-                    } else {
-                        DebugLog.log("SHOT", "RAW ISP produced nothing - preview frame fallback")
-                        previewRef?.captureCurrentFrame {
-                            saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), eng?.zoomRatio ?: 1f))
-                        }
-                    }
+                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
+                    else fallBackToPreview()
+                }
+            },
+            // YUV 直采（禁止 JPEG 主通道）：HAL 后 ISP YUV 帧零拷贝进 GPU，
+            // 同一统一引擎出片。proxy 生命周期由渲染端收尾。
+            onYuvFrame = { proxy, rot, mirror ->
+                previewRef?.renderStill(StillFrame.Yuv(proxy, rot, mirror)) { processed ->
+                    DebugLog.log(
+                        "SHOT",
+                        "GPU chain done (YUV): ${processed.width}x${processed.height} " +
+                            "(total ${android.os.SystemClock.elapsedRealtime() - t0}ms)",
+                    )
+                    if (processed.width > 1 && processed.height > 1) saveProcessed(processed)
+                    else fallBackToPreview()
                 }
             },
         ) ?: false
@@ -298,7 +364,7 @@ fun CameraScreen(navController: NavController) {
             // Fallback: grab the current preview frame through the GL chain.
             DebugLog.log("SHOT", "captureStill not issued — preview frame fallback")
             previewRef?.captureCurrentFrame {
-                    saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), eng?.zoomRatio ?: 1f))
+                    saveAndNotify(centerCropZoom(centerCropToRatio(it, 3f / 4f), digitalFactor))
                 }
         }
     }
@@ -320,14 +386,30 @@ fun CameraScreen(navController: NavController) {
 
     LaunchedEffect(hasPermission) {
         if (hasPermission && profiles.isEmpty()) {
-            runBlocking { ProfileLoader.init(context) }
+            // IO off the main thread — runBlocking here stalled first-frame
+            // composition (profile disk IO inside the composition pass).
+            withContext(Dispatchers.IO) {
+                ProfileLoader.init(context)
+                // pick up profiles the user dropped into /sdcard/PhotographerCamera
+                ProfileLoader.importFromPublicInbox(context)
+            }
             profiles.clear(); profiles.addAll(ProfileLoader.listProfiles())
             com.photographercamera.core.debug.DebugLog.log(
                 "PROFILE",
                 "loaded ${profiles.size}: ${profiles.joinToString()}",
             )
             if (selected.isEmpty() && profiles.isNotEmpty()) {
-                selected = profiles.firstOrNull { it.equals("VINTAGE 400", ignoreCase = true) } ?: profiles.first()
+                // Cold start restores the LAST preset used (persisted below);
+                // factory default VINTAGE 400 only when nothing is saved yet.
+                val saved = context
+                    .getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                    .getString("last_preset", null)
+                selected = if (!saved.isNullOrEmpty() && profiles.contains(saved)) {
+                    com.photographercamera.core.debug.DebugLog.log("PROFILE", "restored last preset '$saved'")
+                    saved
+                } else {
+                    profiles.firstOrNull { it.equals("VINTAGE 400", ignoreCase = true) } ?: profiles.first()
+                }
             }
         }
     }
@@ -339,7 +421,20 @@ fun CameraScreen(navController: NavController) {
         }
     }
 
-    LaunchedEffect(selected) {
+    // Keyed on previewRef AND profiles.size: on cold start this effect used to
+    // run BEFORE the AndroidView factory created the preview (previewRef null →
+    // setProfile silently dropped), and BEFORE the async ProfileLoader.init
+    // finished (toGpuParams threw "Unknown profile"). With both as keys the
+    // effect re-runs the moment the view exists AND the moment the profile
+    // list lands — every cold-start race converges to a successful apply.
+    LaunchedEffect(selected, previewRef, profiles.size) {
+        if (selected.isNotEmpty()) {
+            context
+                .getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("last_preset", selected)
+                .apply()
+        }
         applyAdjustments()
     }
 
@@ -355,19 +450,6 @@ fun CameraScreen(navController: NavController) {
             // release the camera BEFORE the GL view tears down its SurfaceTexture
             engine?.close()
         }
-    }
-
-    // Zoom stops for the iPhone-style rotor: nice round marks, clamped to the
-    // device's native zoom window (CONTROL_ZOOM_RATIO_RANGE). Keyed on zoomState
-    // too: back-navigation recomposes while the engine is still closed, so the
-    // stops re-derive once the camera is up.
-    val zoomStops = remember(engine, zoomState) {
-        val mn = engine?.minZoom() ?: 1f
-        val mx = engine?.maxZoom() ?: 5f
-        (listOf(mn, 1f, 2f, 3f, 5f, mx))
-            .filter { it in mn..mx }
-            .toMutableSet().apply { add(1f) }
-            .toList().sorted()
     }
 
     BoxWithConstraints(
@@ -396,25 +478,40 @@ fun CameraScreen(navController: NavController) {
         // The GL preview surface is EXACTLY this frame: the camera image never
         // extends beyond it — everything outside stays the dark background.
         // Bottom-anchored between the top HUD row and the bottom panel.
-        val bottomReserve = with(density) { 208.dp.toPx() }  // focal HUD + quick controls + shutter row
-        val topReserve = with(density) { 64.dp.toPx() }      // metering capsule row
+        val bottomReserve = with(density) { 248.dp.toPx() } // quick controls + zoom rotor + shutter row (raised 24dp per target UI)
+        val topReserve = with(density) { 100.dp.toPx() }    // top bar (EV / flash / metering / settings)
         val slotH = (maxH - topReserve - bottomReserve).coerceAtLeast(1f)
         val fw = min(maxW * 0.96f, slotH * 3f / 4f)
         val fh = fw * 4f / 3f
         val fx = (maxW - fw) / 2f
         val fy = topReserve + (slotH - fh)                   // anchor to slot bottom
 
-        // ---- inner capture box (user UI design, unchanged) -------------------
-        // Zoom technique follows dazz: the zoom is NOT applied to Camera2 —
-        // the session runs at its native 1x FOV and the still is CPU-cropped
-        // with 1/zoom. The box therefore shows the fraction of the 1x frame
-        // the capture covers: f = 1/zoom. The focal HUD derives from the SAME
-        // zoom (eq base x zoom, 26mm industry fallback), so the label, the box
-        // and the saved photo can never disagree.
+        // ---- inner capture box -----------------------------------------------
+        // Hybrid zoom: up to the OPTICAL max the native preview IS the capture
+        // FOV, so the box stays full-frame (photo = what you see). PAST the
+        // optical max the engine pins the sensor zoom (see CameraEngine.setZoom)
+        // and the extra digital reach is shown the DAZZ way — the capture box
+        // shrinks by opticalMax/zoom with a scrim outside, and the still gets
+        // the SAME centered crop, so box and photo can never disagree.
         val eqBase = remember(lensEpoch) {
             engine?.mainEq()?.takeIf { it in 18f..40f } ?: 26f
         }
-        val fTarget = if (zoomState <= 0f) 1f else (1f / zoomState).coerceIn(0.12f, 1f)
+        val opticalMax = remember(engine, lensEpoch) { engine?.opticalMaxZoom() ?: 1f }
+        val fTarget = when {
+            // digital tail (> optical max): strict box=photo — the box shrinks
+            // by opticalMax/zoom and the still gets the same centered crop.
+            zoomState > opticalMax * 1.001f -> (opticalMax / zoomState).coerceIn(0.25f, 1f)
+            // optical zoom segment (1×..opticalMax): a SUBTLE visual shrink as a
+            // zoom indicator (≈12% at the optical limit). The still stays at the
+            // full optical frame — zero quality loss, the box is just a hair
+            // larger than the capture (a ~12% framing margin the user allows).
+            zoomState > 1.001f -> {
+                val t = ((zoomState - 1f) / (opticalMax - 1f).coerceAtLeast(0.001f))
+                    .coerceIn(0f, 1f)
+                1f - 0.12f * t
+            }
+            else -> 1f
+        }
         // Optimized motion: stiffer spring than the old sluggish low-stiffness —
         // follows pinch/rotor closely, still settles smoothly.
         val f by animateFloatAsState(
@@ -457,6 +554,12 @@ fun CameraScreen(navController: NavController) {
                         engine = eng
                         view.setCameraEngine(eng)
                         previewRef = view
+                        // The first LaunchedEffect(selected) run may execute
+                        // BEFORE this factory (previewRef still null →
+                        // setProfile silently dropped). Re-apply now that the
+                        // view exists — without this, the first open showed an
+                        // unstyled preview until the profile was re-selected.
+                        applyAdjustments()
                     }
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -465,6 +568,10 @@ fun CameraScreen(navController: NavController) {
             // focus-ring state
             var ringPos by remember { mutableStateOf<Pair<Float, Float>?>(null) }
             val ringAlpha = remember { Animatable(0f) }
+            // EV slider (sun icon right of the focus ring): -1..1 across the
+            // device's exposure-compensation index range; 0 = no adjustment.
+            var evFrac by remember { mutableFloatStateOf(0f) }
+            var evRange by remember { mutableStateOf<Pair<Int, Int>?>(null) }
             LaunchedEffect(ringPos) {
                 if (ringPos != null) {
                     ringAlpha.snapTo(1f)
@@ -500,6 +607,10 @@ fun CameraScreen(navController: NavController) {
                                 val ny = (off.y / size.height).coerceIn(0f, 1f)
                                 ringPos = Pair(nx, ny)
                                 engine?.tapFocusAndMeter(nx, ny)
+                                // new tap: EV restarts from the middle (0 EV)
+                                engine?.setExposureCompensationIndex(0)
+                                evFrac = 0f
+                                evRange = engine?.exposureCompensationRange()
                             },
                             onLongPress = { engine?.cancelManualMetering() },
                         )
@@ -532,6 +643,98 @@ fun CameraScreen(navController: NavController) {
                     },
             )
 
+            // EV sun slider: a vertical RAIL right of the focus ring (per the
+            // white-UI reference). The sun rides the rail; evFrac=0 → sun center
+            // EXACTLY on the ring's horizontal center line; +EV (brighter) goes
+            // UP. The old version had no rail and the sun drifted off-line.
+            if (meteringManual && ringPos != null && evRange != null &&
+                (engine?.exposureCompensationSupported() == true)
+            ) {
+                val ring = ringPos!!
+                val range = evRange ?: Pair(0, 0)
+                val span = range.second - range.first
+                val evStep = engine?.exposureCompensationStep() ?: 0f
+                val trackH = with(density) { 156.dp.toPx() }   // rail height = 3× the 52dp focus ring
+                val containerW = with(density) { 48.dp.toPx() }
+                val sunSize = with(density) { 36.dp.toPx() }
+                val sunRange = (trackH - sunSize).coerceAtLeast(1f) // sun center travel range
+                val evOffsetX = with(density) { 44.dp.toPx() }     // rail center offset right of ring
+                val readoutLift = with(density) { 22.dp.toPx() }
+                // ring 坐标是相对预览框（fw×fh）的归一化值（onTap 的 size 就是
+                // 预览框），EV 容器也在预览框内定位 —— 必须乘 fw/fh 而不是
+                // maxW/maxH，否则垂直偏差 ny*(maxH-fh) 会把太阳推到右下角。
+                val baseCx = ring.first * fw
+                val baseCy = ring.second * fh
+                // evFrac=0 → centered on the ring line; +1 → top (brighter); -1 → bottom
+                val sunOffsetY = sunRange / 2f - evFrac * sunRange / 2f
+                val containerX = baseCx + evOffsetX - containerW / 2f
+                val containerY = baseCy - trackH / 2f
+                Box(
+                    Modifier
+                        .offset { IntOffset(containerX.roundToInt(), containerY.roundToInt()) }
+                        .size(with(density) { 48.dp }, with(density) { 156.dp })
+                        .pointerInput(span, sunRange) {
+                            detectVerticalDragGestures { change, dragAmount ->
+                                change.consume()
+                                if (span > 0) {
+                                    evFrac = (evFrac - dragAmount / sunRange).coerceIn(-1f, 1f)
+                                    engine?.setExposureCompensationIndex((evFrac * span / 2f).roundToInt())
+                                }
+                            }
+                        }
+                        .drawBehind {
+                            val cx = size.width / 2f
+                            val rail = Color.White.copy(alpha = 0.5f)
+                            val cap = Color.White.copy(alpha = 0.75f)
+                            val stroke = 2.dp.toPx()
+                            val capW = 12.dp.toPx()
+                            drawLine(rail, Offset(cx, 0f), Offset(cx, size.height), strokeWidth = stroke)
+                            drawLine(cap, Offset(cx - capW / 2f, 0f), Offset(cx + capW / 2f, 0f), strokeWidth = stroke)
+                            drawLine(cap, Offset(cx - capW / 2f, size.height), Offset(cx + capW / 2f, size.height), strokeWidth = stroke)
+                        },
+                ) {
+                    // sun handle riding the rail (white disc + rays)
+                    Box(
+                        Modifier
+                            .offset { IntOffset(0, sunOffsetY.roundToInt()) }
+                            .fillMaxWidth()
+                            .height(with(density) { 36.dp }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Canvas(Modifier.size(with(density) { 22.dp })) {
+                            val c = Color.White
+                            val r = size.minDimension / 2f
+                            drawCircle(c, radius = r * 0.42f)
+                            for (i in 0 until 8) {
+                                val ang = i * (PI.toFloat() / 4f)
+                                val dx = kotlin.math.cos(ang)
+                                val dy = kotlin.math.sin(ang)
+                                drawLine(
+                                    c,
+                                    Offset(center.x + dx * r * 0.58f, center.y + dy * r * 0.58f),
+                                    Offset(center.x + dx * r, center.y + dy * r),
+                                    strokeWidth = 2.dp.toPx(),
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                )
+                            }
+                        }
+                        // EV readout floating above the sun handle
+                        Text(
+                            text = "%+.1f".format(evFrac * span / 2f * evStep),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .offset { IntOffset(0, (-readoutLift).roundToInt()) }
+                                .width(60.dp),
+                        )
+                    }
+                }
+            }
+
             // grid lives INSIDE the capture box → always within the shot range
             if (showGrid) {
                 Box(
@@ -552,15 +755,30 @@ fun CameraScreen(navController: NavController) {
                         .background(Color.White.copy(alpha = flashAnim.value)),
                 )
             }
-
-            // metering indicator capsule: top-center of the preview frame
-            MeteringIndicator(
-                manual = meteringManual,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 10.dp),
-            )
         }
+
+        // top bar: EV / flash / metering indicator / settings — sits in the
+        // reserved strip ABOVE the viewfinder frame
+        TopBar(
+            meteringManual = meteringManual,
+            flashMode = flashMode,
+            onFlashToggle = {
+                val next = when (flashMode) {
+                    ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON
+                    ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_AUTO
+                    else -> ImageCapture.FLASH_MODE_OFF
+                }
+                flashMode = next
+                engine?.setFlashMode(next)
+            },
+            onEvClick = { sheetTarget = "EV" },
+            onSettingsClick = { showSettings = true },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                // 目标 UI：顶栏整体下移（原 24dp 贴顶过高）。取景框顶在
+                // topReserve(100dp)，44+40=84dp 仍留 16dp 不压框。
+                .padding(top = 44.dp),
+        )
 
         if (countdownSec > 0) {
             Text(
@@ -572,6 +790,8 @@ fun CameraScreen(navController: NavController) {
             )
         }
 
+        val minZoom = remember(engine, lensEpoch) { engine?.minZoom() ?: 1f }
+        val maxZoom = remember(engine, lensEpoch) { engine?.maxZoom() ?: 5f }
         BottomPanel(
             selected = selected,
             onPresetClick = { navController.navigate("presets") },
@@ -586,14 +806,20 @@ fun CameraScreen(navController: NavController) {
             onGalleryClick = { navController.navigate("gallery") },
             focalMm = (eqBase * zoomState).roundToInt(),
             gridOn = showGrid,
-            onGridToggle = { showGrid = !showGrid },
-            zoomStops = zoomStops,
+            onGridToggle = {
+                showGrid = !showGrid
+                context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                    .edit().putBoolean("show_grid", showGrid).apply()
+            },
             zoomX = zoomState,
-            minZoom = engine?.minZoom() ?: 0.5f,
-            maxZoom = engine?.maxZoom() ?: 5f,
-            onZoom = { v ->
-                engine?.setZoom(v)
-                zoomState = engine?.zoomRatio ?: v
+            minZoom = minZoom,
+            maxZoom = maxZoom,
+            // engine stores the UNCLAMPED total zoom (native part clamps at
+            // opticalMax, the digital tail is the UI crop) → rotor readout and
+            // viewfinder box stay consistent past the optical limit
+            onZoom = { z ->
+                engine?.setZoom(z)
+                zoomState = engine?.zoomRatio ?: z
             },
             onShutter = {
                 if (!shotPending) {
@@ -611,6 +837,8 @@ fun CameraScreen(navController: NavController) {
             ModalBottomSheet(
                 onDismissRequest = { sheetTarget = null },
                 sheetState = sheetState,
+                dragHandle = {},
+                containerColor = SurfaceDark.copy(alpha = 0.92f),
             ) {
                 Column(
                     modifier = Modifier
@@ -619,7 +847,7 @@ fun CameraScreen(navController: NavController) {
                 ) {
                     when (sheetTarget) {
                         "EV" -> {
-                            Text("曝光补偿 (EV) · 双击滑块回中", color = TextPrimary, fontSize = 16.sp)
+                            Text("曝光补偿 EV", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             AdjustSlider(
                                 value = adjEv,
                                 center = 0f,
@@ -629,14 +857,14 @@ fun CameraScreen(navController: NavController) {
                             Text("${"%.2f".format(adjEv)} EV", color = TextSecondary, fontSize = 13.sp)
                         }
                         "WB" -> {
-                            Text("色温 · 双击滑块回中", color = TextPrimary, fontSize = 16.sp)
+                            Text("色温", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             AdjustSlider(
                                 value = adjWbTemp,
                                 center = 0f,
                                 range = -1f..1f,
                                 onValueChange = { adjWbTemp = it; applyAdjustments() },
                             )
-                            Text("色调 · 双击滑块回中", color = TextPrimary, fontSize = 16.sp)
+                            Text("色调", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             AdjustSlider(
                                 value = adjWbTint,
                                 center = 0f,
@@ -645,7 +873,7 @@ fun CameraScreen(navController: NavController) {
                             )
                         }
                         "Grain" -> {
-                            Text("颗粒强度（相对当前预设）· 双击滑块回中", color = TextPrimary, fontSize = 16.sp)
+                            Text("颗粒强度", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             AdjustSlider(
                                 value = adjGrain,
                                 center = 1f,
@@ -654,17 +882,35 @@ fun CameraScreen(navController: NavController) {
                             )
                             Text("×" + "%.2f".format(adjGrain), color = TextSecondary, fontSize = 13.sp)
                         }
-                        else -> {
-                            Text(
-                                "该参数由相机硬件控制，预览管线暂未暴露（后续版本接入）。",
-                                color = TextSecondary,
-                                fontSize = 14.sp,
-                            )
-                        }
                     }
                 }
             }
         }
+
+        // settings sheet: grid toggle + debug log entry (kept OUT of the main
+        // UI — the old floating button pushed the whole bottom panel up)
+        if (showSettings) {
+            SettingsSheet(
+                gridOn = showGrid,
+                onGridToggle = {
+                    showGrid = !showGrid
+                    context.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("show_grid", showGrid).apply()
+                },
+                rawCapable = rawCapable,
+                rawOn = rawOn,
+                onRawToggle = {
+                    rawOn = !rawOn
+                    sp.edit().putBoolean("raw_isp_enabled", rawOn).apply()
+                    // OUTPUT_FORMAT 是 bind 时属性 → engine 内部走 rebind 生效
+                    engine?.setRawIspEnabled(rawOn)
+                },
+                onDebugClick = { showSettings = false; showDebug = true },
+                onDismiss = { showSettings = false },
+            )
+        }
+
+        if (showDebug) DebugConnectDialog(onDismiss = { showDebug = false })
     }
 }
 
@@ -681,75 +927,153 @@ private fun PermissionGate(onRequest: () -> Unit) {
     }
 }
 
+/**
+ * Top bar above the viewfinder: EV sheet entry, 3-state flash toggle, metering
+ * indicator (STATUS ONLY — average = outline icon, manual tap = filled orange)
+ * and the settings entry. Evenly spaced, per the target UI.
+ */
 @Composable
-private fun ZoomRotor(
-    stops: List<Float>,
-    zoom: Float,
-    minZoom: Float,
-    maxZoom: Float,
-    onZoom: (Float) -> Unit,
+private fun TopBar(
+    meteringManual: Boolean,
+    flashMode: Int,
+    onFlashToggle: () -> Unit,
+    onEvClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
-    val tickStep = 0.1f            // zoom represented by each tick (screen-even spacing)
-    val sideTicks = 9             // ticks each side of center → tapered ruler width
-    Box(
+    Row(
         modifier = modifier
-            .draggable(
-                orientation = Orientation.Horizontal,
-                state = rememberDraggableState { delta ->
-                    val newZoom = (zoom - delta / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
-                    onZoom(newZoom)
-                },
-                // NO snap on release: fractional zoom (1.4x) must stay put like the
-                // pinch gesture does. The ticks are a visual ruler, not detents.
-            ),
-        contentAlignment = Alignment.Center,
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // center selector pill behind the live multiplier
-        Box(
-            Modifier
-                .width(46.dp).height(22.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(Color.White.copy(alpha = 0.12f)),
-        )
-        // live current multiplier (always the live value, centered)
-        Text(
-            formatZoom(zoom),
-            color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
-        // tapered ruler: vertical ticks; integer multiples are tallest + thickest,
-        // alpha fades to 0 at both ends (cone look). The center position (i==0) is the
-        // live value itself, so it is shown as the text above instead of a mark.
-        for (i in -sideTicks..sideTicks) {
-            if (i == 0) continue
-            val tZoom = zoom + i * tickStep
-            val edgeFade = (1f - kotlin.math.abs(i).toFloat() / (sideTicks + 1)).coerceIn(0f, 1f)
-            val rangeFade = if (tZoom < minZoom || tZoom > maxZoom) 0.12f else 1f
-            val alpha = (0.7f * edgeFade * rangeFade).coerceIn(0f, 1f)
-            if (alpha <= 0.02f) continue
-            val isInt = kotlin.math.abs(tZoom - tZoom.roundToInt()) < 0.04f
-            val thick = if (isInt) 2.dp else 1.dp
-            val tall = if (isInt) 16.dp else 9.dp
-            Box(
-                Modifier
-                    .offset { IntOffset((i * spacingPx).roundToInt(), 0) }
-                    .width(thick).height(tall)
-                    .background(Color.White.copy(alpha = alpha), shape = RoundedCornerShape(1.dp)),
+        IconButton(onClick = onEvClick, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.WbSunny,
+                contentDescription = "曝光补偿",
+                tint = TextPrimary.copy(alpha = 0.9f),
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(onClick = onFlashToggle, modifier = Modifier.size(40.dp)) {
+            val icon = when (flashMode) {
+                ImageCapture.FLASH_MODE_ON -> Icons.Default.FlashOn
+                ImageCapture.FLASH_MODE_AUTO -> Icons.Default.FlashAuto
+                else -> Icons.Default.FlashOff
+            }
+            val tint = if (flashMode == ImageCapture.FLASH_MODE_OFF) {
+                TextPrimary.copy(alpha = 0.9f)
+            } else AccentOrange
+            Icon(icon, contentDescription = "闪光灯", tint = tint, modifier = Modifier.size(22.dp))
+        }
+        // metering status indicator (not clickable)
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            Icon(
+                if (meteringManual) Icons.Outlined.CenterFocusStrong else Icons.Outlined.CenterFocusWeak,
+                contentDescription = if (meteringManual) "手动测光" else "平均测光",
+                tint = if (meteringManual) AccentOrange else TextPrimary.copy(alpha = 0.85f),
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(onClick = onSettingsClick, modifier = Modifier.size(40.dp)) {
+            Icon(
+                Icons.Default.Settings,
+                contentDescription = "设置",
+                tint = TextPrimary.copy(alpha = 0.9f),
+                modifier = Modifier.size(22.dp),
             )
         }
     }
 }
 
-/** Format a zoom multiplier the iPhone way: 1×, 2×, 0.5, 1.4×. */
-private fun formatZoom(z: Float): String =
-    if (kotlin.math.abs(z - 1f) < 0.05f) "1×"
-    else if (z < 1f) "%.1f".format(z)
-    else if (kotlin.math.abs(z - z.roundToInt()) < 0.05f) "${z.roundToInt()}×"
-    else "%.1f".format(z)
+/** Settings sheet: grid toggle + remote debug log entry. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(
+    gridOn: Boolean,
+    onGridToggle: () -> Unit,
+    rawCapable: Boolean,
+    rawOn: Boolean,
+    onRawToggle: () -> Unit,
+    onDebugClick: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        dragHandle = {},
+        containerColor = SurfaceDark.copy(alpha = 0.92f),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Text("设置", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(14.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Default.GridOn,
+                    contentDescription = null,
+                    tint = TextPrimary.copy(alpha = 0.9f),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("构图网格", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Switch(checked = gridOn, onCheckedChange = { onGridToggle() })
+            }
+            // RAW ISP 开关（RAW-capable 设备才显示）：从快捷行迁入设置页——
+            // 目标 UI 图的快捷行固定 5 项，RAW 属于进阶拍摄选项。
+            if (rawCapable) {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        tint = TextPrimary.copy(alpha = 0.9f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("RAW（实验性功能）", color = TextPrimary, fontSize = 14.sp)
+                        Text(
+                            if (rawOn) "已开启：GPU RAW ISP 直出 Bayer 开发" else "默认关闭：YUV 直采（无 JPEG 压缩）",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    Switch(checked = rawOn, onCheckedChange = { onRawToggle() })
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onDebugClick)
+                    .padding(vertical = 10.dp),
+            ) {
+                Icon(
+                    Icons.Default.BugReport,
+                    contentDescription = null,
+                    tint = TextPrimary.copy(alpha = 0.9f),
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Text("调试日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("远程日志 ›", color = TextSecondary, fontSize = 12.sp)
+            }
+        }
+    }
+}
 
 /**
  * Minimal horizontal slider: tap to seek, drag to scrub, double-tap to snap
@@ -768,7 +1092,7 @@ private fun AdjustSlider(
     val span = range.endInclusive - range.start
     var trackW by remember { mutableStateOf(1) }
     var lastTap by remember { mutableStateOf(0L) }
-    val thumbR = with(density) { 8.dp.toPx() }
+    val thumbR = with(density) { 6.dp.toPx() }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -814,7 +1138,7 @@ private fun AdjustSlider(
         ) {
             // base track
             Box(
-                Modifier.fillMaxWidth().height(3.dp)
+                Modifier.fillMaxWidth().height(2.dp)
                     .background(Color.White.copy(alpha = 0.22f), RoundedCornerShape(2.dp)),
             )
             // center marker (where the neutral / default value sits)
@@ -822,7 +1146,7 @@ private fun AdjustSlider(
             Box(
                 Modifier
                     .offset { IntOffset(cx, 0) }
-                    .width(2.dp).height(14.dp)
+                    .width(2.dp).height(10.dp)
                     .background(Color.White.copy(alpha = 0.5f)),
             )
             // thumb
@@ -830,7 +1154,7 @@ private fun AdjustSlider(
             Box(
                 Modifier
                     .offset { IntOffset((tx - thumbR).toInt(), 0) }
-                    .size(16.dp)
+                    .size(12.dp)
                     .clip(CircleShape)
                     .background(Color.White),
             )
@@ -845,7 +1169,7 @@ private fun GridOverlay() {
             .fillMaxSize()
             .drawBehind {
                 val stroke = 1.dp.toPx()
-                val color = Color.White.copy(alpha = 0.25f)
+                val color = Color.White.copy(alpha = 0.5f)
                 drawLine(color, start = Offset(size.width * 0.33f, 0f), end = Offset(size.width * 0.33f, size.height), strokeWidth = stroke)
                 drawLine(color, start = Offset(size.width * 0.66f, 0f), end = Offset(size.width * 0.66f, size.height), strokeWidth = stroke)
                 drawLine(color, start = Offset(0f, size.height * 0.33f), end = Offset(size.width, size.height * 0.33f), strokeWidth = stroke)
@@ -855,33 +1179,80 @@ private fun GridOverlay() {
 }
 
 /**
- * Metering indicator — translucent capsule at the top-center of the viewfinder.
- * Outline center-focus icon + "平均测光" = whole-frame average metering;
- * filled orange icon + "手动测光" = a manually tapped metering spot is active.
+ * iPhone-style zoom rotor: drag horizontally to change zoom. Ticks are a
+ * visual ruler with even screen spacing (0.1x per tick), integer multiples
+ * taller/thicker, alpha fades to both ends. NO snap on release — fractional
+ * zoom stays put exactly like the pinch gesture. Lives on its own row between
+ * the quick controls and the shutter row.
  */
 @Composable
-private fun MeteringIndicator(manual: Boolean, modifier: Modifier = Modifier) {
-    Row(
+private fun ZoomRotor(
+    zoom: Float,
+    minZoom: Float,
+    maxZoom: Float,
+    onZoom: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+    val tickStep = 0.1f            // zoom represented by each tick (screen-even spacing)
+    val sideTicks = 9             // ticks each side of center → tapered ruler width
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.35f))
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    val newZoom = (zoom - delta / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
+                    onZoom(newZoom)
+                },
+                // NO snap on release: fractional zoom (1.4x) must stay put like the
+                // pinch gesture does. The ticks are a visual ruler, not detents.
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            if (manual) Icons.Outlined.CenterFocusStrong else Icons.Outlined.CenterFocusWeak,
-            contentDescription = if (manual) "手动测光" else "平均测光",
-            tint = if (manual) AccentOrange else TextPrimary.copy(alpha = 0.85f),
-            modifier = Modifier.size(15.dp),
+        // center selector pill behind the live multiplier
+        Box(
+            Modifier
+                .width(46.dp).height(22.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(Color.White.copy(alpha = 0.12f)),
         )
-        Spacer(Modifier.width(5.dp))
+        // live current multiplier (always the live value, centered)
         Text(
-            if (manual) "手动测光" else "平均测光",
-            color = TextPrimary.copy(alpha = 0.9f),
-            fontSize = 11.sp,
+            formatZoom(zoom),
+            color = TextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
         )
+        // tapered ruler: vertical ticks; integer multiples are tallest + thickest,
+        // alpha fades to 0 at both ends (cone look). The center position (i==0) is the
+        // live value itself, so it is shown as the text above instead of a mark.
+        for (i in -sideTicks..sideTicks) {
+            if (i == 0) continue
+            val tZoom = zoom + i * tickStep
+            val edgeFade = (1f - abs(i.toFloat()) / (sideTicks + 1)).coerceIn(0f, 1f)
+            val rangeFade = if (tZoom < minZoom || tZoom > maxZoom) 0.12f else 1f
+            val alpha = (0.7f * edgeFade * rangeFade).coerceIn(0f, 1f)
+            if (alpha <= 0.02f) continue
+            val isInt = abs(tZoom - tZoom.roundToInt()) < 0.04f
+            val thick = if (isInt) 2.dp else 1.dp
+            val tall = if (isInt) 16.dp else 9.dp
+            Box(
+                Modifier
+                    .offset { IntOffset((i * spacingPx).roundToInt(), 0) }
+                    .width(thick).height(tall)
+                    .background(Color.White.copy(alpha = alpha), shape = RoundedCornerShape(1.dp)),
+            )
+        }
     }
 }
+
+/** Format a zoom multiplier the iPhone way: 1×, 2×, 0.5, 1.4×. */
+private fun formatZoom(z: Float): String =
+    if (abs(z - 1f) < 0.05f) "1×"
+    else if (z < 1f) "%.1f".format(z)
+    else if (abs(z - z.roundToInt()) < 0.05f) "${z.roundToInt()}×"
+    else "%.1f".format(z)
 
 @Composable
 private fun BottomPanel(
@@ -899,7 +1270,6 @@ private fun BottomPanel(
     focalMm: Int,
     gridOn: Boolean,
     onGridToggle: () -> Unit,
-    zoomStops: List<Float>,
     zoomX: Float,
     minZoom: Float,
     maxZoom: Float,
@@ -910,48 +1280,41 @@ private fun BottomPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 10.dp),
+            // 目标 UI：快捷行+快门行整体上移 24dp（bottomReserve 同步 272→248，
+            // 取景框底部下探补回高度，缩放条与取景框的间距不变）。
+            .padding(bottom = 34.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // flat HUD above the zoom rotor: grid toggle + focal readout
-        // (no zoom multiplier here — the rotor already shows it)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 2.dp),
-        ) {
-            Icon(
-                Icons.Default.GridOn,
-                contentDescription = "网格",
-                tint = if (gridOn) AccentOrange else TextPrimary.copy(alpha = 0.75f),
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable(onClick = onGridToggle),
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "${focalMm}mm",
-                color = TextPrimary.copy(alpha = 0.9f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
+        // 目标 UI 顺序（严格比对用户提供的 UI 图）：取景框 → 缩放条 → 快捷行
+        // → 快门行。缩放条紧贴取景框下方，快捷行在其下（旧实现把快捷行放在
+        // 缩放条上面，顺序与图相反）。
+        ZoomRotor(
+            zoom = zoomX,
+            minZoom = minZoom,
+            maxZoom = maxZoom,
+            onZoom = onZoom,
+            modifier = Modifier
+                .width(200.dp)
+                .height(40.dp),
+        )
+        Spacer(Modifier.height(10.dp))
         QuickControls(
             sheetTarget = sheetTarget,
             onSheetTarget = onSheetTarget,
             timerSec = timerSec,
             onTimerToggle = onTimerToggle,
             onFlip = onFlip,
-            zoomStops = zoomStops,
-            zoomX = zoomX,
-            minZoom = minZoom,
-            maxZoom = maxZoom,
-            onZoom = onZoom,
+            focalMm = focalMm,
+            gridOn = gridOn,
+            onGridToggle = onGridToggle,
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(22.dp))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp),
+                // 目标 UI：预设卡与相册缩略图内收、贴近快门（原 14dp 顶到屏幕
+                // 两侧边）。SpaceBetween 对称布局 → padding 加大自然靠近快门。
+                .padding(horizontal = 48.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -977,11 +1340,9 @@ private fun QuickControls(
     timerSec: Int,
     onTimerToggle: () -> Unit,
     onFlip: () -> Unit,
-    zoomStops: List<Float>,
-    zoomX: Float,
-    minZoom: Float,
-    maxZoom: Float,
-    onZoom: (Float) -> Unit,
+    focalMm: Int,
+    gridOn: Boolean,
+    onGridToggle: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1000,15 +1361,39 @@ private fun QuickControls(
             selected = sheetTarget == "Grain",
             onClick = { onSheetTarget("Grain") },
         )
-        // iPhone-style physical zoom rotor sits in the CENTER of the button row
-        ZoomRotor(
-            stops = zoomStops,
-            zoom = zoomX,
-            minZoom = minZoom,
-            maxZoom = maxZoom,
-            onZoom = onZoom,
-            modifier = Modifier.width(160.dp).height(40.dp),
-        )
+        // RAW ISP 开关不在快捷行——目标 UI 图的快捷行固定 5 项（WB/Grain/焦距/
+        // 计时/翻转），RAW 入口收敛到设置页（rawCapable 才显示，功能不变）。
+        // grid toggle (icon) + live focal readout (text below): the icon IS
+        // the primary grid switch now (it was non-interactive before, so taps
+        // did nothing → "grid button broken"). Selected mirrors QuickButton.
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .clickable(onClick = onGridToggle)
+                .padding(horizontal = 4.dp),
+        ) {
+            val gridTint = if (gridOn) AccentOrange else TextSecondary
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(if (gridOn) Color.White.copy(alpha = 0.08f) else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.GridOn,
+                    contentDescription = "网格",
+                    tint = gridTint,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(
+                "${focalMm}mm",
+                color = if (gridOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
         QuickButton(
             label = if (timerSec == 0) "关" else "${timerSec}s",
             icon = Icons.Default.Timer,

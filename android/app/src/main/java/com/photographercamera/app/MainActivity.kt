@@ -28,11 +28,15 @@ import com.photographercamera.ui.theme.PhotographerCameraTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Remote shipping must be configured BEFORE the first line is logged,
+        // otherwise the BOOT record would never reach the dev server.
+        com.photographercamera.core.debug.RemoteLog.bootstrap(this)
         // Device-side diagnostics to Downloads/PhotographerCamera_debug.txt:
         // must init BEFORE any camera/GL code logs (buffered lines flush after).
         com.photographercamera.core.debug.DebugLog.init(this)
         installCrashLog()
         enableEdgeToEdge()
+        maybeRequestAllFilesAccess()
         setContent {
             PhotographerCameraTheme {
                 Surface(
@@ -51,6 +55,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Public inbox import needs All-Files-Access on Android 11+. Ask ONCE
+     * (flag in pc_settings): jump to the system settings page; the user can
+     * grant or skip. When not granted, inbox import simply no-ops (logged).
+     */
+    private fun maybeRequestAllFilesAccess() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
+        if (android.os.Environment.isExternalStorageManager()) return
+        val prefs = getSharedPreferences("pc_settings", MODE_PRIVATE)
+        if (prefs.getBoolean("inbox_perm_asked", false)) return
+        prefs.edit().putBoolean("inbox_perm_asked", true).apply()
+        runCatching {
+            startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.fromParts("package", packageName, null),
+                ),
+            )
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        com.photographercamera.core.debug.DebugLog.log("LIFECYCLE", "app foreground (onStart)")
+    }
+
+    override fun onStop() {
+        com.photographercamera.core.debug.DebugLog.log("LIFECYCLE", "app background (onStop)")
+        super.onStop()
     }
 
     /**

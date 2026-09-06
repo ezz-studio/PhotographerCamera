@@ -56,10 +56,15 @@ object DebugLog {
 
     fun log(tag: String, msg: String) {
         val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+        val line = "$ts [$tag] $msg"
         synchronized(lock) {
-            lines.addLast("$ts [$tag] $msg")
+            lines.addLast(line)
             while (lines.size > MAX_LINES) lines.removeFirst()
         }
+        // Ship to the dev server as well. RemoteLog.offer() is O(1) and does all
+        // I/O on its own thread; the extra runCatching is belt-and-braces so a
+        // diagnostics failure can never reach a camera/GL caller.
+        runCatching { RemoteLog.offer(line) }
         scheduleFlush()
     }
 
@@ -96,6 +101,19 @@ object DebugLog {
      */
     fun flushSync() {
         flush(force = true)
+        // Best-effort synchronous push so a crash still reaches the dev server.
+        runCatching { RemoteLog.flushSync() }
+    }
+
+    /**
+     * Turn on (or retarget) remote shipping. Pass a blank URL to switch it off.
+     * Example: `DebugLog.configureRemote("http://1.2.3.4:8080/log")`
+     */
+    fun configureRemote(endpointUrl: String, device: String? = null, sessionId: String? = null) {
+        runCatching {
+            RemoteLog.configure(endpointUrl, device, sessionId)
+            log("LOG", RemoteLog.status())
+        }
     }
 
     private fun flush(force: Boolean) {

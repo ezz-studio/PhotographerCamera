@@ -52,6 +52,7 @@ import android.opengl.GLES30
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import kotlin.math.pow
 
 class ProfileRenderer private constructor(
     private val assets: AssetManager,
@@ -59,6 +60,8 @@ class ProfileRenderer private constructor(
     private val progEffect: Int,
     private val progBlit: Int,
     private val progRawIsp: Int,
+    private val progYuv: Int,
+    private val progChroma: Int,
     private val quad: Int,
 ) {
     companion object {
@@ -89,6 +92,23 @@ class ProfileRenderer private constructor(
                     "GL", "raw_isp program failed to build - RAW ISP path disabled (JPEG fallback)",
                 )
             }
+            // Optional YUV direct-capture stage (StillFrame.Yuv only). Failure
+            // degrades to the ISP-JPEG capture path, never the preview.
+            val progYuv = GLSL.program(assets, "shaders/passthrough.vert", "shaders/yuv_copy.frag")
+            if (progYuv == 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "GL", "yuv_copy program failed to build - YUV direct path disabled (JPEG fallback)",
+                )
+            }
+            // Optional chroma-denoise stage (RAW ISP chain only - the HAL's
+            // multi-frame NR never sees our raw develop). Failure degrades to
+            // the un-denoised RAW output, never blocks the path.
+            val progChroma = GLSL.program(assets, "shaders/passthrough.vert", "shaders/chroma_denoise.frag")
+            if (progChroma == 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "GL", "chroma_denoise program failed to build - RAW chroma NR disabled",
+                )
+            }
             if (progCopy == 0 || progBlit == 0) {
                 throw IllegalStateException("minimum pipeline (oes2d copy / blit) failed to build - preview impossible")
             }
@@ -99,7 +119,7 @@ class ProfileRenderer private constructor(
                 "renderer ready mode=" + (if (degraded.isEmpty()) "FULL_2PASS" else "DEGRADED") +
                     " skipped=[" + degraded.joinToString(",") + "]",
             )
-            return ProfileRenderer(assets, progCopy, progEffect, progBlit, progRawIsp, quad)
+            return ProfileRenderer(assets, progCopy, progEffect, progBlit, progRawIsp, progYuv, progChroma, quad)
         }
 
         private fun makeQuad(): Int {
@@ -135,6 +155,12 @@ class ProfileRenderer private constructor(
     private var outFbo = 0
     private var outW = 0
     private var outH = 0
+
+    // Reusable filter chain (architecture ported from android-gpuimage-plus):
+    // owns a double-buffered A/B RGBA8 pair and runs an ordered list of
+    // GpuFilter passes. Created ONCE and reused every shot so its GL resources
+    // are not leaked (recreated only when the buffer size changes).
+    private val filterChain = GpuFilterChain()
 
     // RGBA8 1024x1 tone curve LUT (dazz-proven format). All four channels
     // mirror R; the shader reads R.
@@ -287,6 +313,7 @@ class ProfileRenderer private constructor(
         calib: RawCalibration,
         params: GpuParams,
         timestampMs: Long,
+        asShotGains: FloatArray? = null,
     ): Bitmap? {
         if (progRawIsp == 0 || rawW <= 0 || rawH <= 0) return null
         val maxTex = run {
@@ -322,7 +349,14 @@ class ProfileRenderer private constructor(
         ensureBuffers(tw, th)
 
         // cover-crop window in UPRIGHT uv (same math as the preview copy pass).
-        val win = coverWindow(tw, th, upW, upH, isRot90)
+        // 0.3.7 CRITICAL fix: upW/upH are ALREADY upright dims (rot90 swapped
+        // above). coverWindow swaps AGAIN when isRotated90=true -> the window
+        // was computed for the LANDSCAPE frame -> on a 3:4 portrait still the
+        // window cropped 25% off the width while keeping full height -> the
+        // output squeezed vertically by 0.75x (the "变形" bug on 0.3.5/0.3.6
+        // RAW + YUV stills). Pass isRotated90=false: the window is computed
+        // directly in the upright domain, no second swap.
+        val win = coverWindow(tw, th, upW, upH, false)
 
         // Upload the Bayer plane as GL_R16UI (zero conversion on the CPU).
         val rawTex = IntArray(1)
@@ -354,26 +388,409 @@ class ProfileRenderer private constructor(
         )
         GLES30.glUniform4fv(GLES30.glGetUniformLocation(progRawIsp, "u_black"), 1, calib.blackLevel, 0)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(progRawIsp, "u_white"), calib.whiteLevel)
-        GLES30.glUniform3fv(GLES30.glGetUniformLocation(progRawIsp, "u_wb"), 1, calib.wbGains, 0)
+        // As-shot WB unavailable (SDK 36 removed SENSOR_NEUTRAL_COLOR_POINT and
+        // CameraX exposes no per-shot CaptureResult) -> gray-world estimate
+        // straight from THIS frame's Bayer data. Neutral gains on a daylight
+        // scene = heavy green cast (verified on device 0.3.2: output avg
+        // 64,168,131). Recomputed per shot, clamped to sane gains.
+        // WB 主通道 = HAL 3A 的 as-shot 增益（per-shot CaptureResult，官方元
+        // 数据）；gray-world 估计降级为兜底（as-shot 缺失时仍可用）。
+        val wb = asShotGains?.takeIf { it.size == 3 && it[0] > 0f && it[2] > 0f }?.also {
+            com.photographercamera.core.debug.DebugLog.log(
+                "RAW",
+                "wb as-shot (HAL 3A) gains=R${"%.2f".format(it[0])},B${"%.2f".format(it[2])}",
+            )
+        } ?: grayWorldWbGains(raw, rawW, rawH, rowStrideBytes / 2, calib)
+        GLES30.glUniform3fv(GLES30.glGetUniformLocation(progRawIsp, "u_wb"), 1, wb, 0)
         GLES30.glUniformMatrix3fv(
             GLES30.glGetUniformLocation(progRawIsp, "u_ccm"), 1, false, calib.ccm, 0,
+        )
+        // Linear-domain grading anchors: the profile sliders are tuned in
+        // DISPLAY light (post-gamma), so convert v -> v^2.2 to anchor the
+        // same perceived tone in LINEAR light before the shader's gamma.
+        // raw_isp.frag then rolls off highlights / lifts shadows pre-gamma,
+        // which is exactly what preserves highlight texture (the validated
+        // B-pipeline from raw_isp_demo: 16.9x texture energy vs post-gamma).
+        GLES30.glUniform3f(
+            GLES30.glGetUniformLocation(progRawIsp, "u_linHi"),
+            toLinearAnchor(params.highlightThreshold),
+            params.highlightStrength,
+            params.highlightSaturation,
+        )
+        GLES30.glUniform3f(
+            GLES30.glGetUniformLocation(progRawIsp, "u_linSh"),
+            toLinearAnchor(params.shadowBlackPoint),
+            params.shadowCompression,
+            params.shadowSaturation,
         )
         GLES30.glUniform1i(GLES30.glGetUniformLocation(progRawIsp, "u_rot"), rot)
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(progRawIsp, "u_win"),
             win[0], win[1], win[2], win[3],
         )
+        // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同 runCopyPass 的教训：
+        // uniform 默认 (0,0,0,0) → v_uv 恒 (0,0) → 整帧采样单点 → 纯色图）。
+        // 裁切/旋转由 raw_isp.frag 自己的 u_win/u_rot 完成，vert 侧必须恒等。
+        GLES30.glUniform4f(GLES30.glGetUniformLocation(progRawIsp, "u_uvWin"), 1f, 1f, 0f, 0f)
         drawQuad()
         GLES30.glDeleteTextures(1, rawTex, 0)
-
-        // Recipe chain on the developed frame, then readback.
-        runEffectPass(mainTex, tw, th, params, timestampMs, toScreen = false)
         com.photographercamera.core.debug.DebugLog.log(
-            "RAW", "isp chain done raw=${rawW}x${rawH} rot=$rot -> ${tw}x${th}",
+            "RAW", "isp pass center=${probeCenterStr(mainFbo, tw, th)} (mainFbo ${tw}x${th})",
+        )
+
+        // Recipe chain on the developed frame, then readback. The ISP pass
+        // already applied highlight/shadow in LINEAR light - flag the effect
+        // shader so it skips its own post-gamma highlight/shadow stages.
+        // RAW-only chroma denoise sits between the two (YUV/JPEG paths skip
+        // it - the HAL already denoised those). mainFbo -> [chroma?] -> outFbo.
+        // The chroma -> effect tail runs through the gpuimage-plus-style
+        // GpuFilterChain (see renderYuvChain for the rationale); the ISP pass
+        // above stays a source pass writing mainFbo.
+        val finalFbo = ensureOut(tw, th)
+        filterChain.clear()
+        if (progChroma != 0) {
+            filterChain.add(ChromaFilter(progChroma, tw, th, 1f))
+        }
+        filterChain.add(EffectFilter(params, timestampMs, tonePreLinear = true, vignetteWindow = null))
+        filterChain.process(mainTex, finalFbo, tw, th)
+        com.photographercamera.core.debug.DebugLog.log(
+            "RAW", "isp chain done (MHC5x5+linearGrade) raw=${rawW}x${rawH} rot=$rot -> ${tw}x${th}",
         )
         // RAW upload: first buffer row (sensor top) goes to texel v=0 — same
         // convention as the bitmap-upload path, so no Y-flip on readback.
-        return readback(tw, th, flipY = false)
+        val outBmp = readback(tw, th, flipY = false)
+        com.photographercamera.core.debug.DebugLog.log(
+            "RAW", "raw chain output avg=${bmpAvgStr(outBmp)}",
+        )
+        return outBmp
+    }
+
+    /**
+     * YUV direct-capture chain (the "no-JPEG" still path, StillFrame.Yuv):
+     *
+     *   Image(YUV_420_888, post-ISP, UNCOMPRESSED)
+     *     --CPU: 3 planes -> 3 compact buffers (stride/pixelStride aware)
+     *     --GPU: 3x GL_R8 textures -> yuv_copy.frag BT.601 -> mainTex
+     *     --effect.frag (unified engine, unchanged)--> outFbo --readback--> Bitmap
+     *
+     * Why CPU plane read + GPU convert (not EGLImage/EXTERNAL_OES zero-copy):
+     * eglCreateImageKHR is NOT in the public SDK (framework-hidden, NDK-only),
+     * and the hidden route hands colorspace control to the driver - which
+     * varies per vendor and would break style consistency. The public-API
+     * route converts with a fixed BT.601 studio-swing matrix, identical on
+     * every device. The one CPU copy (~20MB at 12MP, ~100ms on the GL thread
+     * at shutter) is nothing next to the 100-400ms JPEG decode it replaces.
+     *
+     * Returns null on ANY failure - the caller falls back to the proven
+     * ISP-JPEG capture (auto-fallback per the capability matrix).
+     */
+    fun renderYuvChain(
+        image: android.media.Image,
+        rotDeg: Int,
+        mirror: Boolean,
+        params: GpuParams,
+        timestampMs: Long,
+    ): Bitmap? {
+        if (progYuv == 0) return null
+        if (image.format != android.graphics.ImageFormat.YUV_420_888) {
+            com.photographercamera.core.debug.DebugLog.log("YUV", "unexpected format=${image.format} - JPEG fallback")
+            return null
+        }
+        val yuvW = image.width
+        val yuvH = image.height
+        if (yuvW <= 0 || yuvH <= 0) return null
+
+        // ---- CPU: read the three planes into compact buffers ----------------
+        // Handles I420 (pixelStride=1) AND NV12 (UV pixelStride=2 interleaved),
+        // plus rowStride padding that some HALs insert per row.
+        val planes = image.planes
+        // libyuv-backed plane compaction (YuvNative.compactYuvPlane, ported from
+        // Google libyuv) with the original compactPlane kept as a Java fallback.
+        val yBuf = readYuvPlane(planes[0], yuvW, yuvH)
+        val uBuf = readYuvPlane(planes[1], yuvW / 2, yuvH / 2)
+        val vBuf = readYuvPlane(planes[2], yuvW / 2, yuvH / 2)
+        if (yBuf == null || uBuf == null || vBuf == null) {
+            com.photographercamera.core.debug.DebugLog.log("YUV", "plane read failed - JPEG fallback")
+            return null
+        }
+
+        val rot = (((rotDeg % 360) + 360) % 360).let {
+            when {
+                it in 315..360 || it < 45 -> 0
+                it in 45..134 -> 90
+                it in 135..224 -> 180
+                else -> 270
+            }
+        }
+        val isRot90 = rot == 90 || rot == 270
+        val upW = if (isRot90) yuvH else yuvW
+        val upH = if (isRot90) yuvW else yuvH
+
+        // 3:4 portrait target within the capture budget - identical policy to
+        // the RAW ISP and JPEG still paths, so all three produce the same size.
+        val cap = com.photographercamera.core.device.DeviceCompat.captureMaxLongSidePx
+        val longSide = maxOf(upW, upH).coerceIn(720, cap)
+        val th = longSide
+        val tw = (longSide * 3L / 4L).toInt()
+        ensureBuffers(tw, th)
+        // 0.3.7: isRot90=false — upW/upH 已是 upright 尺寸，coverWindow 内部
+        // 不再二次换位（双重换位导致竖帧纵向压 0.75x = 变形 bug，同 RAW 链）。
+        val win = coverWindow(tw, th, upW, upH, false)
+
+        // ---- GPU: upload Y/U/V as three GL_R8 textures -----------------------
+        val texs = IntArray(3)
+        GLES30.glGenTextures(3, texs, 0)
+        val uploads = arrayOf(
+            Triple(yBuf, yuvW, yuvH),
+            Triple(uBuf, yuvW / 2, yuvH / 2),
+            Triple(vBuf, yuvW / 2, yuvH / 2),
+        )
+        for (i in 0 until 3) {
+            val (buf, w, h) = uploads[i]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texs[i])
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_R8, w, h, 0,
+                GLES30.GL_RED, GLES30.GL_UNSIGNED_BYTE, buf,
+            )
+        }
+
+        // ---- YUV -> RGB pass into mainTex (upright, cover-cropped) ----------
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, mainFbo)
+        GLES30.glViewport(0, 0, tw, th)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glUseProgram(progYuv)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texs[0])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(progYuv, "u_y"), 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texs[1])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(progYuv, "u_u"), 1)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texs[2])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(progYuv, "u_v"), 2)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(progYuv, "u_rot"), rot)
+        GLES30.glUniform4f(
+            GLES30.glGetUniformLocation(progYuv, "u_win"),
+            win[0], win[1], win[2], win[3],
+        )
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(progYuv, "u_mirror"),
+            if (mirror) 1 else 0,
+        )
+        // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同 renderRawChain）：
+        // 默认 (0,0,0,0) → v_uv 恒 (0,0) → 整帧采样单点 → 纯色图。裁切/旋转
+        // 由 yuv_copy.frag 的 u_win/u_rot/u_mirror 完成，vert 侧必须恒等。
+        GLES30.glUniform4f(GLES30.glGetUniformLocation(progYuv, "u_uvWin"), 1f, 1f, 0f, 0f)
+        drawQuad()
+        GLES30.glDeleteTextures(3, texs, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        com.photographercamera.core.debug.DebugLog.log(
+            "YUV", "yuv pass center=${probeCenterStr(mainFbo, tw, th)} (mainFbo ${tw}x${th})",
+        )
+
+        // Unified engine on the converted frame - identical to the JPEG path
+        // (YUV is post-ISP post-gamma, so highlight/shadow run normally).
+        // 0.3.7: chroma denoise pass before the effect chain (same 5x5
+        // edge-stopping kernel as the RAW chain). The YUV_420_888 still output
+        // does NOT go through the HAL's multi-frame noise reduction (that
+        // pipeline only activates for its own JPEG/RAW develop path), so a
+        // single-frame YUV still carries heavy chroma noise - the user-visible
+        // "yuv 极差" component. Luma detail is bit-exact (sharpness preserved).
+        //
+        // The chroma -> effect tail is now run through the gpuimage-plus-style
+        // GpuFilterChain: each pass is a GpuFilter; the chain ping-pongs on its
+        // internal A/B buffers and the LAST pass (effect) renders into outFbo
+        // (the readback target). This mirrors CGEImageHandler::addImageFilter +
+        // drawResult. The YUV convert pass above stays a source pass writing
+        // mainFbo, exactly as before.
+        val finalFbo = ensureOut(tw, th)
+        filterChain.clear()
+        if (progChroma != 0) {
+            filterChain.add(ChromaFilter(progChroma, tw, th, 1f))
+        }
+        filterChain.add(EffectFilter(params, timestampMs, tonePreLinear = false, vignetteWindow = null))
+        filterChain.process(mainTex, finalFbo, tw, th)
+        com.photographercamera.core.debug.DebugLog.log(
+            "YUV", "direct chain done (3-plane BT.601) yuv=${yuvW}x${yuvH} rot=$rot mirror=$mirror -> ${tw}x${th}",
+        )
+        // Plane row 0 uploads to texel v=0, cancelling glReadPixels' bottom-up
+        // read - no flip, same convention as the RAW and bitmap paths.
+        val outBmp = readback(tw, th, flipY = false)
+        com.photographercamera.core.debug.DebugLog.log(
+            "YUV", "yuv chain output avg=${bmpAvgStr(outBmp)}",
+        )
+        return outBmp
+    }
+
+    /**
+     * Gray-world WB gains estimated from THIS frame's Bayer data (R/G, B/G
+     * channel-mean ratios after black-level subtraction). Recomputed per shot
+     * on the GL thread (~350k sampled sites, <10ms). Clamped to [0.5, 2.5] -
+     * beyond that the scene genuinely is monochrome-ish and the CCM would
+     * amplify the error anyway.
+     */
+    private fun grayWorldWbGains(
+        raw: ByteBuffer,
+        w: Int,
+        h: Int,
+        stridePx: Int,
+        calib: RawCalibration,
+    ): FloatArray {
+        return try {
+            val le = raw.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+            val white = calib.whiteLevel
+            // 2x2 CFA quad stepping: sample ALL FOUR phases of every 12th quad.
+            // 0.3.3 bug: a flat step of 6 from an even origin lands on (even,
+            // even) forever - a SINGLE CFA phase (the B site of BGGR) - so
+            // sr=sg=0 and the gains collapsed to the fallback (1, *, 0.5).
+            var sr = 0.0; var sg = 0.0; var sb = 0.0
+            var y = 0
+            while (y + 1 < h) {
+                var x = 0
+                while (x + 1 < w) {
+                    for (dy in 0..1) {
+                        for (dx in 0..1) {
+                            val xx = x + dx
+                            val yy = y + dy
+                            val v = le.getShort((yy * stridePx + xx) * 2).toInt() and 0xFFFF
+                            val blk = calib.blackLevel[((yy and 1) shl 1) or (xx and 1)]
+                            val v01 = ((v - blk) / maxOf(white - blk, 1f)).coerceIn(0f, 1f)
+                            val relX = (xx and 1) xor (calib.cfaOffset[0] and 1)
+                            val relY = (yy and 1) xor (calib.cfaOffset[1] and 1)
+                            when {
+                                relX == 0 && relY == 0 -> sr += v01   // R site
+                                relX == 1 && relY == 1 -> sb += v01   // B site
+                                else -> sg += v01                     // G site
+                            }
+                        }
+                    }
+                    x += 12
+                }
+                y += 12
+            }
+            // Guard: a channel with no samples means the estimate is garbage -
+            // keep the calibration gains instead of emitting fake 1.0s.
+            if (sr <= 0 || sb <= 0 || sg <= 0) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "RAW", "wb estimate unusable (R samples=$sr G=$sg B=$sb) - keeping calib gains",
+                )
+                return calib.wbGains
+            }
+            val clamped = { g: Double ->
+                (if (g.isNaN() || g.isInfinite()) 1.0 else g).coerceIn(0.5, 2.5).toFloat()
+            }
+            val gains = floatArrayOf(
+                clamped(sg / sr),
+                1f,
+                clamped(sg / sb),
+            )
+            val hitLo = gains[0] <= 0.5f || gains[2] <= 0.5f
+            val hitHi = gains[0] >= 2.5f || gains[2] >= 2.5f
+            com.photographercamera.core.debug.DebugLog.log(
+                "RAW", "wb gray-world gains=R${gains[0]},B${gains[2]}" +
+                    (if (hitLo || hitHi) " (CLAMPED - check cfa/layout)" else "") +
+                    " (calib was ${calib.wbGains[0]},${calib.wbGains[2]})",
+            )
+            gains
+        } catch (t: Throwable) {
+            com.photographercamera.core.debug.DebugLog.log("RAW", "wb estimate failed: ${t.message}")
+            calib.wbGains
+        }
+    }
+
+    /**
+     * Read one Y/U/V plane into a compact (outW x outH) direct buffer.
+     * - rowStride > outW  : per-row copy (HAL padding)
+     * - pixelStride > 1   : per-sample de-interleave (NV12 U/V planes)
+     * Returns null when the backing buffer is too small (never expected).
+     */
+    private fun compactPlane(plane: android.media.Image.Plane, outW: Int, outH: Int): ByteBuffer? {
+        if (outW <= 0 || outH <= 0) return null
+        val src = plane.buffer
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        // Pick the layout that FITS the actual buffer: HALs occasionally report
+        // a padded rowStride for tightly-packed data (and vice versa).
+        val paddedFits = (outH - 1) * rowStride + (outW - 1) * pixelStride + 1 <= src.capacity()
+        val effStride = if (paddedFits) rowStride else outW * pixelStride
+        if ((outH - 1) * effStride + (outW - 1) * pixelStride + 1 > src.capacity()) return null
+        val out = ByteBuffer.allocateDirect(outW * outH).order(ByteOrder.nativeOrder())
+        if (pixelStride == 1 && effStride == outW) {
+            src.position(0)
+            src.limit(outW * outH)
+            out.put(src)
+        } else if (pixelStride == 1) {
+            for (row in 0 until outH) {
+                val start = row * effStride
+                // MUST extend the limit BEFORE seeking: position() beyond the
+                // CURRENT limit throws (0.3.2 crash: row 0 set limit=1440, then
+                // position(1472) for row 1 -> "newPosition > limit: (1472 > 1440)")
+                src.limit(start + outW)
+                src.position(start)
+                out.put(src)
+            }
+        } else {
+            for (row in 0 until outH) {
+                val rowStart = row * effStride
+                for (col in 0 until outW) {
+                    out.put(src.get(rowStart + col * pixelStride))
+                }
+            }
+        }
+        src.clear()
+        out.position(0)
+        return out
+    }
+
+    /**
+     * Read one Y/U/V plane via the libyuv-ported [YuvNative.compactYuvPlane]
+     * (Google libyuv: CopyPlane for I420, SplitUVRow_C for NV12). Falls back to
+     * the original hand-written [compactPlane] on ANY failure so the YUV direct
+     * path can never regress if the ported routine throws.
+     */
+    private fun readYuvPlane(plane: android.media.Image.Plane, outW: Int, outH: Int): ByteBuffer? {
+        return try {
+            YuvNative.compactYuvPlane(plane, outW, outH)
+        } catch (t: Throwable) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "YUV", "libyuv compact failed (${t.message}) - Java fallback",
+            )
+            compactPlane(plane, outW, outH)
+        }
+    }
+
+    /** 中心 1px 采样（诊断用）：区分"转换段输出灰"还是"effect 段输出灰"。 */
+    private fun probeCenterStr(fbo: Int, w: Int, h: Int): String {
+        if (fbo == 0 || w <= 0 || h <= 0) return "?"
+        return try {
+            val bb = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
+            GLES30.glReadPixels(w / 2, h / 2, 1, 1, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, bb)
+            bb.rewind()
+            "${(bb.get(0).toInt() and 0xFF)},${(bb.get(1).toInt() and 0xFF)},${(bb.get(2).toInt() and 0xFF)}"
+        } catch (_: Throwable) {
+            "?"
+        }
+    }
+
+    /** 4×4 缩样均值（诊断用）：readback 后整图灰度判定。 */
+    private fun bmpAvgStr(b: android.graphics.Bitmap?): String {
+        if (b == null) return "null"
+        return try {
+            val s = android.graphics.Bitmap.createScaledBitmap(b, 4, 4, true)
+            var r = 0; var g = 0; var bl = 0
+            for (y in 0 until 4) for (x in 0 until 4) {
+                val px = s.getPixel(x, y)
+                r += (px shr 16) and 0xFF; g += (px shr 8) and 0xFF; bl += px and 0xFF
+            }
+            "${r / 16},${g / 16},${bl / 16}"
+        } catch (_: Throwable) {
+            "?"
+        }
     }
 
     fun requestProbe() {
@@ -393,7 +810,7 @@ class ProfileRenderer private constructor(
     }
 
     fun release() {
-        listOf(progCopy, progEffect, progBlit, progRawIsp).forEach { if (it != 0) GLES30.glDeleteProgram(it) }
+        listOf(progCopy, progEffect, progBlit, progRawIsp, progYuv).forEach { if (it != 0) GLES30.glDeleteProgram(it) }
         if (mainTex != 0) GLES30.glDeleteTextures(1, intArrayOf(mainTex), 0)
         if (mainFbo != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(mainFbo), 0)
         if (outTex != 0) GLES30.glDeleteTextures(1, intArrayOf(outTex), 0)
@@ -401,6 +818,52 @@ class ProfileRenderer private constructor(
         if (toneTex != 0) GLES30.glDeleteTextures(1, intArrayOf(toneTex), 0)
         if (lut3dTex != 0) GLES30.glDeleteTextures(1, intArrayOf(lut3dTex), 0)
         if (quad != 0) GLES30.glDeleteBuffers(1, intArrayOf(quad), 0)
+        filterChain.release()
+    }
+
+    // ---- filter-chain passes (architecture ported from android-gpuimage-plus)
+    // These wrap the renderer's existing GL programs as GpuFilter instances so
+    // the YUV/RAW capture chains can run through the shared GpuFilterChain.
+
+    /** Wraps the chroma-denoise program as a [GpuFilter] (CGEImageFilter port). */
+    private class ChromaFilter(
+        private val prog: Int,
+        private val tw: Int,
+        private val th: Int,
+        private val amount: Float,
+    ) : GpuFilter {
+        override fun render(srcTexture: Int, dstFramebuffer: Int, w: Int, h: Int) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, dstFramebuffer)
+            GLES30.glViewport(0, 0, w, h)
+            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            GLES30.glUseProgram(prog)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, srcTexture)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(prog, "u_input"), 0)
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(prog, "u_texel"), 1f / w, 1f / h)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(prog, "u_amount"), amount)
+            // CRITICAL: passthrough.vert 的 u_uvWin 恒等重置（同上）
+            GLES30.glUniform4f(GLES30.glGetUniformLocation(prog, "u_uvWin"), 1f, 1f, 0f, 0f)
+            drawQuad()
+        }
+    }
+
+    /** Wraps the unified effect program as a [GpuFilter] (CGEImageFilter port). */
+    private class EffectFilter(
+        private val p: GpuParams,
+        private val timestampMs: Long,
+        private val tonePreLinear: Boolean,
+        private val vignetteWindow: FloatArray?,
+    ) : GpuFilter {
+        override fun render(srcTexture: Int, dstFramebuffer: Int, w: Int, h: Int) {
+            // The chain already bound dstFramebuffer as the target; runEffectPass
+            // just drives the effect program and draws into it.
+            runEffectPass(
+                srcTexture, w, h, p, timestampMs, toScreen = false,
+                vignetteWindow = vignetteWindow, tonePreLinear = tonePreLinear,
+                dstFbo = dstFramebuffer,
+            )
+        }
     }
 
     // ---- pass 1: OES -> 2D copy ---------------------------------------------
@@ -453,13 +916,25 @@ class ProfileRenderer private constructor(
         timestampMs: Long,
         toScreen: Boolean,
         vignetteWindow: FloatArray? = null,
+        tonePreLinear: Boolean = false,
+        dstFbo: Int = -1,
     ) {
         if (progEffect == 0) return
-        val target = if (toScreen) 0 else ensureOut(w, h)
+        // dstFbo >= 0 means a filter chain owns the destination framebuffer
+        // (architecture ported from android-gpuimage-plus: the LAST filter in
+        // CGEImageHandler::drawResult renders into the caller's output FBO).
+        val target = if (dstFbo >= 0) dstFbo else if (toScreen) 0 else ensureOut(w, h)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, target)
         GLES30.glViewport(0, 0, w, h)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(progEffect)
+
+        // RAW ISP path: highlight/shadow were already applied in LINEAR light
+        // by raw_isp.frag; skip the post-gamma stages to avoid double grading.
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(progEffect, "u_tonePreLinear"),
+            if (tonePreLinear) 1 else 0,
+        )
 
         // CRITICAL: reset u_uvWin to identity for progEffect. The previous
         // runCopyPass left u_uvWin = coverWindow crop coords (e.g.
@@ -739,6 +1214,14 @@ class ProfileRenderer private constructor(
     }
 
     // ---- uniform setters -----------------------------------------------------
+
+    /**
+     * Display-referred anchor (0..1 profile slider) -> LINEAR-light anchor.
+     * The raw ISP grades pre-gamma; v^2.2 puts the shoulder/toe knee at the
+     * same perceived tone as the profile intended post-gamma.
+     */
+    private fun toLinearAnchor(v: Float): Float =
+        if (v <= 0f) 0f else v.toDouble().pow(2.2).toFloat()
 
     private fun u1f(name: String, v: Float) {
         val loc = GLES30.glGetUniformLocation(progEffect, name)

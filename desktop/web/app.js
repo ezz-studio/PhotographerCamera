@@ -528,12 +528,17 @@ function pickIcon(file) {
   rd.readAsDataURL(file);
 }
 
-// display payload for the App preset list (intro text + optional icon flag)
+// display payload for the App preset list (display name + intro + optional icon flag).
+// The App renders `display.name` and only falls back to the file name when it is
+// blank, so the RAW user input must be stored here — NOT safeName(), whose
+// Windows-illegal-character substitution would corrupt names like "Look: A/B".
 function collectDisplay() {
+  const rawName = $("#profileName").value.trim();
   const intro = $("#profileIntro").value.trim();
   const d = {};
+  if (rawName) d.name = rawName;
   if (intro) d.intro = intro;
-  if (state.icon) d.icon = state.icon.ext; // App looks for <name>.<ext> next to the json
+  if (state.icon) d.icon = state.icon.ext; // App looks for <file-name>.<ext> next to the json
   return Object.keys(d).length ? d : undefined;
 }
 

@@ -37,18 +37,23 @@ import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Size
 import android.view.Surface
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceRequest
@@ -117,6 +122,11 @@ class CameraEngine(
 
     /** The zoom ratio currently applied to Camera2 CONTROL_ZOOM_RATIO. */
     @Volatile private var appliedNativeZoom = 1f
+    /** Re-entry guard: a single shutter press must produce exactly one takePicture. */
+    @Volatile private var capturing = false
+
+    /** User-selected flash mode (ImageCapture.FLASH_MODE_OFF/ON/AUTO); survives rebinds. */
+    @Volatile private var flashModeState = ImageCapture.FLASH_MODE_OFF
 
     /**
      * RAW+DNG capture mode. Probed at bind time: requires a RAW-capable camera
@@ -128,9 +138,64 @@ class CameraEngine(
     @Volatile var rawMode: Boolean = false
         private set
 
-    /** True when the still is developed by OUR GPU RAW ISP (pc_raw_isp.txt). */
+    /** True when the still is developed by OUR GPU RAW ISP (default as of
+     *  0.2.4; UI RAW 开关 / pc_raw_isp_off.txt 应急后门可关). */
     @Volatile var rawIspMode: Boolean = false
         private set
+
+    /** 当前摄像头 RAW 能力（设备适配层探测结果）：RAW 开关仅在 true 时显示。 */
+    @Volatile var rawCapable: Boolean = false
+        private set
+
+    /** 设备适配层能力快照（quad bayer 判定 / 像素阵列尺寸等）。 */
+    @Volatile private var deviceCaps: com.photographercamera.core.device.DeviceAdapter.Caps? = null
+
+    // ---- YUV direct capture (the "no-JPEG" still path) -------------------------
+    // ImageAnalysis(YUV_420_888) 常驻流 = "厂商 ISP 的 YUV"：HAL 后 ISP 原始
+    // YUV 帧直达 GPU（HardwareBuffer→EGLImage 零拷贝），绕过 JPEG 有损压缩。
+    // 仅在非 RAW 模式启用（RAW 有自己的完整管线）；闪光灯需要 ImageCapture
+    // 硬件联动，因此 flash!=OFF 时自动回退 JPEG 拍摄。
+    private var imageAnalysis: ImageAnalysis? = null
+
+    /** Analyzer 持有的最新 YUV 帧（KEEP_LATEST；拍照时取走置 null）。 */
+    private var latestYuv: ImageProxy? = null
+
+    /** HAL 至少吐过一帧 YUV 才走直采（绑定了但无帧的设备自动回退 JPEG）。 */
+    @Volatile private var yuvAlive = false
+
+    // daemon 单线程：空闲开销可忽略，进程退出自动回收（engine 生命周期外不泄漏）
+    private val yuvExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "pc-yuv").apply { isDaemon = true }
+    }
+
+    /** pc_yuv_off.txt 应急后门（与 pc_raw_off.txt 同模式，无 UI）。 */
+    private val yuvOptOut: Boolean by lazy {
+        File(appContext.filesDir, "pc_yuv_off.txt").exists()
+    }
+
+    /**
+     * 全分辨率 YUV 直采主通道（bind 时确定）：ImageCapture 以
+     * OUTPUT_IMAGE_FORMAT_YUV_420_888 输出 12.5MP binned YUV，绕过 HAL JPEG
+     * 压缩（analysis 流只有 1.6MP，不够成片）。RAW ISP / RAW+DNG 模式有
+     * 自己的输出格式，其余一律走本模式（含 rawCapable=false 设备）。
+     */
+    @Volatile private var yuvCaptureOn = false
+
+    /**
+     * UI RAW 开关（任务：能力检测驱动显示/隐藏 + 持久化）。
+     * 写入 pc_settings.raw_isp_enabled 并重建 ImageCapture —— RAW 输出格式
+     * 是 bind 时属性，切换必须 rebind（与 switchFacing 同路径，<1s）。
+     */
+    fun setRawIspEnabled(on: Boolean) {
+        appContext.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+            .edit().putBoolean("raw_isp_enabled", on).apply()
+        DebugLog.log("CAM", "RAW ISP setting -> $on (rebind)")
+        mainHandler.post {
+            bound = false
+            bindPending = false
+            startBind()
+        }
+    }
 
     /** Which lens id the HAL is expected to be serving at the given zoom. */
     private var lastServedLensId: String? = null
@@ -139,64 +204,27 @@ class CameraEngine(
     private var rawCalib: com.photographercamera.core.gpu.RawCalibration? = null
 
     /**
+     * Per-shot COLOR_CORRECTION_GAINS from the still capture's TotalCaptureResult
+     * (camera2 interop session capture callback), float[3] = R,G,B with G=1.
+     * Official HAL 3A as-shot WB — replaces the gray-world estimate when present.
+     */
+    @Volatile var lastAsShotGains: FloatArray? = null
+        private set
+
+    /**
      * Static RAW calibration from the main lens' characteristics: CFA layout,
-     * black/white levels, as-shot WB gains and a camera->sRGB color matrix
-     * (SENSOR_COLOR_TRANSFORM2 camera->XYZ composed with the standard
-     * XYZ->sRGB matrix). Cached; identity-ish fallback when partial.
+     * black/white levels, as-shot WB gains and a camera->sRGB color matrix.
+     * 标准化逻辑在设备适配层 DeviceAdapter（各品牌差异不外泄）；本方法只负责
+     * 选镜头 + 缓存。
      */
     private fun queryRawCalibration(): com.photographercamera.core.gpu.RawCalibration {
         rawCalib?.let { return it }
         val calib = try {
             val mainId = lenses.firstOrNull { it.isMain }?.id ?: lenses.firstOrNull()?.id
-            if (mainId == null) null else {
-                val c = cameraManager.getCameraCharacteristics(mainId)
-                val cfaOff = when (
-                    c.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
-                ) {
-                    1 -> intArrayOf(1, 0)  // GRBG
-                    2 -> intArrayOf(0, 1)  // GBRG
-                    3 -> intArrayOf(1, 1)  // BGGR
-                    else -> intArrayOf(0, 0) // RGGB
-                }
-                val blPat = c.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
-                val black = if (blPat != null) {
-                    val tmp = IntArray(4)
-                    blPat.copyTo(tmp, 0)
-                    FloatArray(4) { tmp[it].toFloat() }
-                } else {
-                    floatArrayOf(64f, 64f, 64f, 64f)
-                }
-                val white = (c.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023).toFloat()
-                // As-shot WB: SDK 36 removed SENSOR_NEUTRAL_COLOR_POINT and the
-                // per-shot CaptureResult is not reachable through CameraX, so
-                // the sensor-side gains stay neutral here - the recipe's own WB
-                // (GpuParams u_wb) drives the look on top.
-                val wb = floatArrayOf(1f, 1f, 1f)
-                // camera -> XYZ (illuminant-2 DNG matrix) composed with the
-                // standard XYZ -> sRGB matrix
-                val xyzToSrgb = floatArrayOf(
-                    3.2406f, -1.5372f, -0.4986f,
-                    -0.9689f, 1.8758f, 0.0415f,
-                    0.0557f, -0.2040f, 1.0570f,
-                )
-                val t2 = c.get(CameraCharacteristics.SENSOR_COLOR_TRANSFORM2)
-                val ccm = if (t2 != null) {
-                    val el = Array(9) { android.util.Rational(0, 1) }
-                    t2.copyElements(el, 0)
-                    FloatArray(9) { i ->
-                        val row = i / 3
-                        val col = i % 3
-                        var acc = 0f
-                        for (k in 0 until 3) {
-                            acc += xyzToSrgb[row * 3 + k] * el[k * 3 + col].toFloat()
-                        }
-                        acc
-                    }
-                } else {
-                    floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
-                }
-                com.photographercamera.core.gpu.RawCalibration(cfaOff, black, white, wb, ccm)
-            }
+            if (mainId == null) null
+            else com.photographercamera.core.device.DeviceAdapter.normalizeCalibration(
+                cameraManager.getCameraCharacteristics(mainId),
+            )
         } catch (t: Throwable) {
             DebugLog.log("CAM", "RAW calibration query failed: ${t.message}")
             null
@@ -257,10 +285,15 @@ class CameraEngine(
             } catch (_: Exception) {
             }
             camera = null; preview = null; imageCapture = null
+            imageAnalysis = null
+            latestYuv?.close()
+            latestYuv = null
+            yuvAlive = false
             DebugLog.log("CAM", "engine closed (unbindAll)")
         }
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun bindOnMain() {
         if (surfaceTexture == null) {
             DebugLog.log("CAM", "bind skipped — no SurfaceTexture yet")
@@ -324,35 +357,80 @@ class CameraEngine(
         }
 
         // ---- RAW capability probe (must run before building ImageCapture) ------
+        // 设备适配层（DeviceAdapter）负责能力探测与标准化，上层不直接碰
+        // CameraCharacteristics。RAW ISP 自 0.3.5 起为实验性功能、默认关
+        // （开发冻结：YUV 直采成为唯一成片主通道；pc_settings.raw_isp_enabled
+        // 由 UI"RAW（实验性功能）"开关写入）；pc_raw_isp_off.txt 保留为应急后门。
         val rawOptOut = File(appContext.filesDir, "pc_raw_off.txt").exists()
-        // RAW-ISP opt-in flag: develop the Bayer frame on OUR GPU instead of
-        // the device ISP (doc route: RAW -> RAW ISP -> recipe -> GPU -> JPEG).
-        val wantRawIsp = File(appContext.filesDir, "pc_raw_isp.txt").exists()
+        val rawIspOptOut = File(appContext.filesDir, "pc_raw_isp_off.txt").exists()
+        val sp0 = appContext.getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+        // 0.3.5 一次性迁移：把历史版本（默认开）遗留的 true 重置为关。
+        // 迁移只跑一次（raw_isp_default_off_migrated 标记），之后尊重用户手动选择。
+        if (!sp0.getBoolean("raw_isp_default_off_migrated", false)) {
+            sp0.edit()
+                .putBoolean("raw_isp_enabled", false)
+                .putBoolean("raw_isp_default_off_migrated", true)
+                .apply()
+            DebugLog.log("CAM", "0.3.5 migration: RAW ISP force-set OFF (experimental, frozen)")
+        }
+        val uiRawIspOn = sp0.getBoolean("raw_isp_enabled", false)
+        val wantRawIsp = uiRawIspOn && !rawIspOptOut
         rawMode = false
         rawIspMode = false
+        rawCapable = false
         try {
             val supported = ImageCapture.getImageCaptureCapabilities(p.getCameraInfo(selector))
                 .supportedOutputFormats
-            val rawCapable = supported.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG) ||
+            val rawCapableNow = supported.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG) ||
                 supported.contains(ImageCapture.OUTPUT_FORMAT_RAW)
-            if (!rawCapable) {
+            rawCapable = rawCapableNow
+            // 设备适配层：对当前 facing 的镜头做 RAW 传感器特性探测
+            // （quad bayer / 像素阵列 / 白电平兜底），供运行时帧守卫使用。
+            deviceCaps = run {
+                val facingVal = if (facing == CameraSelector.LENS_FACING_FRONT)
+                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT
+                else android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+                val lid = try {
+                    cameraManager.cameraIdList.firstOrNull { id ->
+                        cameraManager.getCameraCharacteristics(id)
+                            .get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == facingVal
+                    }
+                } catch (_: Throwable) { null }
+                com.photographercamera.core.device.DeviceAdapter.probeCaps(cameraManager, lid)
+            }
+            if (!rawCapableNow) {
                 DebugLog.log("CAM", "camera not RAW-capable (supported=$supported) -> JPEG only")
             } else if (rawOptOut) {
                 DebugLog.log("CAM", "camera RAW-capable but opted OUT (files/pc_raw_off.txt)")
             } else if (wantRawIsp && supported.contains(ImageCapture.OUTPUT_FORMAT_RAW)) {
                 rawMode = true
                 rawIspMode = true
-                DebugLog.log("CAM", "RAW ISP capture ENABLED (our GPU develops the Bayer frame)")
+                DebugLog.log(
+                    "CAM",
+                    "RAW ISP capture ENABLED (our GPU develops the Bayer frame; setting=$uiRawIspOn " +
+                        "backdoorOff=$rawIspOptOut)",
+                )
             } else {
-                rawMode = true
-                if (wantRawIsp) {
-                    DebugLog.log("CAM", "RAW ISP requested but OUTPUT_FORMAT_RAW unsupported -> DNG archive mode")
+                // RAW ISP 关（UI 开关 off / RAW ISP 后门 off）→ YUV 直采主通道
+                // （"禁止 JPEG"路线：ImageAnalysis 常驻流 → GPU BT.601 → 统一
+                // 引擎，绕过 HAL JPEG 有损压缩）。旧 RAW+DNG 档案模式保留为
+                // 后门旗标 files/pc_raw_bundle.txt（无 UI，与 pc_raw_off.txt 同模式）。
+                rawMode = File(appContext.filesDir, "pc_raw_bundle.txt").exists()
+                if (rawMode) {
+                    DebugLog.log("CAM", "RAW+DNG archive mode (backdoor pc_raw_bundle.txt)")
                 } else {
-                    DebugLog.log("CAM", "RAW+DNG capture ENABLED (native sensor color, max quality)")
+                    DebugLog.log("CAM", "YUV direct capture ENABLED (no-JPEG main channel; RAW ISP off)")
                 }
             }
         } catch (t: Throwable) {
             DebugLog.log("CAM", "RAW probe failed: ${t.message}")
+        }
+
+        // 全分辨率 YUV 直采（"禁止 JPEG"）：RAW ISP / RAW+DNG 有专属输出格式，
+        // 其余（RAW ISP 关、rawCapable=false、探测失败）都走 YUV 输出。
+        yuvCaptureOn = !rawIspMode && !rawMode && !yuvOptOut
+        if (yuvCaptureOn) {
+            DebugLog.log("CAM", "yuv capture mode ON (full-res YUV_420_888 stills, no HAL JPEG)")
         }
 
         val newCapture = ImageCapture.Builder()
@@ -361,33 +439,158 @@ class CameraEngine(
             .setResolutionSelector(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(
-                        // Target far above any known sensor so the fallback rule
-                        // lands on the LARGEST output the HAL offers (e.g. the
-                        // 50MP 8160x6144 stream on 50MP sensors instead of the
-                        // default 12.5MP 4096x3072). This is how the still path
-                        // reaches the sensor's maximum native quality.
+                        // 12.5MP binned (4096x3072) = the native camera app's
+                        // DEFAULT still size. At this size the vendor HAL keeps
+                        // its full ISP pipeline: multi-frame noise reduction AND
+                        // local tone mapping (highlight compression). The 50MP
+                        // full-size stream (9600x7200 target) made the HAL skip
+                        // both — high-ISO color noise + blown highlights (255
+                        // clipping) were artifacts of that mode, not of the app.
+                        // 50MP can return later as an opt-in setting once we run
+                        // our own RAW ISP with highlight recovery.
                         ResolutionStrategy(
-                            Size(9600, 7200),
+                            Size(4096, 3072),
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
                         ),
                     )
                     .build(),
             )
             // RAW capture (CameraX >= 1.5): untouched Bayer to OUR GPU ISP
-            // (pc_raw_isp.txt) or untouched DNG archive + ISP JPEG bundle.
+            // (default; opt out via pc_raw_isp_off.txt) or untouched DNG
+            // archive + ISP JPEG bundle.
             .apply {
                 if (rawIspMode) {
                     setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW)
+                    // 官方 per-shot 元数据通道：camera2 interop 的 session
+                    // capture callback 在每次 capture 完成时给 TotalCaptureResult，
+                    // 里面是 HAL 3A 算好的 as-shot WB（COLOR_CORRECTION_GAINS）。
+                    // RAW ISP 用它做白平衡主通道，gray-world 降级为兜底。
+                    try {
+                        Camera2Interop.Extender(this).setSessionCaptureCallback(
+                            object : android.hardware.camera2.CameraCaptureSession.CaptureCallback() {
+                                override fun onCaptureCompleted(
+                                    session: android.hardware.camera2.CameraCaptureSession,
+                                    request: android.hardware.camera2.CaptureRequest,
+                                    result: android.hardware.camera2.TotalCaptureResult,
+                                ) {
+                                    val g = result.get(android.hardware.camera2.CaptureResult.COLOR_CORRECTION_GAINS)
+                                    if (g != null) {
+                                        val green = maxOf(g.greenEven, 1e-6f)
+                                        lastAsShotGains = floatArrayOf(
+                                            g.red / green,
+                                            1f,
+                                            g.blue / green,
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                        DebugLog.log("CAM", "RAW ISP: as-shot WB gains via per-shot CaptureResult enabled")
+                    } catch (t: Throwable) {
+                        DebugLog.log("CAM", "as-shot WB callback failed: ${t.message}")
+                    }
                 } else if (rawMode) {
                     setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                } else if (yuvCaptureOn) {
+                    // 全分辨率 YUV 直采输出（12.5MP binned，无 HAL JPEG 压缩）；
+                    // 闪光 precapture 联动照常工作，输出仍是 YUV。
+                    // CameraX 1.6 移除了 setOutputImageFormat，setBufferFormat
+                    // 是替代 API（ImagePipeline 以此为输入格式）。
+                    setBufferFormat(android.graphics.ImageFormat.YUV_420_888)
+                    // YUV 直采画质补强：HAL 对 YUV still 的 ISP 档位默认跟随
+                    // FAST，绕过了 JPEG 路径隐含的高质量处理。这里用 camera2
+                    // interop 显式请求 HIGH_QUALITY 档的降噪/锐化/色差校正，
+                    // 让 HAL 端把 ISP 管线拉满（失败的设备忽略之，不阻塞）。
+                    try {
+                        Camera2Interop.Extender(this)
+                            .setCaptureRequestOption(
+                                CaptureRequest.NOISE_REDUCTION_MODE,
+                                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY,
+                            )
+                            .setCaptureRequestOption(
+                                CaptureRequest.EDGE_MODE,
+                                CaptureRequest.EDGE_MODE_HIGH_QUALITY,
+                            )
+                            .setCaptureRequestOption(
+                                CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                                CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY,
+                            )
+                        DebugLog.log("CAM", "yuv capture: HQ noise-reduction/edge/aberration requested")
+                    } catch (t: Throwable) {
+                        DebugLog.log("CAM", "camera2 interop HQ options failed: ${t.message}")
+                    }
                 }
             }
             .build()
         imageCapture = newCapture
+        // survive rebinds (front/back switch): the fresh ImageCapture always
+        // starts at FLASH_MODE_OFF, so re-apply the user's chosen mode
+        newCapture.flashMode = flashModeState
         preview = newPreview
 
+        // ---- YUV direct-capture stream (non-RAW modes only) ---------------------
+        // RAW 模式有自己的完整管线，不需要 analysis 流挤占带宽；非 RAW 模式
+        // 下常驻 YUV_420_888 流作为"禁止 JPEG"成片主通道。绑定失败（三流
+        // 组合不被 HAL 支持）自动降级为双流 bind —— 能力矩阵的自动 fallback。
+        val newAnalysis = if (!rawMode && !yuvOptOut) {
+            ImageAnalysis.Builder()
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(
+                            AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY,
+                        )
+                        .setResolutionStrategy(
+                            // 同 JPEG 成片目标（12.5MP binned）：HAL 保留完整
+                            // ISP 管线；HAL 不支持时 CameraX 就近降级。
+                            ResolutionStrategy(
+                                Size(4096, 3072),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                            ),
+                        )
+                        .build(),
+                )
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also { analysis ->
+                    analysis.setAnalyzer(yuvExecutor) { proxy ->
+                        val old = latestYuv
+                        latestYuv = proxy
+                        old?.close()
+                        if (!yuvAlive) {
+                            yuvAlive = true
+                            DebugLog.log(
+                                "CAM",
+                                "YUV analysis alive ${proxy.width}x${proxy.height} " +
+                                    "(direct no-JPEG capture ready)",
+                            )
+                        }
+                    }
+                }
+        } else {
+            null
+        }
+        imageAnalysis = newAnalysis
+        yuvAlive = false
+        latestYuv?.close()
+        latestYuv = null
+
         try {
-            camera = p.bindToLifecycle(lifecycle, selector, newPreview, newCapture)
+            camera = if (newAnalysis != null) {
+                try {
+                    p.bindToLifecycle(lifecycle, selector, newPreview, newCapture, newAnalysis)
+                } catch (e3: Exception) {
+                    // 三流组合不被支持（部分 HAL 的 YUV+JPEG 并发限制）→ 双流
+                    DebugLog.log(
+                        "CAM",
+                        "bind with YUV analysis failed (${e3.message}) - falling back to preview+capture",
+                    )
+                    imageAnalysis = null
+                    p.bindToLifecycle(lifecycle, selector, newPreview, newCapture)
+                }
+            } else {
+                p.bindToLifecycle(lifecycle, selector, newPreview, newCapture)
+            }
         } catch (e: Exception) {
             bindPending = false
             DebugLog.logError("CAM", "bindToLifecycle failed (facing=$facing)", e)
@@ -542,28 +745,43 @@ class CameraEngine(
     fun maxZoom(): Float = zoomRatioMax
 
     /**
-     * Hybrid zoom model (DAZZ pattern for the tele end, native for the wide
-     * end):
-     *  - zoom >= 1: preview stays pinned at native 1x; the viewfinder box
-     *    shows the 1/zoom crop and the STILL is taken with a brief native
-     *    setZoomRatio(zoom) around the shutter (restore right after). This
-     *    lets the HAL switch to the telephoto lens and run its own ISP crop,
-     *    delivering a FULL-RESOLUTION zoomed photo - far better quality than
-     *    CPU-cropping the 1x frame.
-     *  - zoom < 1 (wide end): applied natively to the LIVE preview too, so
-     *    the user sees the real ultra-wide FOV; capture needs no dance.
-     * In both cases box, focal label (eq x zoom) and photo always agree.
+     * Max OPTICAL zoom multiplier (tele eq-focal / main eq-focal, e.g. 69.8/24.2
+     * = 2.88x). Up to this ratio the logical HAL serves a real lens and the
+     * native preview is the capture FOV. BEYOND it the extra zoom is digital:
+     * the engine pins the native zoom at the optical max and the UI expresses
+     * the extra reach by shrinking the viewfinder capture box + a matching CPU
+     * crop of the still — no HAL lossy upscale, box and photo always agree.
+     */
+    fun opticalMaxZoom(): Float {
+        val mainEqV = mainEq().coerceAtLeast(0.1f)
+        return (lenses.maxOfOrNull { it.eqFocal / mainEqV } ?: 1f).coerceAtLeast(1f)
+    }
+
+    /**
+     * Continuous native zoom for BOTH preview and capture.
+     *
+     * The zoom ratio is applied to the LIVE preview at all times (wide end < 1,
+     * tele end >= 1). The logical multi-camera HAL owns the actual per-ratio
+     * physical-lens switching, so as the user zooms past a lens' optical reach
+     * the HAL transparently engages the next lens (e.g. the 2x/5x telephoto) —
+     * the preview shows REAL optical zoom and adapts to ANY device's camera
+     * array automatically. Because the preview already sits at the user's zoom,
+     * capture needs no last-moment ratio "dance": the still is taken at the
+     * current native zoom and is pixel-identical to what was on screen (no
+     * freeze, no lens flip-back). Box, focal label (eq x zoom) and photo agree.
      */
     fun setZoom(total: Float) {
         val z = total.coerceIn(minZoom(), maxZoom())
         zoomRatio = z
-        // native target: wide ratio when zoomed out, 1x otherwise (the dance
-        // around the shutter handles the tele end)
-        val target = if (z < 1f) z else 1f
-        if (abs(target - appliedNativeZoom) > 1e-3f) {
-            appliedNativeZoom = target
+        // Native (CONTROL_ZOOM_RATIO) part stops at the OPTICAL max: past it
+        // the HAL only does a lossy digital upscale, so we pin the sensor zoom
+        // there and let the UI shrink the capture box + CPU-crop the still by
+        // zoom/opticalMax instead (better quality, box = photo guaranteed).
+        val native = minOf(z, opticalMaxZoom())
+        if (abs(native - appliedNativeZoom) > 1e-3f) {
+            appliedNativeZoom = native
             try {
-                camera?.cameraControl?.setZoomRatio(target)
+                camera?.cameraControl?.setZoomRatio(native)
             } catch (_: Exception) {
             }
         }
@@ -599,44 +817,49 @@ class CameraEngine(
     // ---- capture -----------------------------------------------------------------
 
     /**
-     * Full-resolution still through ImageCapture with NATIVE LENS CALLING:
-     * for zoom >= 1 a brief native setZoomRatio(userZoom) runs around the
-     * shutter (masked by the capture flash) so the HAL selects the best
-     * physical lens (tele for high zoom) and delivers the FULL-RESOLUTION
-     * zoomed photo - no CPU crop quality loss. For zoom < 1 the wide ratio is
-     * already applied natively to the live preview. RAW mode additionally
-     * writes the untouched sensor DNG (OUTPUT_FORMAT_RAW_JPEG bundle).
-     * Returns false only when the camera is not bound (UI falls back to the
-     * preview-frame capture path).
+     * Full-resolution still through ImageCapture with NATIVE LENS CALLING.
+     *
+     * The zoom is applied to the LIVE PREVIEW continuously (see [setZoom]), so
+     * by shutter time the HAL has already engaged the best physical lens for
+     * the current ratio (tele for high zoom, wide for low) and the preview
+     * shows the REAL optical FOV. We therefore capture at the CURRENT native
+     * zoom — no last-moment ratio dance, no freeze, no lens flip-back, and the
+     * saved photo is pixel-identical to what the user saw. RAW modes
+     * additionally write the untouched sensor DNG / Bayer frame.
+     *
+     * A re-entry guard ([capturing]) ensures ONE shutter press = ONE
+     * takePicture, even if the UI fires capture twice in a frame. Returns
+     * false when the camera is not bound OR a capture is already running.
      */
     fun captureStill(
         onBitmap: (Bitmap) -> Unit,
         onRawFrame: ((RawFrame) -> Unit)? = null,
+        onYuvFrame: ((ImageProxy, Int, Boolean) -> Unit)? = null,
     ): Boolean {
+        if (capturing) {
+            DebugLog.log("SHOT", "capture already in progress — ignored (guards double shutter)")
+            return false
+        }
         val cam = camera ?: return false
         val ic = imageCapture ?: return false
         val t0 = SystemClock.elapsedRealtime()
         val userZoom = zoomRatio
-        val needsDance = userZoom >= 1f && abs(userZoom - appliedNativeZoom) > 1e-3f
+        capturing = true
+        DebugLog.log(
+            "SHOT",
+            "takePicture zoom=$userZoom (native preview zoom, no dance) raw=$rawMode rawIsp=$rawIspMode",
+        )
 
-        fun restoreNative() {
-            if (needsDance) {
-                appliedNativeZoom = 1f
-                try {
-                    cam.cameraControl.setZoomRatio(1f)
-                } catch (_: Exception) {
-                }
-            }
-        }
+        fun finish() { capturing = false }
 
         fun shootBitmap() {
-            DebugLog.log("SHOT", "takePicture zoom=$userZoom nativeDance=$needsDance raw=$rawMode")
+            DebugLog.log("SHOT", "takePicture zoom=$userZoom nativeZoom=${"%.2f".format(userZoom)} raw=$rawMode")
             ic.takePicture(
                 mainExecutor,
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
                         val t1 = SystemClock.elapsedRealtime()
-                        restoreNative()
+                        finish()
                         // Copy the bytes out and close the ImageProxy IMMEDIATELY
                         // (holding camera buffers open stalls the capture session
                         // on some HALs), then decode OFF the main thread: a 12-50MP
@@ -700,7 +923,7 @@ class CameraEngine(
                     }
 
                     override fun onError(exception: ImageCaptureException) {
-                        restoreNative()
+                        finish()
                         DebugLog.logError("SHOT", "takePicture failed", exception)
                         onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
                     }
@@ -709,7 +932,7 @@ class CameraEngine(
         }
 
         fun shootRawBundle() {
-            DebugLog.log("SHOT", "takePicture RAW+JPEG zoom=$userZoom nativeDance=$needsDance")
+            DebugLog.log("SHOT", "takePicture RAW+JPEG zoom=$userZoom nativeZoom=${"%.2f".format(userZoom)}")
             val dir = File(appContext.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES), "RAW")
             if (!dir.exists()) dir.mkdirs()
             val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", java.util.Locale.US)
@@ -723,13 +946,32 @@ class CameraEngine(
                 jpgOpts,
                 mainExecutor,
                 object : ImageCapture.OnImageSavedCallback {
+                    // The dual-output API invokes onImageSaved ONCE PER SAVED
+                    // FILE — the DNG and the ISP JPEG each deliver their own
+                    // callback. Styled processing must run EXACTLY ONCE per
+                    // shutter: the ISP-JPEG callback does the decode+chain,
+                    // the DNG callback is archival only. Without this gate a
+                    // single shutter press produced two decodes, two chain
+                    // runs and two gallery JPEGs (observed on PLG110).
+                    val styledDone = java.util.concurrent.atomic.AtomicBoolean(false)
+
                     override fun onImageSaved(results: ImageCapture.OutputFileResults) {
-                        restoreNative()
+                        finish()
+                        val seg = results.savedUri?.lastPathSegment ?: ""
+                        val isDng = seg.endsWith(".dng", ignoreCase = true)
                         DebugLog.log(
                             "SHOT",
-                            "raw bundle saved dng=${dngFile.length() / 1024}KB " +
+                            "raw output saved path=$seg dng=${dngFile.length() / 1024}KB " +
                                 "ispJpeg=${jpgFile.length() / 1024}KB -> ${dir.path}",
                         )
+                        if (isDng) {
+                            DebugLog.log("SHOT", "DNG archived — styled output handled by ISP-JPEG callback")
+                            return
+                        }
+                        if (!styledDone.compareAndSet(false, true)) {
+                            DebugLog.log("SHOT", "duplicate saved callback — styled output already issued, skip")
+                            return
+                        }
                         com.photographercamera.core.device.DeviceCompat.captureExecutor.execute {
                             // The archived _isp.jpg is the HAL's JPEG written
                             // straight to disk with correct EXIF; decoding it
@@ -749,7 +991,7 @@ class CameraEngine(
                     }
 
                     override fun onError(exception: ImageCaptureException) {
-                        restoreNative()
+                        finish()
                         DebugLog.logError("SHOT", "RAW+JPEG takePicture failed", exception)
                         onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
                     }
@@ -758,12 +1000,12 @@ class CameraEngine(
         }
 
         fun shootRawIsp() {
-            DebugLog.log("SHOT", "takePicture RAW-ISP zoom=$userZoom nativeDance=$needsDance")
+            DebugLog.log("SHOT", "takePicture RAW-ISP zoom=$userZoom nativeZoom=${"%.2f".format(userZoom)}")
             ic.takePicture(
                 mainExecutor,
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
-                        restoreNative()
+                        finish()
                         val t1 = SystemClock.elapsedRealtime()
                         val format = image.format
                         val w = image.width
@@ -799,12 +1041,22 @@ class CameraEngine(
                             onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
                             return
                         }
+                        // 设备适配层运行时守卫：Quad Bayer 传感器吐全尺寸未
+                        // remosaic 帧时，标准 demosaic 会出 2×2 伪彩 —— 拒帧，
+                        // 走预览帧回退（见 CameraScreen 的 RAW fallback）。
+                        val caps = deviceCaps
+                        if (caps != null && !com.photographercamera.core.device.DeviceAdapter
+                            .acceptsRawFrame(caps, w, h)
+                        ) {
+                            onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+                            return
+                        }
                         DebugLog.log(
                             "SHOT",
                             "raw frame ${w}x${h} stride=$stride rot=$rot ${buf.capacity() / 1024}KB " +
                                 "(capture ${t1 - t0}ms)",
                         )
-                        val frame = RawFrame(w, h, stride, buf, rot, queryRawCalibration())
+                        val frame = RawFrame(w, h, stride, buf, rot, queryRawCalibration(), lastAsShotGains)
                         mainHandler.post {
                             if (onRawFrame != null) onRawFrame(frame)
                             else onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
@@ -812,9 +1064,72 @@ class CameraEngine(
                     }
 
                     override fun onError(exception: ImageCaptureException) {
-                        restoreNative()
+                        finish()
                         DebugLog.logError("SHOT", "RAW-ISP takePicture failed", exception)
                         onBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+                    }
+                },
+            )
+        }
+
+        /**
+         * YUV 直采（"禁止 JPEG 路线"主通道）：取走 analyzer 手里的最新
+         * YUV_420_888 帧移交给 GL 渲染链。proxy 生命周期移交渲染端
+         * （CameraPreviewView.renderYuvThroughChain 在读回后 close）。
+         * 拿不到帧（HAL 未吐/流挂了）→ onFallback 回 JPEG 拍摄。
+         */
+        fun shootYuv(onYuv: (ImageProxy, Int, Boolean) -> Unit, onFallback: () -> Unit) {
+            val proxy = latestYuv
+            latestYuv = null   // taken for this shot; the analyzer refills on the next frame
+            if (proxy == null) {
+                DebugLog.log("SHOT", "no YUV frame available - JPEG fallback")
+                onFallback()
+                return
+            }
+            finish()
+            val rot = proxy.imageInfo.rotationDegrees
+            val mirror = facing == CameraSelector.LENS_FACING_FRONT
+            DebugLog.log(
+                "SHOT",
+                "yuv direct frame ${proxy.width}x${proxy.height} rot=$rot mirror=$mirror zoom=$userZoom",
+            )
+            mainHandler.post { onYuv(proxy, rot, mirror) }
+        }
+
+        /**
+         * 全分辨率 YUV 直采（RAW 关时的成片主通道）：ImageCapture 已在 bind
+         * 时配置为 YUV_420_888 输出，takePicture 直接产出 12.5MP binned YUV
+         * ImageProxy（闪光 precapture 联动照常）。proxy 生命周期移交渲染端
+         * （renderYuvThroughChain 读回后 close）。失败回退链：analysis 流帧
+         * （1.6MP）→ JPEG。
+         */
+        fun shootYuvCapture(onFallback: () -> Unit) {
+            val cb = onYuvFrame
+            if (cb == null) {
+                DebugLog.log("SHOT", "yuv capture unavailable (no renderer) - fallback")
+                onFallback()
+                return
+            }
+            val t1 = SystemClock.elapsedRealtime()
+            ic.takePicture(
+                mainExecutor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        finish()
+                        val rot = image.imageInfo.rotationDegrees
+                        val mirror = facing == CameraSelector.LENS_FACING_FRONT
+                        DebugLog.log(
+                            "SHOT",
+                            "yuv capture frame ${image.width}x${image.height} rot=$rot mirror=$mirror " +
+                                "(capture ${SystemClock.elapsedRealtime() - t1}ms)",
+                        )
+                        mainHandler.post { cb(image, rot, mirror) }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        finish()
+                        DebugLog.logError("SHOT", "yuv capture failed - fallback", exception)
+                        onFallback()
                     }
                 },
             )
@@ -823,18 +1138,22 @@ class CameraEngine(
         fun shoot() = when {
             rawIspMode -> shootRawIsp()
             rawMode -> shootRawBundle()
+            // 全分辨率 YUV 直采主通道（含闪光：precapture 由 ImageCapture 驱动，
+            // 输出仍是 YUV）。回退链：analysis 流帧 → JPEG。
+            yuvCaptureOn -> shootYuvCapture {
+                if (onYuvFrame != null && yuvAlive) shootYuv(onYuvFrame!!) { shootBitmap() }
+                else shootBitmap()
+            }
+            flashModeState != ImageCapture.FLASH_MODE_OFF -> shootBitmap()
+            // analysis 流直采仅作 YUV 输出不可用时的降级（1.6MP）
+            onYuvFrame != null && yuvAlive -> shootYuv(onYuvFrame!!) { shootBitmap() }
             else -> shootBitmap()
         }
 
-        if (needsDance) {
-            // Native zoom BEFORE the still request: the HAL re-routes to the
-            // best physical lens for this ratio (tele for high zoom) and the
-            // photo comes out full-resolution with the true zoomed FOV.
-            appliedNativeZoom = userZoom
-            cam.cameraControl.setZoomRatio(userZoom).addListener({ shoot() }, mainExecutor)
-        } else {
-            shoot()
-        }
+        // Capture at the CURRENT native zoom — the HAL already has the right
+        // physical lens engaged (tele for high zoom, wide for low), so the
+        // still matches the preview exactly. No ratio dance, no freeze.
+        shoot()
         return true
     }
 
@@ -954,11 +1273,51 @@ class CameraEngine(
         }
     }
 
+    // ---- exposure compensation (EV) --------------------------------------------------
+    // Driven by the sun-icon slider next to the tap-to-focus ring.
+
+    /** True when the current camera supports AE exposure compensation. */
+    fun exposureCompensationSupported(): Boolean =
+        camera?.cameraInfo?.exposureState?.isExposureCompensationSupported == true
+
+    /** (min, max) EV index range of the current camera, or null when unsupported. */
+    fun exposureCompensationRange(): Pair<Int, Int>? =
+        camera?.cameraInfo?.exposureState
+            ?.takeIf { it.isExposureCompensationSupported }
+            ?.exposureCompensationRange?.let { it.lower to it.upper }
+
+    /** EV (in stops) per index step, e.g. 0.5f. 0f when unsupported. */
+    fun exposureCompensationStep(): Float =
+        camera?.cameraInfo?.exposureState?.exposureCompensationStep?.let {
+            it.numerator.toFloat() / it.denominator.toFloat()
+        } ?: 0f
+
+    /** Apply an EV index (clamped into the device range). Returns true on success. */
+    fun setExposureCompensationIndex(index: Int): Boolean {
+        val cam = camera ?: return false
+        val st = cam.cameraInfo.exposureState
+        if (!st.isExposureCompensationSupported) return false
+        val clamped = index.coerceIn(st.exposureCompensationRange.lower, st.exposureCompensationRange.upper)
+        return try {
+            cam.cameraControl.setExposureCompensationIndex(clamped)
+            DebugLog.log("EV", "index=$clamped ev=${"%.1f".format(clamped * exposureCompensationStep())}")
+            true
+        } catch (e: Exception) {
+            DebugLog.logError("EV", "setExposureCompensationIndex failed", e)
+            false
+        }
+    }
+
     // ---- misc controls --------------------------------------------------------------
 
-    fun setFlash(on: Boolean) {
-        imageCapture?.flashMode =
-            if (on) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF
+    /** Current flash mode: ImageCapture.FLASH_MODE_OFF / ON / AUTO. */
+    fun flashMode(): Int = flashModeState
+
+    /** Set flash mode (FLASH_MODE_OFF/ON/AUTO); applied to the live use case and kept across rebinds. */
+    fun setFlashMode(mode: Int) {
+        flashModeState = mode
+        imageCapture?.flashMode = mode
+        DebugLog.log("CAM", "flashMode -> $mode")
     }
 
     /** Switch front/rear: rebind (CameraX closes and reopens cleanly). */

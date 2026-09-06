@@ -62,7 +62,10 @@ object CaptureSaver {
         pendingUri = uri
         var written = false
         resolver.openOutputStream(uri)?.use { os ->
-            written = bmp.compress(Bitmap.CompressFormat.JPEG, 95, os)
+            // 0.3.5: 95 -> 100。"禁止 JPEG 路线"语境下的编码是链路终点，
+            // 压缩伪影不应再叠加在 12.6MP YUV 直采成片上（95 档 4:2:0 采样
+            // 与二次量化在高倍放大下可见；100 档仅保留基线熵编码）。
+            written = bmp.compress(Bitmap.CompressFormat.JPEG, 100, os)
             os.flush()
         } ?: return@runCatching null
         if (!written) error("compress failed")

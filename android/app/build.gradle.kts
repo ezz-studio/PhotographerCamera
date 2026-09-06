@@ -1,3 +1,11 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+// Single source of truth for the app version: defaultConfig.versionName AND the
+// APK file name (PhotographerCamera-<version>.apk) both derive from this.
+// Bump on every feature round: minor = feature batch, patch = fix-only round.
+val APP_VERSION_NAME = "0.3.7"
+val APP_VERSION_CODE = 15
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,8 +21,8 @@ android {
         applicationId = "com.photographercamera"
         minSdk = 26          // adaptive-icon launcher requires >=26; GLES 3.0 (18) & Camera2 (21) both satisfied
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-alpha"
+        versionCode = APP_VERSION_CODE
+        versionName = APP_VERSION_NAME
         vectorDrawables { useSupportLibrary = true }
         // Camera permission is normal-tier at install; requested at runtime in CameraEngine.
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
@@ -43,7 +51,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     buildFeatures { compose = true }
 
@@ -52,9 +59,31 @@ android {
     }
 }
 
+// KGP 2.2+ replaces the deprecated kotlinOptions{} with the compilerOptions DSL.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+// APK naming rule: PhotographerCamera-<versionName>.apk (single APP-VERSION.apk
+// per the project convention). Uses the stable AGP Variant API (androidComponents
+// — the supported path under AGP 9, unlike the legacy applicationVariants hook).
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("PhotographerCamera-$APP_VERSION_NAME.apk")
+            println("APK rename [${variant.name}] -> PhotographerCamera-$APP_VERSION_NAME.apk")
+        }
+    }
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    // androidx.lifecycle.compose.LocalLifecycleOwner lives here (the old
+    // androidx.compose.ui.platform.LocalLifecycleOwner is deprecated)
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.compose.ui:ui:1.7.2")
     implementation("androidx.compose.material3:material3:1.3.0")

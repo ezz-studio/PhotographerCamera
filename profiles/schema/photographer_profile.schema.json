@@ -11,6 +11,15 @@
     "name": { "type": "string" },
     "author": { "type": "string" },
     "description": { "type": "string" },
+    "display": {
+      "type": "object",
+      "description": "可选：App 预设列表展示元数据，不参与 GPU 渲染。name=展示名（可含任意字符，优先于文件名，由 Studio「风格名称」原样写入）；intro=一句话简介（对应「滤镜简介」）；icon=同目录图标文件的扩展名，图标须与 profile JSON 同名成对存放（<profile文件名>.<icon>）",
+      "properties": {
+        "name": { "type": "string" },
+        "intro": { "type": "string" },
+        "icon": { "type": "string" }
+      }
+    },
     "created_at": { "type": "string" },
     "validation_status": { "type": "string", "enum": ["pending", "validated", "failed"] },
     "conditions": {

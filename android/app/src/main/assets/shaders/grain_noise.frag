@@ -18,7 +18,11 @@ uniform vec2  u_resolution; // in pixels, for stable grain frequency
 #include "noise.glsl"
 
 float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+    // sin-free hash12 — see effect.frag pc_hash note (regular banding at
+    // full-res coordinates with the old sin hash).
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
 void main() {

@@ -234,7 +234,20 @@ def apply_grain(rgb, amount=0.0, size=1.0, density=1.0, seed=None):
     noise = rng.standard_normal(rgb.shape[:2]).astype(np.float32)
     # finer grain with smaller size (more high-freq); approximate with scaling
     scale = amount * 0.08 * density / max(0.5, size)
-    return _clip(rgb + noise[..., None] * scale)
+    # LIGHT-AWARE distribution (v0.3.0, matches effect.frag::pc_grain):
+    # the only adaptive term in the engine. Dense grain in shadows, flat
+    # 0.4 floor in mids, gentle lift over strong highlights. The amount/
+    # size/density parameters stay constant - only the per-pixel mask varies.
+    lum = rgb.mean(axis=2)
+    shadow_w = 1.0 - 0.6 * _smoothstep(0.0, 0.45, lum)
+    high_w = 0.4 + 0.45 * _smoothstep(0.72, 0.97, lum)
+    mask = np.maximum(shadow_w, high_w)
+    return _clip(rgb + noise[..., None] * scale * mask[..., None])
+
+
+def _smoothstep(e0, e1, x):
+    t = np.clip((x - e0) / max(1e-6, e1 - e0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
 
 
 def apply_noise(rgb, luma=0.0, chroma=0.0, seed=None):
@@ -295,22 +308,33 @@ def apply_film_curve(rgb, shadow_floor=8.0, highlight_ceiling=248.0):
 
 
 def render(rgb: np.ndarray, profile: dict, seed: int | None = 0) -> np.ndarray:
-    """Apply full PhotographerProfile pipeline (CPU reference)."""
+    """Apply full PhotographerProfile pipeline (CPU reference).
+
+    Chain order synced with effect.frag v0.3.0 (Unified Image Engine, the
+    user-defined authoritative order):
+      exposure -> WB -> color matrix -> highlight -> shadow
+      -> film curve (Contrast/BW) -> tone curve (independent) -> HSL
+      -> vignette -> bloom -> halation
+      -> grain (light-aware) -> noise -> sharpen (always LAST)
+    The 3D LUT stage is Android-only (sampler3D; no CPU equivalent here).
+    """
     rgb = rgb.astype(np.float32)
     p = profile or {}
     rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
     wb = p.get("white_balance", {})
     rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
     rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
-    rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
     hr = p.get("highlight_rolloff", {})
     rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
     sh = p.get("shadow", {})
     rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
                        sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+    fc = p.get("film_curve", {})
+    rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
     rgb = apply_hsl(rgb, p.get("hsl", {}))
-    sp = p.get("sharpen", {})
-    rgb = apply_sharpen(rgb, sp.get("amount", 0.0), sp.get("radius", 1.0))
+    vg = p.get("vignette", {})
+    rgb = apply_vignette(rgb, vg.get("amount", 0.0), vg.get("radius", 1.0), vg.get("feather", 0.5), vg.get("center", [0.5, 0.5]))
     bl = p.get("bloom", {})
     rgb = apply_bloom(rgb, bl.get("amount", 0.0), bl.get("threshold", 0.9), bl.get("radius", 1.0))
     hl = p.get("halation", {})
@@ -319,12 +343,9 @@ def render(rgb: np.ndarray, profile: dict, seed: int | None = 0) -> np.ndarray:
     rgb = apply_grain(rgb, gr.get("amount", 0.0), gr.get("size", 1.0), gr.get("density", 1.0), seed)
     ns = p.get("noise", {})
     rgb = apply_noise(rgb, ns.get("luma", 0.0), ns.get("chroma", 0.0), seed)
-    vg = p.get("vignette", {})
-    rgb = apply_vignette(rgb, vg.get("amount", 0.0), vg.get("radius", 1.0), vg.get("feather", 0.5), vg.get("center", [0.5, 0.5]))
-    # film curve LAST so its guarantees (shadow floor / highlight ceiling) hold
-    # for the exported pixels — same position as the Android GPU chain.
-    fc = p.get("film_curve", {})
-    rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    # sharpen LAST (final detail stage) - matches the Android GPU chain.
+    sp = p.get("sharpen", {})
+    rgb = apply_sharpen(rgb, sp.get("amount", 0.0), sp.get("radius", 1.0))
     return _clip(rgb)
 
 

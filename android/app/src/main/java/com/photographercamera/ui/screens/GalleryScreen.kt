@@ -1,11 +1,18 @@
 package com.photographercamera.ui.screens
 
+import android.app.Activity
 import android.content.Context
-import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -26,12 +34,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -45,10 +55,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +72,8 @@ import com.photographercamera.ui.theme.SurfaceDark
 import com.photographercamera.ui.theme.TextPrimary
 import com.photographercamera.ui.theme.TextSecondary
 
+private val DeleteRed = Color(0xFFE53935)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(navController: NavController) {
@@ -71,12 +82,66 @@ fun GalleryScreen(navController: NavController) {
     val photos = remember { mutableStateListOf<SavedPhoto>() }
     var viewerPhoto by remember { mutableStateOf<SavedPhoto?>(null) }
 
-    DisposableEffect(lifecycleOwner) {
-        photos.clear(); photos.addAll(CaptureSaver.list(context))
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                photos.clear(); photos.addAll(CaptureSaver.list(context))
+    // ---- edit mode: multi-select + delete --------------------------------
+    var editing by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<Uri>() }
+    var confirmDelete by remember { mutableStateOf(false) }
+    // photos handed to MediaStore.createDeleteRequest, resolved on result
+    val pendingDelete = remember { mutableStateListOf<SavedPhoto>() }
+
+    fun refresh() {
+        photos.clear()
+        photos.addAll(CaptureSaver.list(context))
+    }
+
+    // API 30+: the system delete dialog (createDeleteRequest) — refresh after
+    // the user confirms. The photos are ours, so no per-URI permission dance.
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { res ->
+        val n = pendingDelete.size
+        pendingDelete.clear()
+        if (res.resultCode == Activity.RESULT_OK) {
+            refresh()
+            selected.clear()
+            Toast.makeText(context, "已删除 $n 张", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun performDelete(targets: List<SavedPhoto>) {
+        if (targets.isEmpty()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pendingDelete.clear()
+            pendingDelete.addAll(targets)
+            try {
+                val pi = MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    targets.map { it.uri },
+                )
+                deleteLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            } catch (t: Throwable) {
+                pendingDelete.clear()
+                Toast.makeText(context, "删除失败：${t.message}", Toast.LENGTH_SHORT).show()
             }
+        } else {
+            // Legacy / API 29: our own MediaStore entries — direct delete works
+            // (owner app; WRITE_EXTERNAL_STORAGE already granted on legacy).
+            var ok = 0
+            targets.forEach { p ->
+                runCatching {
+                    if (context.contentResolver.delete(p.uri, null, null) > 0) ok++
+                }
+            }
+            refresh()
+            selected.clear()
+            Toast.makeText(context, "已删除 $ok 张", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        refresh()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -91,10 +156,31 @@ fun GalleryScreen(navController: NavController) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("相册", color = TextPrimary, fontSize = 18.sp) },
+                title = {
+                    Text(
+                        if (editing && selected.isNotEmpty()) "已选 ${selected.size} 项" else "相册",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(onClick = {
+                        if (editing) {
+                            editing = false
+                            selected.clear()
+                        } else {
+                            navController.popBackStack()
+                        }
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = TextPrimary)
+                    }
+                },
+                actions = {
+                    TextButton(onClick = {
+                        editing = !editing
+                        selected.clear()
+                    }) {
+                        Text(if (editing) "完成" else "编辑", color = AccentOrange, fontSize = 15.sp)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -136,49 +222,149 @@ fun GalleryScreen(navController: NavController) {
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(photos, key = { it.uri.toString() }) { photo ->
-                        GalleryThumb(photo = photo, onClick = { viewerPhoto = photo })
+                        GalleryThumb(
+                            photo = photo,
+                            editing = editing,
+                            selected = photo.uri in selected,
+                            onClick = {
+                                if (editing) {
+                                    if (photo.uri in selected) selected.remove(photo.uri)
+                                    else selected.add(photo.uri)
+                                } else {
+                                    viewerPhoto = photo
+                                }
+                            },
+                        )
                     }
                 }
             }
         }
     }
 
-    // Floating "+" button anchored to bottom-right
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-        Box(
-            modifier = Modifier
-                .padding(20.dp)
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(AccentOrange)
-                .clickable { navController.popBackStack() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "返回相机",
-                tint = Color.Black,
-                modifier = Modifier.size(28.dp),
-            )
+    // Edit-mode delete bar (bottom center)
+    if (editing && selected.isNotEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            Box(
+                modifier = Modifier
+                    .padding(bottom = 32.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DeleteRed)
+                    .clickable { confirmDelete = true }
+                    .padding(horizontal = 28.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    "删除（${selected.size}）",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
+    }
+
+    // Floating "+" button anchored to bottom-right (hidden in edit mode)
+    if (!editing) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            Box(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(AccentOrange)
+                    .clickable { navController.popBackStack() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "返回相机",
+                    tint = Color.Black,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+    }
+
+    // Delete confirmation
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = SurfaceDark,
+            title = { Text("删除照片", color = TextPrimary, fontSize = 17.sp) },
+            text = {
+                Text(
+                    "将删除选中的 ${selected.size} 张照片，此操作无法恢复。",
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    val targets = photos.filter { it.uri in selected }
+                    performDelete(targets)
+                }) { Text("删除", color = DeleteRed, fontWeight = FontWeight.Medium) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) {
+                    Text("取消", color = TextSecondary)
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun GalleryThumb(photo: SavedPhoto, onClick: () -> Unit) {
-    // Coil: async MediaStore load with built-in downsampling + caching — no
-    // hand-rolled decode, no main-thread stalls, works for every format.
-    coil.compose.AsyncImage(
-        model = photo.uri,
-        contentDescription = "照片",
-        modifier = Modifier
-            .size(88.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceDark)
-            .clickable(onClick = onClick)
-            .padding(2.dp),
-        contentScale = ContentScale.Crop,
-    )
+private fun GalleryThumb(
+    photo: SavedPhoto,
+    editing: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(modifier = Modifier.size(88.dp)) {
+        // Coil: async MediaStore load with built-in downsampling + caching — no
+        // hand-rolled decode, no main-thread stalls, works for every format.
+        coil.compose.AsyncImage(
+            model = photo.uri,
+            contentDescription = "照片",
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceDark)
+                .clickable(onClick = onClick)
+                .padding(2.dp),
+            contentScale = ContentScale.Crop,
+        )
+        if (editing) {
+            // selection ring
+            if (selected) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(2.dp, AccentOrange, RoundedCornerShape(8.dp)),
+                )
+            }
+            // check bubble
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(5.dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) AccentOrange else Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = "已选择",
+                        tint = Color.Black,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

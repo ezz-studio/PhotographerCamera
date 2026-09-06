@@ -105,8 +105,8 @@ class GpuParams private constructor(
                     0f,
                 ),
                 noiseVec = floatArrayOf(
-                    profile.noise.luma,
-                    profile.noise.chroma,
+                    normNoise(profile.noise.luma),
+                    normNoise(profile.noise.chroma),
                     aspect,
                     0f,
                 ),
@@ -136,6 +136,17 @@ class GpuParams private constructor(
 
         private fun identityToneLut(): FloatArray =
             FloatArray(TONE_LUT_SIZE) { (it + 0.5f) / TONE_LUT_SIZE }
+
+        /**
+         * Analyzer-measured noise arrives on a 0-100-ish scale (e.g. a
+         * recompressed source JPEG measured chroma_noise=20.83); the shader
+         * expects ~[0,1]. Passing the raw value once amplified chroma noise to
+         * ±40% of channel range and destroyed every saved still. Normalize
+         * anything above 1 by /100 and hard-cap both channels so even a broken
+         * profile can only ever inject subtle film-like noise.
+         */
+        private fun normNoise(v: Float): Float =
+            (if (v > 1f) v / 100f else v).coerceIn(0f, 0.5f)
 
         /** 7 texels, one per hue category, in HUE_ORDER. R=sat, G=light, B=hueShift(deg). */
         fun bakeHslLut(hsl: Hsl): FloatArray {

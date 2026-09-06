@@ -18,6 +18,7 @@ package com.photographercamera.core.profile
 
 import android.content.Context
 import android.net.Uri
+import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.gpu.GpuParams
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,8 +37,20 @@ object ProfileLoader {
     private val registry = LinkedHashMap<String, PhotographerProfile>()
     private val gpuCache = LinkedHashMap<String, GpuParams>()
 
+    // Idempotency guard: init() used to clear() + rescan the registry on EVERY
+    // CameraScreen entry (the screen keeps `profiles` as remember-scoped state,
+    // so it looks empty again after leaving). While the async rescan ran,
+    // toGpuParams() could hit the cleared registry and throw "Unknown profile"
+    // — the preset name logged "applied" but the GL params were never set.
+    // After the first load the registry is PERMANENT; re-init is a no-op.
+    @Volatile private var initialized = false
+
     /** Scan assets/profiles + cache dir; populate the registry. Call once at startup. */
     suspend fun init(context: Context) = withContext(Dispatchers.IO) {
+        if (initialized) {
+            DebugLog.log("PROFILE", "init skipped (registry cached: ${registry.size} profiles)")
+            return@withContext
+        }
         registry.clear()
         gpuCache.clear()
         val am = context.assets
@@ -45,15 +58,21 @@ object ProfileLoader {
             am.list("profiles")?.forEach { name ->
                 if (name.endsWith(".json", ignoreCase = true)) {
                     val text = am.open("profiles/$name").bufferedReader().use { it.readText() }
-                    loadFromText(text, nameWithoutExt(name))
+                    // Each profile may fail independently — log it (never throw, so one
+                    // bad preset can't blank out the whole list on a real device).
+                    runCatching { loadFromText(text, nameWithoutExt(name)) }
+                        .onFailure { e -> DebugLog.logError("PROFILE", "load bundled '$name' failed", e) }
                 }
             }
-        }
+        }.onFailure { e -> DebugLog.logError("PROFILE", "scan assets/profiles failed", e) }
         // user-imported / exported-to-cache profiles persist across sessions
         val cacheDir = profilesCacheDir(context)
         cacheDir.listFiles { f -> f.extension.equals("json", ignoreCase = true) }?.forEach { f ->
             runCatching { loadFromText(f.readText(), f.nameWithoutExtension) }
+                .onFailure { e -> DebugLog.logError("PROFILE", "load cached '${f.name}' failed", e) }
         }
+        DebugLog.log("PROFILE", "init done: ${registry.size} profiles loaded")
+        initialized = true
     }
 
     /** Parse + validate + register a profile. Throws ProfileValidationException on range error. */
@@ -119,6 +138,89 @@ object ProfileLoader {
         context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { w ->
             w.write(json.encodeToString(PhotographerProfile.serializer(), p))
         } ?: throw IllegalArgumentException("Cannot write $uri")
+    }
+
+    // ---- Public inbox import / delete ---------------------------------------
+
+    /**
+     * Public inbox folder on shared storage: `/storage/emulated/0/PhotographerCamera`.
+     * Users drop `<name>.json` (+ optional same-name `<name>.<png|jpg|...>` icon)
+     * here from a PC or file manager; the app copies them into its private dir.
+     */
+    fun publicInboxDir(): File =
+        File(android.os.Environment.getExternalStorageDirectory(), "PhotographerCamera")
+
+    /**
+     * Scan the public inbox, validate + copy every profile JSON (and its
+     * same-name icon) into the private profiles dir, then register it.
+     * Files are COPIED, never moved — the user keeps their originals.
+     * Without All-Files-Access the inbox simply reads as absent (logged).
+     */
+    suspend fun importFromPublicInbox(context: Context): List<String> = withContext(Dispatchers.IO) {
+        val inbox = publicInboxDir()
+        if (!inbox.isDirectory) {
+            DebugLog.log("PROFILE", "public inbox absent: ${inbox.path}")
+            return@withContext emptyList()
+        }
+        val dest = profilesCacheDir(context)
+        val imported = mutableListOf<String>()
+        inbox.listFiles { f -> f.isFile && f.extension.equals("json", ignoreCase = true) }
+            ?.forEach { f ->
+                val id = f.nameWithoutExtension
+                runCatching {
+                    val text = f.readText()
+                    loadFromText(text, id) // validates BEFORE anything is copied
+                    f.copyTo(File(dest, "$id.json"), overwrite = true)
+                    copyInboxIcon(f, id, dest)
+                    imported += id
+                }.onFailure { e -> DebugLog.logError("PROFILE", "inbox import '${f.name}' failed", e) }
+            }
+        DebugLog.log(
+            "PROFILE",
+            "public inbox: ${imported.size} imported ${imported} (scan=${inbox.path})",
+        )
+        imported
+    }
+
+    /** Copy `<id>.<iconExt>` declared in the profile's display.icon (probe common exts). */
+    private fun copyInboxIcon(jsonFile: File, id: String, dest: File) {
+        val declared = registry[id]?.display?.icon?.takeIf { it.isNotBlank() }
+        val exts = listOfNotNull(declared, "png", "jpg", "jpeg", "webp").distinct()
+        for (ext in exts) {
+            val icon = File(jsonFile.parentFile, "$id.$ext")
+            if (icon.isFile) {
+                icon.copyTo(File(dest, "$id.$ext"), overwrite = true)
+                return
+            }
+        }
+    }
+
+    /** True when the profile is bundled in assets (bundled ones cannot be deleted). */
+    fun isBundled(id: String, context: Context): Boolean =
+        runCatching { context.assets.list("profiles")?.contains("$id.json") == true }
+            .getOrDefault(false)
+
+    /**
+     * Delete a user-imported profile: removes its JSON + icon from the private
+     * dir and drops it from the registry. Bundled (assets) profiles are
+     * protected and return false.
+     */
+    suspend fun deleteProfile(context: Context, id: String): Boolean = withContext(Dispatchers.IO) {
+        if (isBundled(id, context)) {
+            DebugLog.log("PROFILE", "delete '$id' refused (bundled)")
+            return@withContext false
+        }
+        val dir = profilesCacheDir(context)
+        var removed = false
+        dir.listFiles { f -> f.isFile && f.nameWithoutExtension == id }?.forEach { f ->
+            removed = f.delete() || removed
+        }
+        if (removed) {
+            registry.remove(id)
+            gpuCache.keys.removeAll { it.startsWith("$id|") }
+        }
+        DebugLog.log("PROFILE", "delete '$id' -> removed=$removed")
+        removed
     }
 
     private fun profilesCacheDir(context: Context): File {

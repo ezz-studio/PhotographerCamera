@@ -277,6 +277,68 @@ class CameraPreviewView @JvmOverloads constructor(
      * returns a 1x1 bitmap so the caller falls back to the preview-frame
      * capture path (the same signal the GPU-chain-SKIPPED branch uses).
      */
+    /**
+     * 统一成片入口（目标架构）：RAW 路径与 YUV/ISP 路径在 [StillFrame] 收敛，
+     * 之后共用同一个动态计算引擎 + 风格链，下游代码不感知帧来源。
+     */
+    fun renderStill(frame: com.photographercamera.core.camera.StillFrame, onDone: (Bitmap) -> Unit) {
+        when (frame) {
+            is com.photographercamera.core.camera.StillFrame.Raw -> renderRawThroughChain(frame.frame, onDone)
+            is com.photographercamera.core.camera.StillFrame.Yuv -> renderYuvThroughChain(frame, onDone)
+            is com.photographercamera.core.camera.StillFrame.Isp -> renderBitmapThroughChain(frame.bitmap, 1f, onDone)
+        }
+    }
+
+    /**
+     * YUV_420_888 直采成片（"禁止 JPEG 路线"主通道）：HAL 后 ISP YUV 帧的
+     * 三个平面读出后以 GL_R8 纹理上传，yuv_copy.frag 用标准 BT.601 矩阵转
+     * RGB（公开 API、全设备一致），再交给统一引擎。proxy 生命周期由本方法
+     * 收尾（GL 线程渲染 + 读回完成后 close）。任何失败都以 1x1 bitmap 回调
+     * （上层走预览帧回退）。
+     */
+    fun renderYuvThroughChain(
+        frame: com.photographercamera.core.camera.StillFrame.Yuv,
+        onDone: (Bitmap) -> Unit,
+    ) {
+        queueEvent {
+            val r = renderer
+            val p = params
+            val t0 = android.os.SystemClock.elapsedRealtime()
+            var out: Bitmap? = null
+            try {
+                val img = frame.proxy.image
+                if (r != null && p != null && img != null) {
+                    out = try {
+                        r.renderYuvChain(img, frame.rotDeg, frame.mirror, p, t0)
+                    } catch (t: Throwable) {
+                        com.photographercamera.core.debug.DebugLog.logError("SHOT", "YUV render failed", t)
+                        null
+                    }
+                }
+            } catch (t: Throwable) {
+                com.photographercamera.core.debug.DebugLog.logError("SHOT", "YUV proxy access failed", t)
+                out = null
+            } finally {
+                try {
+                    frame.proxy.close()
+                } catch (_: Throwable) {
+                }
+            }
+            if (out == null) {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "SHOT", "YUV direct path unavailable - falling back",
+                )
+                onDone(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
+            } else {
+                com.photographercamera.core.debug.DebugLog.log(
+                    "SHOT",
+                    "YUV direct chain done ${out.width}x${out.height} in ${android.os.SystemClock.elapsedRealtime() - t0}ms",
+                )
+                onDone(out)
+            }
+        }
+    }
+
     fun renderRawThroughChain(frame: RawFrame, onDone: (Bitmap) -> Unit) {
         queueEvent {
             val r = renderer
@@ -300,6 +362,7 @@ class CameraPreviewView @JvmOverloads constructor(
                     frame.calib,
                     p,
                     t0,
+                    frame.asShotGains,
                 )
             } catch (t: Throwable) {
                 com.photographercamera.core.debug.DebugLog.logError("SHOT", "RAW ISP render failed", t)
