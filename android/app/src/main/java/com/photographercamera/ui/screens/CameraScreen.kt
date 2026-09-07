@@ -17,6 +17,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -272,8 +273,11 @@ fun CameraScreen(navController: NavController) {
 
     // total zoom across lenses (mirrors photon state for recomposition)
     var zoomState by remember { mutableFloatStateOf(1f) }
-    // 跟随 photon state.zoomRatio（镜头枚举由 photon 内部完成，state 已含真实数据）
-    LaunchedEffect(state.zoomRatio) { zoomState = state.zoomRatio }
+    // 0.9.11：显示倍率源 = pvm.zoomRatioByMain（mutableFloatStateOf，相对主摄 1x 的
+    // 显示倍率，与 ZoomRotor 的 minZoom/maxZoom 全局标尺同基准）。旧源 state.zoomRatio
+    // 是控制器本地倍率（ratio/dispIntrinsic 后被相机 range 钳制），跨镜头后与全局
+    // 标尺错位（长焦 zoomState=1.5 落在 0.62~5.98 标尺上），取景框/滑块/mm 全错。
+    LaunchedEffect(pvm.zoomRatioByMain) { zoomState = pvm.zoomRatioByMain }
     // RAW 能力 = photon 当前镜头是否支持 RAW_SENSOR
     val rawCapable = state.isRawSupported
     // self-timer: 0 = off, else seconds
@@ -306,9 +310,11 @@ fun CameraScreen(navController: NavController) {
 
     // ---- zoom soft-snap（照搬上游 ContinuousZoomStopSettlement 语义）--------
     // 档位源 = VM allZoomStops（镜头固有倍率 + 自定义焦段；zoomSteps 字段两边
-    // 都是死字段不可用）。软吸附：距档位 ≤0.05 才吸，绝不跨镜头切换（0.8.3
-    // 架构：HAL 自动路由物理镜头，小步吸附不会换摄；switchToLensAndSetZoomRatio
-    // 会触发 session 重建=0.8.2 乒乓灾难，吸附热路径禁用）。
+    // 都是死字段不可用）。软吸附：距档位 ≤0.05 才吸。0.9.11：吸附走 pvm.settleZoomRatio
+    // （照搬上游 handleVolumeZoom 档位路由：findOptimalLens 找到不同相机则
+    // switchToLensAndSetZoomRatio 一次到位）——仅 settle 松手单次触发，拖拽/捏合
+    // 热路径仍走 setZoomRatio 绝不切镜头（0.8.3 乒乓教训不破）。用户设备 HAL 无
+    // 逻辑多摄路由，1x 以下（0.62 超广角档）必须靠 settle 跨镜头才能生效。
     val zoomStops = remember(state.availableCameras, state.currentCameraId) {
         val cam = state.getCurrentCameraInfo()
         val main = state.availableCameras.firstOrNull {
@@ -318,7 +324,7 @@ fun CameraScreen(navController: NavController) {
     }
     val settleZoomStop = {
         val snap = settleContinuousZoomStop(zoomStops, pvm.zoomRatioByMain).snapZoomStop
-        if (snap != null) pvm.setZoomRatio(snap)
+        if (snap != null) pvm.settleZoomRatio(snap)
     }
     var wasZooming by remember { mutableStateOf(false) }
     // 捏合停手 2s 后软吸附（对齐上游 ZoomControlBar 语义：拖拽条松手立即吸，捏合停手 2s 吸）
@@ -639,16 +645,35 @@ fun CameraScreen(navController: NavController) {
         val fy = topReserve + (slotH - fh)                   // anchor to slot bottom
 
         // ---- inner capture box -----------------------------------------------
-        // 取景框表示"实际拍摄画面"：预览 GL 在 >1x 钳到 1x 显示广角静止画面
-        // （见 Camera2Controller.applyZoomRequestSettings forPreview），取景框则按
-        // 1/zoomRatio 缩小，范围与成片 CONTROL_ZOOM_RATIO / SCALER_CROP_REGION 裁切
-        // 完全一致；≤1x 取景框不缩放（预览即拍摄框，所见即所得）。
+        // 取景框 = 实际拍摄画面相对预览框的缩放。
+        // 0.9.11 公式（用户规格："0.6-1 预览框内图像变化、取景框最大化保持不动；
+        // 1 以上预览框内图像不变、取景框缩放与实际拍摄范围一致"）：
+        //   zoomState 为显示倍率（相对主摄 1x）。预览 GL 在 >1x 钳到当前相机 1x
+        //   显示静止画面（见 Camera2Controller.applyZoomRequestSettings forPreview），
+        //   该静止画面 = 当前相机 dispIntrinsic 倍视野；实际拍摄 = zoomState 倍视野：
+        //       f = dispIntrinsic / zoomState   （>1x：预览视野 → 实际拍摄视野映射）
+        //       f = 1                           （0.6~1x：预览图像实时变化，取景框不动）
+        //   coerceAtMost(1f)：拖拽中长焦上 zoom<dispIntrinsic 的瞬态（控制器钳 1.0，
+        //   实际=预览视野）取景框回全幅不越界。
+        // 动画：animateFloatAsState + 无过冲 spring——拖拽中平滑跟手，settle 跨镜头
+        // 切换时取景框平滑过渡不跳变（旧实现硬计算，切镜两次硬跳无动画）。
         val camInfo = state.getCurrentCameraInfo()
-        val eqBase = camInfo?.focalLength35mmEquivalent?.takeIf { it in 18f..40f } ?: 26f
-        // 取景框 = 实际拍摄画面：>1x 时缩放到 1/zoomRatio（与 CONTROL_ZOOM_RATIO /
-        // SCALER_CROP_REGION 实际裁切一致——预览 GL 在 >1x 钳到 1x 显示广角，
-        // 故取景框范围即真实裁切范围）；≤1x 不缩放（预览即拍摄框，所见即所得）。
-        val f = if (zoomState > 1.001f) (1f / zoomState) else 1f
+        val dispIntrinsic = camInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+        val fTarget = if (zoomState > 1.001f) (dispIntrinsic / zoomState).coerceAtMost(1f) else 1f
+        val f by animateFloatAsState(
+            targetValue = fTarget,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+            label = "viewfinderScale",
+        )
+        // 0.9.11：等效焦距基准 = 主摄焦段 × 显示倍率（zoomState 即相对主摄 1x），
+        // 跨镜头恒正确（26×0.62≈16 超广角 / 26×3=78 长焦）；前置用前置自身焦段。
+        // 旧逻辑 18..40 过滤拒掉超广角（~16mm），且用当前相机焦段跨镜头后错误。
+        val eqBase = if (camInfo?.lensType == LensType.FRONT) {
+            camInfo?.focalLength35mmEquivalent?.takeIf { it > 0f } ?: 26f
+        } else {
+            state.availableCameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
+                ?.focalLength35mmEquivalent?.takeIf { it > 0f } ?: 26f
+        }
         val bw = fw * f
         val bh = fh * f
         val bx = fx + (fw - bw) / 2f

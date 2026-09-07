@@ -3297,6 +3297,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setCameraControllerZoomRatio(clamped, cur)
     }
 
+    /**
+     * 0.9.11：settle（软吸附档位）专用跨镜头路由，语义照搬上游 handleVolumeZoom
+     * 档位切换（4714-4718）：自定义档位纯 setZoomRatio；findOptimalLens 找到不同
+     * 相机则 switchToLensAndSetZoomRatio（session 重建一次到位），否则 setZoomRatio。
+     * 只允许 settle 路径（ZoomRotor 松手 / 捏合停手 2s）调用——拖拽/捏合热路径仍走
+     * setZoomRatio 绝不切镜头，避免 0.8.2 的异步 reopen 乒乓风暴复发（0.8.3 教训）。
+     * 背景：用户设备 HAL 无逻辑多摄路由（各相机独立 zoomRatioRange，如长焦
+     * [1.00,10.00]），0.6x 下发被当前相机 range 下限钳死——1x 以下必须由本方法
+     * 在档位吸附时切到超广角（dispIntrinsic=0.62 → 控制器收 0.62/0.62=1.0 原生视野）。
+     */
+    fun settleZoomRatio(ratio: Float) {
+        val currentState = state.value
+        val currentCamera = currentState.getCurrentCameraInfo()
+        if (currentCamera == null) {
+            setZoomRatio(ratio)
+            return
+        }
+        if (isCurrentLensCustomZoomRatioStop(ratio)) {
+            setZoomRatio(ratio)
+            return
+        }
+        val optimalLens = findOptimalLens(ratio, currentState.availableCameras, currentCamera.cameraId)
+        if (optimalLens != null && optimalLens.cameraId != currentCamera.cameraId) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "ZOOM",
+                "settle.crossLens ratio=${"%.3f".format(ratio)} ${currentCamera.cameraId} -> ${optimalLens.cameraId}",
+            )
+            switchToLensAndSetZoomRatio(optimalLens.cameraId, ratio)
+        } else {
+            setZoomRatio(ratio)
+        }
+    }
+
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
         zoomRatioByMain = ratio
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
