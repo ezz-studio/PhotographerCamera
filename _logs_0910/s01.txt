@@ -1,0 +1,585 @@
+22:02:50.584 [BOOT] device=OPPO PLG110 api=36 cores=8
+22:02:50.618 [LIFECYCLE] app foreground (onStart)
+22:02:50.817 [ShutterSoundPlayer] D/Shutter sound player initialized with SoundPool
+22:02:50.824 [VideoAudioInputManager] D/Audio inputs refreshed: [15:back:PLG110(15), 15:bottom:PLG110(15)]
+22:02:50.912 [Camera2Controller] I/初始化相机控制器
+22:02:50.973 [CameraGLSurfaceView] D/CameraGLSurfaceView initialized
+22:02:50.976 [LutRenderer] I/Preview stabilization useCase=OFF, strength=1.0, lookahead=7
+22:02:51.043 [LutRenderer] D/onSurfaceCreated
+22:02:51.071 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=false, includePreLogFilmGrain=false, includeLutMask=false, includeJpegInputToneCurve=false, includeSpatialRecipeEffects=false)
+22:02:51.085 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:51.086 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:51.099 [CameraGLSurfaceView] D/onResume
+22:02:51.118 [PROFILE] init done: 4 profiles loaded
+22:02:51.119 [PROFILE] public inbox absent: /storage/emulated/0/PhotographerCamera
+22:02:51.128 [VideoAudioInputManager] D/Audio inputs refreshed: [15:back:PLG110(15), 15:bottom:PLG110(15)]
+22:02:51.167 [Camera2Controller] D/测光模式: SYSTEM_DEFAULT
+22:02:51.167 [METER] mode=SYSTEM_DEFAULT maxAeRegions=0 builder=false
+22:02:51.167 [Camera2Controller] V/updatePreview: camera not ready (device=null, session=null, builder=null)
+22:02:51.168 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:51.168 [Camera2Controller] D/虚拟光圈开关: false
+22:02:51.168 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:51.173 [ShutterSoundPlayer] D/Shutter sound loaded successfully
+22:02:51.173 [ShutterSoundPlayer] D/Shutter sound loaded successfully
+22:02:51.176 [CameraPreviewGL] D/onSurfaceReady called
+22:02:51.176 [CameraPreviewGL] D/onSurfaceReady: notifiedST=null, newST=android.graphics.SurfaceTexture@ffcdf35
+22:02:51.178 [PROFILE] loaded 4: ACROS 100, CINEMA 80, CLASSIC 320, native
+22:02:51.178 [PROFILE] restored last preset 'native'
+22:02:51.205 [CameraPreviewGL] D/shouldNotifySurfaceTexture is true, calling onSurfaceTextureReady
+22:02:51.217 [PROFILE] inject 'native' -> lut=profile:native grain=0.0 wb=(0.0,0.0) ev=0.0
+22:02:51.249 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:51.250 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:51.258 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:02:51.262 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:02:51.263 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:02:51.274 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:02:51.275 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:02:51.277 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:02:51.278 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:02:51.279 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:02:51.279 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:02:51.280 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:02:51.283 [CameraDiscovery] D/Camera2 final list:
+22:02:51.283 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.283 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.284 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.284 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.284 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.284 [Camera2Controller] D/Discovered 5 cameras:
+22:02:51.284 [Camera2Controller] D/发现 5 个摄像头
+22:02:51.284 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.284 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:02:51.284 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.284 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.284 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.284 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:02:51.284 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.285 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:02:51.285 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.285 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.285 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:02:51.335 [Camera2Controller] I/刷新摄像头列表
+22:02:51.347 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:02:51.348 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:02:51.349 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:02:51.352 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:02:51.353 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:02:51.353 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:02:51.353 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:02:51.354 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:02:51.354 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:02:51.354 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:02:51.356 [CameraDiscovery] D/Camera2 final list:
+22:02:51.356 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.357 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.357 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.357 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.357 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.357 [Camera2Controller] D/Discovered 5 cameras:
+22:02:51.357 [Camera2Controller] D/发现 5 个摄像头
+22:02:51.357 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.357 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:02:51.357 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.357 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.357 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.357 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:02:51.357 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.357 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:02:51.357 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.357 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.357 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:02:51.359 [CameraViewModel] D/openCamera
+22:02:51.359 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:02:51.363 [Camera2Controller] I/刷新摄像头列表
+22:02:51.372 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:02:51.377 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:02:51.377 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:02:51.378 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:02:51.379 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:02:51.379 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:02:51.384 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:02:51.384 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:02:51.385 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:02:51.385 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:02:51.385 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:02:51.386 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:02:51.386 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:02:51.388 [CameraDiscovery] D/Camera2 final list:
+22:02:51.388 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.388 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.388 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.388 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.388 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.388 [Camera2Controller] D/Discovered 5 cameras:
+22:02:51.388 [Camera2Controller] D/发现 5 个摄像头
+22:02:51.388 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.389 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:02:51.389 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.389 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.389 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.389 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:02:51.389 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.389 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:02:51.389 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.389 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.389 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:02:51.393 [Camera2Controller] I/刷新摄像头列表
+22:02:51.407 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:02:51.409 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:02:51.409 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:02:51.409 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:02:51.413 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:02:51.413 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:02:51.413 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:02:51.413 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:02:51.414 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:02:51.414 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:02:51.414 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:02:51.416 [CameraDiscovery] D/Camera2 final list:
+22:02:51.416 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.416 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.416 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.416 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.416 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.416 [Camera2Controller] D/Discovered 5 cameras:
+22:02:51.416 [Camera2Controller] D/发现 5 个摄像头
+22:02:51.416 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:02:51.416 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:02:51.416 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.416 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.416 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:02:51.416 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:02:51.417 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:02:51.417 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:02:51.417 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:02:51.417 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:02:51.417 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:02:51.422 [Camera2Controller] D/拍照尺寸: 3840x2880, 预览尺寸: 1440x1080, 格式: YUV, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:02:51.423 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:02:51.475 [Camera2Controller] D/Camera opened: 2
+22:02:51.476 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+22:02:51.482 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true
+22:02:51.486 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]
+22:02:51.552 [Camera2Controller] D/Preview started
+22:02:54.785 [SHOT] shutter pressed (zoom=1.0, focal=23.378553)
+22:02:54.799 [Camera2Controller] D/setLocation: 38.7102, 115.1446
+22:02:54.800 [CameraViewModel] I/FACE_MASK stage=CAPTURE_LATCH available=false source=BLAZEFACE_VALIDATED_SOFT_FACE_ELLIPSE size=null ageMs=null sensorOrientation=null previewToCaptureRotation=null frontFacing=null cameraId=null
+22:02:54.801 [Camera2Controller] I/开始拍照 - 闪光模式: 0, ISO模式: 自动
+22:02:54.806 [VibrationHelper] D/Vibration triggered
+22:02:54.818 [Camera2Controller] I/Multi-frame focus froze settled continuous AF without retrigger: previousMode=4 fixedMode=0 afState=2 lensState=0 focus=0.36056986
+22:02:54.819 [Camera2Controller] D/直接拍照
+22:02:54.824 [Camera2Controller] I/RAW_CROP_TRACE stage=CAMERA2_REQUEST isRaw=false selectedCamera=2 openCamera=2 physicalOutput=null stateZoom=1.0 requestZoom=1.0 requestScalerCrop=Rect(0, 0 - 4096, 3072) requestDistortion=null
+22:02:54.826 [Camera2Controller] D/Multi-frame capture locked exposure=true ae=1 flash=0 iso=100 shutter=10000000 af=0 focus=0.36056986 afState=2 lensState=0 focusSource=settled_continuous_af
+22:02:54.827 [Camera2Controller] D/Capture request built and ready to send: aeMode=1, aeTrigger=0, aeLock=true, flashMode=0, iso=100, shutter=10000000
+22:02:54.827 [Camera2Controller] I/JPGmax denoise burst plan: zeroEvFrames=5 hdr=false
+22:02:54.932 [Camera2Controller] D/Burst capture started at frame 97
+22:02:54.966 [Camera2Controller] D/Burst capture started at frame 98
+22:02:54.999 [Camera2Controller] D/Burst capture started at frame 99
+22:02:55.033 [Camera2Controller] D/Burst capture started at frame 100
+22:02:55.045 [CameraViewModel] D/Burst frame received: 1/5
+22:02:55.046 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=202 shutter=6341373, afMode=0 afState=0 focus=0.36056986 lensState=0, result buffered (timestamp: 64708790456787). Pending images: 0, Pending results: 0
+22:02:55.066 [Camera2Controller] D/Burst capture started at frame 101
+22:02:55.126 [CameraViewModel] D/Burst frame received: 2/5
+22:02:55.126 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=202 shutter=6341373, afMode=0 afState=0 focus=0.36056986 lensState=0, result buffered (timestamp: 64708823781787). Pending images: 0, Pending results: 0
+22:02:55.193 [CameraViewModel] D/Burst frame received: 3/5
+22:02:55.194 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=202 shutter=6341373, afMode=0 afState=0 focus=0.36056986 lensState=0, result buffered (timestamp: 64708857106787). Pending images: 0, Pending results: 0
+22:02:55.261 [CameraViewModel] D/Burst frame received: 4/5
+22:02:55.262 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=202 shutter=6341373, afMode=0 afState=0 focus=0.36056986 lensState=0, result buffered (timestamp: 64708890431787). Pending images: 0, Pending results: 0
+22:02:55.325 [CameraViewModel] D/Burst frame received: 5/5
+22:02:55.326 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=202 shutter=6341373, afMode=0 afState=0 focus=0.36056986 lensState=0, result buffered (timestamp: 64708923756787). Pending images: 0, Pending results: 0
+22:02:55.327 [Camera2Controller] D/Burst sequence completed
+22:02:55.329 [Camera2Controller] I/Multi-frame sequence end: requested=5 captured=5 failed=0
+22:02:55.330 [SHOT] multi-frame sequence end requested=5 captured=5 failed=0
+22:02:55.330 [CameraViewModel] I/RAW burst plan: referenceSource=chronological, reference=0, accepted=5, normal=5, short=0, long=0, exposureRejected=, geometry=GLES_TEMPORAL_GRAPH, costMs=5
+22:02:55.331 [CameraViewModel] D/processStacking started - image size 5
+22:02:55.331 [Camera2Controller] I/Multi-frame focus state released: reason=capture sequence finished
+22:02:55.620 [CameraViewModel] D/Image saved: a6a72591-d5fa-4203-a17d-9a300fc76696, LUT: profile:native, Frame: null
+22:02:55.632 [MultiFrameStacker] I/Starting GLES streaming stacking process for 5 frames (3840 x 2880). SR=false
+22:02:55.778 [GlesYuvStacker] D/GLES stack format=YUV_420_888 internal=R8/RG8 spatialGuide=1920x1440 flowGrid=240x180 sr=false srScale=1.00
+22:02:55.783 [GlesYuvStacker] D/GLES plane upload yRow=3840 cbRow=3840 cbPixel=2 chroma=1920x1440
+22:02:56.012 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=mode(-64.0,-64.0,n=1321)
+22:02:56.226 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=mode(-64.0,-64.0,n=1315)
+22:02:56.433 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=mode(-64.0,-64.0,n=1311)
+22:02:56.640 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=mode(-64.0,-64.0,n=1309)
+22:02:56.706 [LargeDirectBuffer] D/Allocated GLES YUV stack readback buffer with native allocator: 44236800 bytes
+22:02:56.847 [GlesYuvStacker] I/GLES YUV stacking completed in 1212ms
+22:02:57.086 [HeicExportEncoder] D/HEIC export encode result=true, size=2880x3840, gainmap=false, exif=false, bytes=2622260
+22:02:57.087 [PhotoManager] D/saveYuvStackedPhoto internal original saved=original.heic
+22:02:57.107 [PhotoManager] D/prepareUltraHdrSource took 0ms
+22:02:57.109 [PhotoManager] D/gainmapProducer.build took 0ms, enabled=false
+22:02:57.335 [CameraViewModel] D/Multi-frame convergence skipped: processing already dispatched (requested=5 captured=5 failed=0)
+22:02:57.379 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:57.379 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:57.392 [Camera2Controller] D/RAW 格式拍照: true
+22:02:57.435 [LutImageProcessor] D/LutImageProcessor initialized
+22:02:57.447 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:57.448 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:57.468 [Camera2Controller] D/ImageReader closed immediately
+22:02:57.469 [LivePhotoRecorder] D/Live Photo recording stopped
+22:02:57.469 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:02:57.522 [PhotoManager] D/processedBitmap = sRGB IEC61966-2.1, ultraHdrSource=null, gainmap=false
+22:02:57.638 [Camera2Controller] D/Camera close requested: lifecycle=CLOSING
+22:02:57.641 [Camera2Controller] D/Camera device closed: 2
+22:02:57.641 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:02:57.642 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:02:57.643 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:02:57.643 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:02:57.646 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:02:57.647 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:02:57.648 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:02:57.669 [Camera2Controller] D/Camera opened: 2
+22:02:57.670 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+22:02:57.671 [Camera2Controller] I/Creating preview session: readerFormat=RAW_SENSOR, isP010Supported=true
+22:02:57.671 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]
+22:02:57.729 [ExifWriter] D/EXIF written to temp_export_27164334771840.jpg: ISO=202, Exposure=1/157s, Aperture=f/1.5, Focal=6.8mm
+22:02:57.729 [Jpeg444ExportEncoder] D/JPEG 4:4:4 export encode result=true, size=2880x3840, gainmap=false, bytes=4757118
+22:02:57.739 [Camera2Controller] D/Preview started
+22:02:57.738 [PhotoManager] D/exportPhoto JPEG encode took 209ms, jpeg444=true, success=true
+22:02:57.740 [PhotoManager] I/exportPhoto JPEG result: output=2880x3840(ARGB_8888, sRGB IEC61966-2.1), input=nullxnull, quality=95, jpeg444=true, bytes=4757118, encodeMs=209, success=true
+22:02:57.775 [PhotoManager] D/Published photo export: uri=content://media/external/images/media/19754, mimeType=image/jpeg, bytes=4757118
+22:02:57.786 [PhotoManager] D/Exported URI saved: content://media/external/images/media/19754 for photo a6a72591-d5fa-4203-a17d-9a300fc76696
+22:03:00.735 [SHOT] shutter pressed (zoom=1.0, focal=23.378553)
+22:03:00.748 [Camera2Controller] D/setLocation: 38.7102, 115.1446
+22:03:00.749 [CameraViewModel] I/FACE_MASK stage=CAPTURE_LATCH available=false source=BLAZEFACE_VALIDATED_SOFT_FACE_ELLIPSE size=null ageMs=null sensorOrientation=null previewToCaptureRotation=null frontFacing=null cameraId=null
+22:03:00.749 [Camera2Controller] I/开始拍照 - 闪光模式: 0, ISO模式: 自动
+22:03:00.751 [VibrationHelper] D/Vibration triggered
+22:03:00.756 [Camera2Controller] I/Waiting for multi-frame AF lock: generation=3 mode=4 initialAfState=2 initialLensState=1 focus=0.34695286
+22:03:00.761 [Camera2Controller] D/Multi-frame AF observation: generation=3 afState=2 lensState=1 focus=0.34695286 frame=86
+22:03:00.793 [Camera2Controller] D/Multi-frame AF observation: generation=3 afState=2 lensState=0 focus=0.35035735 frame=87
+22:03:00.826 [Camera2Controller] D/Multi-frame AF observation: generation=3 afState=2 lensState=0 focus=0.35035735 frame=88
+22:03:00.860 [Camera2Controller] D/Multi-frame AF observation: generation=3 afState=2 lensState=0 focus=0.35035735 frame=89
+22:03:00.892 [Camera2Controller] D/Multi-frame AF observation: generation=3 afState=4 lensState=0 focus=0.35035735 frame=90
+22:03:00.893 [Camera2Controller] I/Multi-frame AF locked: mode=4 afState=4 lensState=0 focus=0.35035735 frame=90
+22:03:00.893 [Camera2Controller] D/直接拍照
+22:03:00.894 [Camera2Controller] I/RAW_CROP_TRACE stage=CAMERA2_REQUEST isRaw=true selectedCamera=2 openCamera=2 physicalOutput=null stateZoom=1.0 requestZoom=1.0 requestScalerCrop=Rect(0, 0 - 4096, 3072) requestDistortion=null
+22:03:00.895 [Camera2Controller] D/Multi-frame capture locked exposure=true ae=0 flash=0 iso=160 shutter=9998205 af=4 focus=0.35035735 afState=4 lensState=0 focusSource=af_focused_locked
+22:03:00.895 [Camera2Controller] D/Capture request built and ready to send: aeMode=0, aeTrigger=0, aeLock=false, flashMode=0, iso=160, shutter=9998205
+22:03:00.895 [Camera2Controller] I/RAWmax same-exposure burst plan: baseFrames=5 hdr=false shortFrames=0 longFrames=0
+22:03:01.042 [Camera2Controller] D/Burst capture started at frame 94
+22:03:01.077 [CameraViewModel] D/Burst frame received: 1/5
+22:03:01.078 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=160 shutter=9998205, afMode=4 afState=4 focus=0.35035735 lensState=0, result buffered (timestamp: 64714897353955). Pending images: 0, Pending results: 20
+22:03:01.110 [Camera2Controller] D/Burst capture started at frame 95
+22:03:01.143 [CameraViewModel] D/Burst frame received: 2/5
+22:03:01.144 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=160 shutter=9998205, afMode=4 afState=4 focus=0.35035735 lensState=0, result buffered (timestamp: 64714964024955). Pending images: 0, Pending results: 20
+22:03:01.176 [Camera2Controller] D/Burst capture started at frame 96
+22:03:01.215 [CameraViewModel] D/Burst frame received: 3/5
+22:03:01.216 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=160 shutter=9998205, afMode=4 afState=4 focus=0.35035735 lensState=0, result buffered (timestamp: 64715030695955). Pending images: 0, Pending results: 20
+22:03:01.244 [Camera2Controller] D/Burst capture started at frame 97
+22:03:01.283 [CameraViewModel] D/Burst frame received: 4/5
+22:03:01.284 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=160 shutter=9998205, afMode=4 afState=4 focus=0.35035735 lensState=0, result buffered (timestamp: 64715097366955). Pending images: 0, Pending results: 20
+22:03:01.311 [Camera2Controller] D/Burst capture started at frame 98
+22:03:01.350 [CameraViewModel] D/Burst frame received: 5/5
+22:03:01.351 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=160 shutter=9998205, afMode=4 afState=4 focus=0.35035735 lensState=0, result buffered (timestamp: 64715164036955). Pending images: 0, Pending results: 20
+22:03:01.351 [CameraViewModel] I/RAW burst plan: referenceSource=deferred_mgc_gles, reference=pending, accepted=5, normal=5, short=0, long=0, exposureRejected=, geometry=GLES_TEMPORAL_GRAPH, costMs=1
+22:03:01.352 [CameraViewModel] D/processStacking started - image size 5
+22:03:01.352 [Camera2Controller] D/Burst sequence completed
+22:03:01.354 [Camera2Controller] I/Multi-frame sequence end: requested=5 captured=5 failed=0
+22:03:01.355 [SHOT] multi-frame sequence end requested=5 captured=5 failed=0
+22:03:01.356 [Camera2Controller] I/Multi-frame focus state released: reason=capture sequence finished
+22:03:01.361 [CameraViewModel] I/RAWmax output layout=RGB outputScale=1.0 superResolution=true
+22:03:01.368 [PhotoManager] I/RAW_CROP_TRACE stage=PREPARE_RESULT image=4096x3072 scalerCrop=Rect(0, 0 - 4096, 3072) zoomRatio=1.0 distortionMode=null legacyDerivedCrop=Rect(0, 0 - 4096, 3072)
+22:03:01.405 [CameraViewModel] D/Image saved: cecce0a6-a150-4f00-bd51-a65b105a6a87, LUT: profile:native, Frame: null
+22:03:01.448 [RawProcessor] I/RAW_CROP_TRACE stage=CAMERA2_RESULT buffer=4096x3072 pixelArray=4096x3072 activePre=Rect(0, 0 - 4096, 3072) activePost=Rect(0, 0 - 4096, 3072) scalerCrop=Rect(0, 0 - 4096, 3072) scalerReturned=true zoomRatio=1.0 bufferCropSource=RAW_SENSOR_SOFTWARE distortionMode=null distortionControl=false coordinateSpace=POST_CORRECTION dngTarget=4096x3072 mappedDefaultCrop=Rect(0,…
+22:03:01.448 [RawProcessor] I/RAW_CROP_TRACE stage=SOFTWARE_PHYSICAL source=4096x3072 active=Rect(0, 0 - 4096, 3072) requested=Rect(0, 0 - 4096, 3072) aligned=Rect(0, 0 - 4096, 3072) output=4096x3072 cfaPhaseOffset=0,0
+22:03:01.518 [RawDemosaicProcessor] I/GL device: vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none glsl=OpenGL ES GLSL ES 3.20 linearRawDecode=phocus-uimage-load
+22:03:01.518 [RawDemosaicProcessor] D/GL limits: maxTextureSize=16384 textureImageUnits=16 imageUnits=21 ssboBindings=70 computeSsboBlocks=35 computeWorkGroupInvocations=1024 computeWorkGroupSize=[1024, 1024, 1024] computeSharedMemory=32768
+22:03:01.519 [RawDemosaicProcessor] D/RawDemosaicProcessor initialized, took=35ms
+22:03:01.519 [MultiFrameStacker] D/Starting MGC Spatial RGB fusion for 5 frames source=4096x3072 physicalCrop=Rect(0, 0 - 4096, 3072) Pattern=3 outputScale=1.0 BL=64.006836, 63.995605, 63.99829, 64.007324 WL=1023 noiseProfile=system_camera2 legacyHdrFlag=false
+22:03:01.522 [GlesMgcRawBaseFrameSelector] I/MGC RAW selector GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none invocations=1024 group=[1024, 1024, 1024] ssboBindings=70 ssboBlock=2147483648
+22:03:01.592 [GlesMgcRawBaseFrameSelector] I/MGC GLES RAW sharpness measurements [94:grad=309.332,noise=120.474,sat=0.00000,score=6.20117e-05, 95:grad=309.833,noise=117.957,sat=0.00000,score=6.29320e-05, 96:grad=313.253,noise=116.524,sat=0.00000,score=6.44534e-05, 97:grad=323.447,noise=116.853,sat=0.00000,score=6.75978e-05, 98:grad=309.395,noise=120.188,sat=0.00000,score=6.21183e-05] candidates=[9…
+22:03:01.720 [GlesMgcRawBaseFrameSelector] I/Fast Moments GPU reference statistics size=256x192 source=4096x3072 frame=97 baseRgb=64x64 uploadMs=4 submitMs=3 gpuWaitMs=22 mapMs=95 totalMs=127 budgetMs=200
+22:03:01.722 [GlesMgcRawFusion] I/MGC Spatial RGB baseFrame=97 source=gles_raw_sharpness
+22:03:01.722 [GlesMgcRawFusion] I/MGC Spatial RGB schedule baseFrame=97 normal=5 long=0 ultrashort=0 shortRatio=none excluded=0 outputScale=1.0 AI alignment=disabled
+22:03:01.732 [GlesMgcRawSpatial] I/MGC RAW black levels master=[64.006836, 63.995605, 63.99829, 64.007324] perFrame=[[64.006836, 63.995605, 63.99829, 64.007324], [64.006836, 63.995605, 63.99829, 64.007324], [64.006836, 63.995605, 63.99829, 64.007324], [64.006836, 63.995605, 63.99829, 64.007324], [64.006836, 63.995605, 63.99829, 64.007324]]
+22:03:01.733 [GlesMgcRawSpatial] I/MGC Spatial GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none strengthSsboMax=2147483648 strengthPackGroups=65535x65535
+22:03:01.783 [GlesMgcRawSpatial] I/MGC Spatial domains bayerQuad=2048x1536 guide=2048x1536 rejection=2048x1536 mergeWeight=1024x768 rgbAotRejection=RAW/4-direct filter=256x192 pixelDiff=ClippedGaussian20(sigma=500.0) downsample=4x colorSigma=5.0E-5 spatialSigma=4.0 boost=500.0 radius=3 pixelDiffThreshold=150.0/255 clippedThreshold=3.0/255
+22:03:01.783 [GlesMgcRawSpatial] I/MGC Raw10 unblocker fullresTile=8 domain=256x192 scale=1.0 offset=0.45 postBlur=binomial3x3U8
+22:03:01.867 [GlesMgcRawSpatial] I/MGC Spatial noise profile source=Camera2 SENSOR_NOISE_PROFILE fallback=gcam-c:builtin_noise_pixel8_pro perFrame=5/5 systemFallback=0/5 calibrated=0/5
+22:03:01.868 [GlesMgcRawSpatial] I/MGC Spatial Bayer kernel referenceSnr=6.9721093 baseSpatialScale=0.33582157 referenceSigma=2.9777718 alignmentInputGain=16.0 alignmentDomain=signed-s16
+22:03:01.872 [GlesMgcRawSpatial] I/MGC Spatial RAW temporal window textures=2 bytes=50331648 referenceUpload=1 took=3ms
+22:03:01.877 [GlesMgcRawSpatial] I/MGC Align reference products cached levels=4 grids=62x46, 30x22, 14x10, 6x4 cpuSubmit=1ms
+22:03:01.877 [GlesMgcRawSpatial] I/MGC Spatial output exposure normalizationScale=1.0 baselineExposureEv=null domain=reference
+22:03:01.877 [GlesMgcRawSpatial] I/MGC linear kernel mask mode=zero reason=no-accepted-bento-selected-slice
+22:03:01.878 [GlesMgcRawSpatial] I/MGC Spatial strength atlas layout frames=5 maxTexture=16384 alignment=256x1920 grid=1x10 rejection=1024x3840 grid=1x5
+22:03:02.115 [GlesMgcRawSpatial] D/MGC global alignment grid=62x46 candidate=(-2.0,1.0) peak=746 source=histogram readback=224ms
+22:03:02.117 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-mode(-2.0,1.0,n=746)/3-candidate median=false runtimeOptions=256/8/64/-1/2/3/0/1/0 schedule=65x49:8px,LK3,normalize=true -> 257x193:16px,LK3,normalize=true,levelScale=4.0 -> 1025x769:32px,LK3,normalize=true,le…
+22:03:02.141 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=94 role=NORMAL guideCov=0ms pyramid=3ms align=232ms flow=13ms rejectionScale=1.0 rejectionAdjusted=false rejection=9ms total=259ms
+22:03:02.143 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=1 frame=94 role=NORMAL uploadCall=2ms prepareCall=261ms postPrepareSubmit=0ms totalCpu=264ms
+22:03:02.386 [GlesMgcRawSpatial] D/MGC global alignment grid=62x46 candidate=(-1.0,1.0) peak=976 source=histogram readback=225ms
+22:03:02.388 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-mode(-1.0,1.0,n=976)/3-candidate median=false runtimeOptions=256/8/64/-1/2/3/0/1/0 schedule=65x49:8px,LK3,normalize=true -> 257x193:16px,LK3,normalize=true,levelScale=4.0 -> 1025x769:32px,LK3,normalize=true,le…
+22:03:02.392 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=95 role=NORMAL guideCov=0ms pyramid=0ms align=230ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=2ms total=233ms
+22:03:02.393 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=2 frame=95 role=NORMAL uploadCall=13ms prepareCall=234ms postPrepareSubmit=0ms totalCpu=249ms
+22:03:02.607 [GlesMgcRawSpatial] D/MGC global alignment grid=62x46 candidate=(0.0,1.0) peak=659 source=histogram readback=194ms
+22:03:02.609 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-mode(0.0,1.0,n=659)/3-candidate median=false runtimeOptions=256/8/64/-1/2/3/0/1/0 schedule=65x49:8px,LK3,normalize=true -> 257x193:16px,LK3,normalize=true,levelScale=4.0 -> 1025x769:32px,LK3,normalize=true,lev…
+22:03:02.612 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=96 role=NORMAL guideCov=0ms pyramid=0ms align=202ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=2ms total=206ms
+22:03:02.613 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=3 frame=96 role=NORMAL uploadCall=11ms prepareCall=207ms postPrepareSubmit=0ms totalCpu=219ms
+22:03:02.865 [GlesMgcRawSpatial] D/MGC global alignment grid=62x46 candidate=(1.0,0.0) peak=845 source=histogram readback=234ms
+22:03:02.867 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-mode(1.0,0.0,n=845)/3-candidate median=false runtimeOptions=256/8/64/-1/2/3/0/1/0 schedule=65x49:8px,LK3,normalize=true -> 257x193:16px,LK3,normalize=true,levelScale=4.0 -> 1025x769:32px,LK3,normalize=true,lev…
+22:03:02.870 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=98 role=NORMAL guideCov=0ms pyramid=0ms align=240ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=2ms total=244ms
+22:03:02.872 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=4 frame=98 role=NORMAL uploadCall=11ms prepareCall=245ms postPrepareSubmit=0ms totalCpu=257ms
+22:03:02.872 [GlesMgcRawSpatial] I/MGC Spatial RGB temporal resources=161848338 advisoryBytes=671088640 estimateExceedsAdvisory=false
+22:03:02.911 [GlesMgcRawSpatial] I/MGC Spatial RGB temporal arena released textures=53 releasedBytes=155950098 retainedTextures=2 retainedBytes=5898240 beforeBytes=161848338 gpuWait=37ms
+22:03:02.913 [GlesMgcRawSpatial] I/MGC Spatial strength PBO submit label=MGC Spatial RGB strength alignment atlas mode=compute-ssbo-pack-3840x1 bytes=1966080 setup=0ms submit=0ms total=0ms
+22:03:02.914 [LargeDirectBuffer] D/Allocated MGC Spatial RGB strength alignment host buffer with native allocator: 1966080 bytes
+22:03:02.916 [GlesMgcRawSpatial] I/MGC Spatial strength PBO mapped label=MGC Spatial RGB strength alignment host bytes=1966080 wait=0ms
+22:03:02.922 [GlesMgcRawSpatial] I/MGC Spatial diagnostic host materialized label=MGC Spatial RGB strength alignment host bytes=1966080 took=7ms
+22:03:02.923 [GlesMgcRawSpatial] I/MGC Spatial strength PBO submit label=MGC Spatial RGB strength rejection atlas mode=compute-ssbo-pack-7680x1 bytes=3932160 setup=0ms submit=0ms total=0ms
+22:03:02.923 [LargeDirectBuffer] D/Allocated MGC Spatial RGB strength rejection host buffer with native allocator: 3932160 bytes
+22:03:02.926 [GlesMgcRawSpatial] I/MGC Spatial strength PBO mapped label=MGC Spatial RGB strength rejection host bytes=3932160 wait=2ms
+22:03:02.938 [GlesMgcRawSpatial] I/MGC Spatial diagnostic host materialized label=MGC Spatial RGB strength rejection host bytes=3932160 took=14ms
+22:03:02.939 [LargeDirectBuffer] D/Allocated MGC V25 Spatial RGB planar F16/Q14 buffer with native allocator: 75497472 bytes
+22:03:03.357 [CameraViewModel] D/Multi-frame convergence skipped: processing already dispatched (requested=5 captured=5 failed=0)
+22:03:03.393 [GlesMgcRawSpatial] I/MGC Spatial RGB V25 AOT fusion arena released textures=1 releasedBytes=2312 retainedBytes=100663296 iirWorkingSetBytes=301989888 beforeBytes=100665608 gpuWait=19ms
+22:03:03.921 [GlesMgcRawSpatial] I/MGC Spatial V25 RGB AOT frames=5 native=4096x3072 storage=4096x3072 output=4096x3072 rawScale=16.0 mergeSharpness=0.8 aot=359ms colorNoiseIir=511ms chromaFinal=8ms
+22:03:03.923 [GlesMgcRawSpatial] I/MGC Spatial strength PBOs prepared mode=RGB image=4096x3072 bytes=81395712 took=0ms
+22:03:03.923 [GlesMgcRawSpatial] I/MGC Spatial RGB dispatch complete frames=5 took=984ms mode=mgc-v25-merge-rgb-raw16-f16-aot aotNative=4096x3072 aotStorage=4096x3072
+22:03:03.924 [GlesMgcRawSpatial] I/MGC Spatial strength readback queued mode=RGB bytes=81395712 fixed16PrepareSubmit=359ms modes=compute-ssbo-pack-3840x1-host/compute-ssbo-pack-7680x1-host/mgc-v25-aot-planar-q14-host alignmentSubmit=7ms rejectionSubmit=14ms fixed16Submit=359ms enqueue=0ms
+22:03:03.976 [GlesMgcRawSpatial] I/MGC Spatial strength resolve mode=RGB diagnostics=0ms aot=51ms unmap=0ms total=51ms
+22:03:03.977 [GlesMgcRawSpatial] I/MGC Spatial strength readback resolved mode=RGB took=53ms
+22:03:03.978 [GlesMgcRawSpatial] I/MGC Spatial denoise model aotMode=RGB captureFrames=5 diag0=[3.47723, 6.954461, 3.47723] diag1=[1.4732126, 2.946425, 1.4732126] savannahRatio=0.10591852 savannahTaps=[0.13142231,0.7605188,0.13142231] read=[8.8429715E-8, 8.347868E-8, 8.5790646E-8] shot=[3.660835E-5, 7.927524E-5, 4.338774E-5] outputExposureScale=1.0 strength=spatial-aot readback=atlas-pbo-deferred
+22:03:03.979 [GlesMgcRawSpatial] I/MGC Spatial RGB merge complete frames=5 output=4096x3072 referenceSnr=6.9721093 finishRawDenoiseSnr=14.87189 finishRawDenoiseSnrSource=spatial-output-noise-model lscApplied=true result=RGBA16F_GPU programInit=49ms queueMode=mgc-v25-native-aot total=2245ms
+22:03:03.992 [MgcFullResolutionDenoise] I/MGC RunFullResolutionDenoise static kernels ready: lumaSnr=[5.0, 20.0, 40.0] sabreLumaSnr=[5.0, 20.0, 40.0] chromaSnr=[1.0, 5.0, 10.0, 20.0]
+22:03:04.097 [RawDemosaicProcessor] I/MGC Spatial default denoise noise source=spatial-aot captureFrames=5 read=[8.8429715E-8, 8.347868E-8, 8.5790646E-8] shot=[3.660835E-5, 7.927524E-5, 4.338774E-5]
+22:03:05.222 [MgcFullResolutionDenoise] D/MGC static denoise complete: size=4096x3072 origin=(0,0) input=CAMERA_RGBA16F snr=14.87189 pass=SPATIAL_DEFAULT luma=true(1.0994759) chroma=true(1.1007292) measureMoire=true outputScale=1.0 rgbShot=[3.660835E-5, 7.927524E-5, 4.338774E-5] rgbRead=[8.8429715E-8, 8.347868E-8, 8.5790646E-8] sabreNoiseModelScale=1.0 rgbWb=[1.8105469, 1.0, 2.0917969] tuningInter…
+22:03:05.264 [RawDemosaicProcessor] I/MGC Spatial GPU LinearRaw ready: source=SPATIAL_RGB16F_GPU size=4096x3072 outputScale=1.0 pass=SPATIAL_DEFAULT luma=1.0994759 chroma=1.1007292 frames=5 readNoise=[8.8429715E-8, 8.347868E-8, 8.5790646E-8] shotNoise=[3.660835E-5, 7.927524E-5, 4.338774E-5] sabreNoiseModelScale=null strengthMap=1024x768 lscIn=true lscAppliedToBayer=false lscOut=true demosaicNoiseT…
+22:03:05.266 [PhotoManager] D/MGC default-denoised RAW stack DNG stores normalized RAW values; clearing metadata black/white level overrides
+22:03:05.267 [PhotoManager] I/RAW_ADAPTIVE_EXPOSURE stage=DNG_PREPARE mode=PHOTON_HDR curve=DEFAULT blackBorderDefaultCrop=null photonPgtm=true processingBounds=null scalarViewfinderMatching=false capturePreview=true portraitMask=false additionalExposureEv=0.0
+22:03:05.278 [RawProcessor] I/RAW LSC ownership: fused pixels already corrected; capture profile will not apply Camera2/DNG gain map
+22:03:05.311 [RawDemosaicProcessor] D/Using provided RAW DCP plan: Embedded
+22:03:05.311 [RawDemosaicProcessor] I/RAW_CROP_TRACE stage=RENDER_BOUNDS raw=4096x3072 metadataDefaultCrop=Rect(0, 0 - 4096, 3072) blackBorderOverride=null effectiveDefaultCrop=Rect(0, 0 - 4096, 3072) legacyCrop=null appliedLegacyCrop=null aspectRatio=RATIO_4_3 rotation=90 outputSourceBounds=Rect(0, 0 - 4096, 3072)
+22:03:05.324 [RawDemosaicProcessor] D/Using GPU-resident LinearRaw input: 4096x3072 samplesPerPixel=4 texture=8
+22:03:05.325 [RawDemosaicProcessor] D/RAW DCP pipeline: source=provided profile=Embedded matrixSource=DCP planSpace=ProPhoto profileSpace=ProPhoto engineSpace=ProPhoto requestedEngine=AdobeCurve actualEngine=AdobeCurve profileMapsBeforeEngine=true hueSat=false hueSatDims=none hueSatEncoding=0 look=false profileToneCurve=false profileExposureRamp=true profileSupportsOverrange=false hueSatSupportsOv…
+22:03:05.325 [RawDemosaicProcessor] D/Processing RAW image: 4096x3072, colorEngine=AdobeCurve profileSpace=ProPhoto engineWorkingSpace=ProPhoto
+22:03:05.368 [RawDemosaicProcessor] D/LinearRaw input prepared on GPU: 4096x3072 samplesPerPixel=4 rowStride=24576
+22:03:05.494 [RawSceneExposureEstimator] I/RAW_SCENE_EXPOSURE stage=ML_MODEL_CONTRACT short=serving_default_combined_input:0:[1,64,64,9] longSemantic=serving_default_combined_channels:0:[1,64,64,5]@0 longColor=serving_default_color_channels_and_log_scene_brightness:0:[1,64,64,4]@1 portrait=serving_default_combined_input:0:[1,64,64,9]
+22:03:05.563 [RawSceneExposureEstimator] I/RAW_SCENE_EXPOSURE stage=SOLVE_TIMING prepareMs=30.404097 lockWaitMs=0.00128 engineCold=true engineMs=30.343296 shortMs=2.074624 longMs=2.020992 portraitMs=1.92768 finalizeMs=62.694782 totalMs=129.46675 budgetMs=200.0
+22:03:05.564 [RawSceneExposureEstimator] I/RAW_SCENE_EXPOSURE stage=MGC_ML_AE_FINALIZE mode=2 computeAeResultsProcessRawStats=true processAeStatsExecuted=true shortLongSource=MGC_9_7_V25_TFLITE modelInputContract=RUN_ML_AE_CORE_ADVANCED_64X64 modelColorContract=LN_R_G_B_PLUS_1E_6_AND_LOG_SCENE_BRIGHTNESS modelSemanticEnums=[3,4,5,6,7] modelFaceMapEnum=3 modelPortraitMaskEnum=4 modelMissingSaliency…
+22:03:05.565 [RawDemosaicProcessor] I/RAW_SCENE_EXPOSURE stage=INFERENCE_COMPLETE pgtm=true processingBounds=Rect(0, 0 - 4096, 3072) sourceBaselineEv=0.0 hdrRatio=6.0180297 finalShortTetMs=22.271885 finalLongTetMs=134.03287 finalShortGain=1.3922428 safeUnderexposure=1.0 fractionPixelsClippedAtFinalShortTet=2.2379558E-4
+22:03:05.575 [PhotonPGTM] I/MGC HDRNet loaded: asset=mgc_hdrnet/hdrnet_coefficients.tflite input=[1, 192, 256, 4] output=[1, 12, 16, 8, 1, 2]
+22:03:05.669 [RawLegacyAutoExposureMatcher] I/HDRNet post-exposure matching result: exposureEv=-0.36424842 matchRate=0.3625 meanAbsoluteErrorEv=0.3362572
+22:03:05.671 [PhotonPGTM] I/HDRNET_MATCH stage=SELECTED shortGain=1.3922428 hdrRatio=6.0180297 postExposureEv=-0.36424842 postExposureSource=VIEWFINDER_MATCH maximumPostExposureEv=0.2112027 matchRate=0.3625 meanAbsoluteErrorEv=0.3362572 postDehazeP99Peak=0.8465405 dehazeActive=true dehazeLow=0.0 dehazeHigh=0.0 dhaScale=0.8465406 dhaDetected=0.8465406 dehazeSamples=49152
+22:03:05.701 [RawDemosaicProcessor] D/ProfileGainTableMap texture retained from GPU: 64x48x257 texture=11
+22:03:05.706 [RawProcessor] I/RAW_SCENE_EXPOSURE stage=SHARED_PROFILE_READY enabled=true viewfinderBrightnessMatch=false sourceBaselineEv=0.0 sourceBaselineGain=1.0 viewfinderExposureOffsetEv=null baselineExposureSource=SOURCE_METADATA finalBaselineEv=0.0 finalBaselineGain=1.0 pgtm=true pgtmSource=GPU photon=true processingBounds=null
+22:03:05.715 [RawDemosaicProcessor] I/RAW_DNG_BUFFER_BYPASS source=GPU_STACK_TEXTURE metadata=SHARED_DNG_PARAMS size=4096x3072 samplesPerPixel=3 rowStride=24576 baselineExposure=0.0 defaultCrop=Rect(0, 0 - 4096, 3072) black=[0.0, 0.0, 0.0, 0.0] white=65535.0 wb=[1.8105469, 1.0, 1.0, 2.0917969] cameraWhite=[0.5523191, 0.99999994, 0.47805792] ccm=[1.6457909, 9.938702E-4, 0.18851931, -0.065952, 1.275…
+22:03:05.716 [RawDemosaicProcessor] I/RAW_CROP_TRACE stage=RENDER_BOUNDS raw=4096x3072 metadataDefaultCrop=Rect(0, 0 - 4096, 3072) blackBorderOverride=null effectiveDefaultCrop=Rect(0, 0 - 4096, 3072) legacyCrop=null appliedLegacyCrop=null aspectRatio=RATIO_4_3 rotation=90 outputSourceBounds=Rect(0, 0 - 4096, 3072)
+22:03:05.717 [RawDemosaicProcessor] D/Using GPU-resident LinearRaw input: 4096x3072 samplesPerPixel=4 texture=8
+22:03:05.717 [RawDemosaicProcessor] I/DNG embedded profile: action=disable selected=none engine=AgX customDcp=false photonHdr=true pgtmSource=photon-hdr
+22:03:05.721 [RawDemosaicProcessor] D/RAW DCP not resolved for non-Adobe colorEngine=AgX: source=embedded-dng
+22:03:05.722 [RawDemosaicProcessor] D/Processing RAW image: 4096x3072, colorEngine=AgX profileSpace=ProPhoto engineWorkingSpace=BT2020
+22:03:05.722 [RawDemosaicProcessor] D/LinearRaw input prepared on GPU: 4096x3072 samplesPerPixel=4 rowStride=24576
+22:03:05.722 [RawDemosaicProcessor] D/RAW render exposure: manualEv=0.0 engineDefaultEv=0.7 engineCompensationDomain=Linear profileExposureEv=0.7 defaultBlackRender=None profileRampBlack=0.0 profileSupportOverrange=false dngShadowScale=1.0 dngBaselineExposure=0.0 linearCameraWhite=[0.5523191, 0.99999994, 0.47805792] dngBaselineExposureInLinear=false dngBaselineExposureInProfileRamp=false profileGa…
+22:03:05.730 [RawDemosaicProcessor] D/RAW_GL target=Combined fbo=3 texture=13 size=4096x3072 format=RGBA8 status=complete
+22:03:05.775 [RawDemosaicProcessor] D/RAW_GL target=EngineTone fbo=4 texture=14 size=4096x3072 format=RGBA16F status=complete
+22:03:05.782 [RawDemosaicProcessor] D/Combined Pass took: 52ms
+22:03:05.926 [RawDemosaicProcessor] D/RAW_GL target=Sharpen fbo=5 texture=15 size=4096x3072 format=RGBA8 status=complete
+22:03:05.928 [RawSharpenPass] D/RAW sharpen scratch ready fbo=6 texture=16 size=4096x3072 format=R16F
+22:03:05.929 [RawSharpenPass] D/RAW sharpen submitted path=GLES_SEPARABLE_ADAPTIVE_USM size=4096x3072 strength=1.1994075 cpuReadback=false
+22:03:05.929 [RawDemosaicProcessor] I/MGC final sharpen uses GLES adaptive USM size=4096x3072 runtimeAttenuation=1.0 slider=0.5997037 algorithmStrength=1.1994075 effectiveStrength=1.1994075 cpuReadback=false
+22:03:05.929 [RawDemosaicProcessor] D/Sharpen Pass took: 3ms
+22:03:05.982 [RawDemosaicProcessor] D/RAW_GL target=Output fbo=3 texture=17 size=3072x4096 format=RGBA16F status=complete
+22:03:05.984 [RawDemosaicProcessor] D/Output Pass took: 2ms
+22:03:06.620 [RawDemosaicProcessor] D/RAW output materialization timing target=SDR upstreamStackGpuWait=0ms renderGpuQueueWait=5ms pixelTransferAndBitmap=628ms
+22:03:06.623 [RawDemosaicProcessor] I/RAW output schedule stage=SDR_BITMAP_COMPLETE size=3072x4096
+22:03:06.625 [RawDemosaicProcessor] I/RAW output schedule stage=HDR_BITMAP_SKIPPED reason=disabled
+22:03:06.625 [RawDemosaicProcessor] D/RAW processing complete: 3072x4096
+22:03:06.626 [PhotoManager] I/RAW GPU handoff timing profile=440ms render=917ms cpuMaterializationBeforeRender=false
+22:03:06.627 [PhotoManager] I/RAW GPU render completed; DNG materialization queued behind SDR JPEG publication
+22:03:06.792 [PhotoManager] D/writeFinalJpeg took 164ms, size=3072x4096, gainmap=false, success=true
+22:03:06.810 [PhotoManager] I/RAW output schedule stage=SDR_JPEG_PUBLISHED
+22:03:06.810 [PhotoManager] I/RAW output schedule stage=DNG_MATERIALIZATION_START
+22:03:06.814 [LargeDirectBuffer] D/Allocated Stacked LinearRaw deferred RGB16 materialization buffer with native allocator: 75497472 bytes
+22:03:06.815 [LargeDirectBuffer] D/Allocated Stacked LinearRaw deferred RGBA16 tile buffer with native allocator: 8388608 bytes
+22:03:06.883 [PhotoManager] D/Thumbnail updated for photo: cecce0a6-a150-4f00-bd51-a65b105a6a87
+22:03:06.895 [PhotoManager] D/prepareUltraHdrSource took 0ms
+22:03:06.905 [PhotoManager] D/gainmapProducer.build took 0ms, enabled=false
+22:03:06.989 [CameraGLSurfaceView] D/onPause
+22:03:07.007 [LIFECYCLE] app background (onStop)
+22:03:07.103 [RawDemosaicProcessor] I/Stacked LinearRaw DNG materialization timing total=289ms upstreamStackGpuWait=0ms materializationGpuWait=0ms pixelTransfer=107ms cpuPack=163ms allocation=1ms setup=18ms bytes=75497472
+22:03:07.106 [RawProcessor] I/RAW_CROP_TRACE stage=CAMERA2_RESULT buffer=4096x3072 pixelArray=4096x3072 activePre=Rect(0, 0 - 4096, 3072) activePost=Rect(0, 0 - 4096, 3072) scalerCrop=Rect(0, 0 - 4096, 3072) scalerReturned=true zoomRatio=1.0 bufferCropSource=RAW_SENSOR_SOFTWARE distortionMode=null distortionControl=false coordinateSpace=POST_CORRECTION dngTarget=4096x3072 mappedDefaultCrop=Rect(0,…
+22:03:07.108 [RawProcessor] I/Writing stacked RAW DNG with custom writer: 4096x3072 layout=LINEAR_RAW_RGB compression=JPEG_LOSSLESS
+22:03:07.371 [PhotoManager] D/processedBitmap = sRGB IEC61966-2.1, ultraHdrSource=null, gainmap=false
+22:03:08.014 [ExifWriter] D/EXIF written to temp_export_27174118016640.jpg: ISO=160, Exposure=1/100s, Aperture=f/1.5, Focal=6.8mm
+22:03:08.015 [Jpeg444ExportEncoder] D/JPEG 4:4:4 export encode result=true, size=3072x4096, gainmap=false, bytes=1671802
+22:03:08.015 [PhotoManager] D/exportPhoto JPEG encode took 634ms, jpeg444=true, success=true
+22:03:08.016 [PhotoManager] I/exportPhoto JPEG result: output=3072x4096(ARGB_8888, sRGB IEC61966-2.1), input=3072x4096, quality=95, jpeg444=true, bytes=1671802, encodeMs=634, success=true
+22:03:08.076 [PhotoManager] D/Published photo export: uri=content://media/external/images/media/19755, mimeType=image/jpeg, bytes=1671802
+22:03:08.114 [PhotoManager] D/Exported URI saved: content://media/external/images/media/19755 for photo cecce0a6-a150-4f00-bd51-a65b105a6a87
+22:03:08.794 [SuperResolutionDngWriter] I/RAW_CROP_TRACE stage=DNG_WRITE buffer=4096x3072 activeArea=[0, 0, 3072, 4096] defaultCropOrigin=0.0,0.0 defaultCropSize=4096.0x3072.0 sourceOrigin=0,0 sourceSize=4096x3072 includesPixelArray=true scale=1.0,1.0
+22:03:08.979 [SuperResolutionDngWriter] I/DNG focal metadata: physical=6.75mm recorded=6.8mm encoded=6.8mm equivalent35mm=23mm
+22:03:09.028 [SuperResolutionDngWriter] I/Wrote super-resolution DNG 4096x3072 layout=LINEAR_RAW_RGB compression=JPEG_LOSSLESS rowStepSamples=12288 colStepSamples=3 blackLevel=0.0, 0.0, 0.0, 0.0 whiteLevel=65535 lscInPixels=true baselineExposureEv=0.0 ifdLayout=raw-ifd0 preview=none defaultBlackRender=none profileToneCurvePoints=0 rawAeSummary=true cameraRawLook=pgtm=100 profileGainTable=tag=52544…
+22:03:09.030 [PhotoManager] I/Deferred stacked DNG timing total=2218ms success=true
+22:03:12.013 [Camera2Controller] E/Camera error: 2, error=3 - 相机被系统策略禁用
+22:03:12.022 [Camera2Controller] D/ImageReader closed immediately
+22:03:12.184 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 2: 3
+22:03:12.185 [LivePhotoRecorder] D/Live Photo recording stopped
+22:03:12.186 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:03:12.187 [Camera2Controller] W/Scheduling camera recovery in 1200ms after error=3
+22:03:12.188 [CameraViewModel] D/onCameraError: code=3, message=相机被系统策略禁用, canRetry=true
+22:03:12.191 [Camera2Controller] D/Camera device closed: 2
+22:03:13.389 [Camera2Controller] W/Recovering camera after error=3
+22:03:13.391 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:03:13.394 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:03:13.397 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:03:13.397 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:03:13.406 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:03:13.408 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:03:13.408 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:03:13.443 [Camera2Controller] D/Camera opened: 2
+22:03:13.446 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+22:03:13.451 [Camera2Controller] I/Creating preview session: readerFormat=RAW_SENSOR, isP010Supported=true
+22:03:13.453 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]
+22:03:13.522 [Camera2Controller] D/Preview started
+22:03:13.527 [Camera2Controller] E/Camera error: 2, error=4 - 相机设备遇到严重错误
+22:03:13.527 [Camera2Controller] D/ImageReader closed immediately
+22:03:13.994 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 2: 4
+22:03:13.994 [LivePhotoRecorder] D/Live Photo recording stopped
+22:03:13.995 [Camera2Controller] W/Scheduling camera recovery in 800ms after error=4
+22:03:13.995 [CameraViewModel] D/onCameraError: code=4, message=相机设备遇到严重错误, canRetry=true
+22:03:13.995 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:03:13.996 [Camera2Controller] D/Camera device closed: 2
+22:03:14.798 [Camera2Controller] W/Recovering camera after error=4
+22:03:14.801 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:03:14.801 [Camera2Controller] I/刷新摄像头列表
+22:03:14.805 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:03:14.809 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:03:14.810 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:03:14.821 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:03:14.824 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:03:14.825 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:03:14.864 [Camera2Controller] D/Camera opened: 2
+22:03:14.865 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+22:03:14.866 [Camera2Controller] I/Creating preview session: readerFormat=RAW_SENSOR, isP010Supported=true
+22:03:14.868 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]
+22:03:14.874 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:03:14.877 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:03:14.877 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:03:14.881 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:03:14.882 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:03:14.882 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:03:14.883 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:03:14.884 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:03:14.884 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:03:14.885 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:03:14.887 [CameraDiscovery] D/Camera2 final list:
+22:03:14.887 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:14.887 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:14.888 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:14.888 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:14.888 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:14.888 [Camera2Controller] D/Discovered 5 cameras:
+22:03:14.888 [Camera2Controller] D/发现 5 个摄像头
+22:03:14.889 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:14.889 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:03:14.889 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:14.889 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:14.890 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:14.890 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:03:14.890 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:14.890 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:03:14.891 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:14.891 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:14.891 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:03:14.933 [Camera2Controller] E/Camera error: 2, error=4 - 相机设备遇到严重错误
+22:03:14.934 [Camera2Controller] D/ImageReader closed immediately
+22:03:14.929 [Camera2Controller] D/Preview started
+22:03:15.190 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 2: 4
+22:03:15.191 [LivePhotoRecorder] D/Live Photo recording stopped
+22:03:15.191 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:03:15.191 [Camera2Controller] W/Scheduling camera recovery in 800ms after error=4
+22:03:15.192 [CameraViewModel] D/onCameraError: code=4, message=相机设备遇到严重错误, canRetry=true
+22:03:15.192 [Camera2Controller] D/Camera device closed: 2
+22:03:15.994 [Camera2Controller] W/Recovering camera after error=4
+22:03:15.996 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:03:15.996 [Camera2Controller] I/刷新摄像头列表
+22:03:15.998 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:03:15.999 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:03:15.999 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:03:16.004 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:03:16.006 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:03:16.007 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:03:16.043 [Camera2Controller] D/Camera opened: 2
+22:03:16.043 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+22:03:16.044 [Camera2Controller] I/Creating preview session: readerFormat=RAW_SENSOR, isP010Supported=true
+22:03:16.046 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]
+22:03:16.049 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:03:16.051 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:03:16.052 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:03:16.057 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:03:16.057 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:03:16.058 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:03:16.058 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:03:16.059 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:03:16.059 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:03:16.060 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:03:16.062 [CameraDiscovery] D/Camera2 final list:
+22:03:16.062 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:16.063 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:16.063 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:16.063 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:16.063 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:16.063 [Camera2Controller] D/Discovered 5 cameras:
+22:03:16.064 [Camera2Controller] D/发现 5 个摄像头
+22:03:16.064 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:16.064 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:03:16.064 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:16.064 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:16.064 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:16.065 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:03:16.065 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:16.065 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:03:16.065 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:16.066 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:16.066 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN
+22:03:16.107 [Camera2Controller] D/Preview started
+22:03:16.110 [Camera2Controller] E/Camera error: 2, error=4 - 相机设备遇到严重错误
+22:03:16.111 [Camera2Controller] D/ImageReader closed immediately
+22:03:16.448 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 2: 4
+22:03:16.449 [LivePhotoRecorder] D/Live Photo recording stopped
+22:03:16.449 [Camera2Controller] W/Scheduling camera recovery in 800ms after error=4
+22:03:16.450 [CameraViewModel] D/onCameraError: code=4, message=相机设备遇到严重错误, canRetry=true
+22:03:16.451 [Camera2Controller] D/Camera device closed: 2
+22:03:16.450 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:03:17.251 [Camera2Controller] W/Recovering camera after error=4
+22:03:17.253 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO
+22:03:17.256 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0
+22:03:17.258 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true
+22:03:17.259 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE
+22:03:17.260 [Camera2Controller] I/刷新摄像头列表
+22:03:17.268 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…
+22:03:17.272 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+22:03:17.273 [Camera2Controller] D/Opening camera: open=2, selected=2
+22:03:17.593 [Camera2Controller] E/Camera open failed for 2: 相机打开失败 | CameraAccessException: CAMERA_DISABLED (1): validateClientPermissionsLocked:1872: Caller "com.photographercamera" (PID 7388, UID 10485) cannot open camera "2" from background (calling UID 10485 proc state 15) @ ExceptionUtils.java:75 <- CameraManager.java:1237 <- CameraManager.java:1606
+22:03:17.600 [Camera2Controller] D/ImageReader closed immediately
+22:03:17.601 [LivePhotoRecorder] D/Live Photo recording stopped
+22:03:17.601 [LivePhotoRecorder] D/Live Photo hardware resources released
+22:03:17.602 [CameraViewModel] D/onCameraError: code=1001, message=相机打开失败, canRetry=true
+22:03:17.603 [Camera2Controller] D/Camera device closed: 2
+22:03:17.612 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]
+22:03:17.616 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: 
+22:03:17.617 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])
+22:03:17.624 [CameraDiscovery] D/Logical multi-camera auto discovery disabled
+22:03:17.625 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]
+22:03:17.626 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697
+22:03:17.627 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0
+22:03:17.628 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0
+22:03:17.629 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298
+22:03:17.630 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011
+22:03:17.633 [CameraDiscovery] D/Camera2 final list:
+22:03:17.634 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:17.634 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:17.635 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:17.636 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:17.636 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:17.637 [Camera2Controller] D/Discovered 5 cameras:
+22:03:17.637 [Camera2Controller] D/发现 5 个摄像头
+22:03:17.637 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298
+22:03:17.638 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298
+22:03:17.638 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0
+22:03:17.639 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:17.639 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697
+22:03:17.640 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697
+22:03:17.641 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011
+22:03:17.641 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011
+22:03:17.642 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0
+22:03:17.642 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0
+22:03:17.643 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN

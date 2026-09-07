@@ -127,10 +127,12 @@ private fun resolveEffectiveRawAutoExposure(): Boolean = false
 private fun resolveCaptureSharpening(
     isRawCapture: Boolean,
     userPrefs: UserPreferences?,
-): Float = if (isRawCapture) {
-    userPrefs?.rawMaxSharpening ?: RawSharpeningDefaults.DEFAULT_STRENGTH
-} else {
-    0f
+): Float = when {
+    !isRawCapture -> 0f
+    // 0.9.10：RAWmax 画质调优总开关（上游 release MAX&HDR 菜单语义）——
+    // 关闭时忽略用户调优值，回退默认成像参数
+    userPrefs?.rawMaxQualityTuning == false -> RawSharpeningDefaults.DEFAULT_STRENGTH
+    else -> userPrefs?.rawMaxSharpening ?: RawSharpeningDefaults.DEFAULT_STRENGTH
 }.let(RawSharpeningDefaults::normalize)
 
 internal data class CaptureDenoiseStrengths(
@@ -145,6 +147,13 @@ internal fun resolveCaptureDenoiseStrengths(
     userPrefs: UserPreferences?,
 ): CaptureDenoiseStrengths = when {
     !isRawCapture -> CaptureDenoiseStrengths(0f, 0f, null, null)
+    // 0.9.10：画质调优关闭 → 默认降噪参数（忽略用户滑杆）
+    userPrefs?.rawMaxQualityTuning == false -> CaptureDenoiseStrengths(
+        editableLuma = 0f,
+        editableChroma = 0f,
+        bakedLuma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH),
+        bakedChroma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH),
+    )
     else -> CaptureDenoiseStrengths(
         editableLuma = 0f,
         editableChroma = 0f,
@@ -503,6 +512,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 照片保存完成事件
     private val _imageSavedEvent = MutableSharedFlow<Unit>()
     val imageSavedEvent: SharedFlow<Unit> = _imageSavedEvent.asSharedFlow()
+
+    // 0.9.10：拍摄/保存失败事件——UI 转圈复位链此前单点依赖 imageSavedEvent，
+    // 所有失败路径（保存异常、early-return、onCameraError）都不触发它，
+    // 表现为"保存期间再按快门永久转圈"。extraBufferCapacity 保证非挂起
+    // 上下文（onCameraError）tryEmit 也能送达。
+    private val _captureFailedEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+    val captureFailedEvent: SharedFlow<Unit> = _captureFailedEvent.asSharedFlow()
 
     private val _isInitialized = MutableStateFlow(false)
     val isInitialized = _isInitialized.asStateFlow()
@@ -1611,6 +1627,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val ultraHdrGainMapEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.ultraHdrGainMapEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    // 0.9.10：RAWmax 画质调优总开关 + 融合模式（上游 MAX&HDR 菜单同款）
+    val rawMaxQualityTuning: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.rawMaxQualityTuning }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val rawMaxMergeMode: StateFlow<String> = userPreferencesRepository.userPreferences
+        .map { it.rawMaxMergeMode }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "SPATIAL")
 
     val useHdrScreenMode: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.useHdrScreenMode }
@@ -1977,10 +2000,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             burstImages.clear()
             burstImageCount = 0
             resetHdrBracketCapture(closeImages = true)
+            // 0.9.10：相机错误可能发生在拍摄进行中——通知 UI 复位转圈
+            //（onCameraError 非挂起上下文，用 tryEmit；extraBufferCapacity=8 保证送达）
+            _captureFailedEvent.tryEmit(Unit)
         }
 
         cameraController.onHdrBracketCaptureFailed = {
             resetHdrBracketCapture(closeImages = true)
+            // 0.9.10：括号拍摄失败同样通知 UI 复位转圈
+            _captureFailedEvent.tryEmit(Unit)
         }
 
         // 监听快门声音、震动和软件处理设置
@@ -4051,6 +4079,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** 0.9.10：RAWmax 画质调优总开关（上游 MAX&HDR 菜单同款语义） */
+    fun setRawMaxQualityTuning(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveRawMaxQualityTuning(enabled)
+        }
+    }
+
+    /** 0.9.10：RAWmax 融合模式（"SPATIAL"/"SABRE"） */
+    fun setRawMaxMergeMode(mode: String) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveRawMaxMergeMode(mode)
+        }
+    }
+
     /**
      * 获取 LUT 信息
      */
@@ -5319,6 +5361,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
             val resolvedCharacteristics = characteristics ?: run {
                 PLog.e(TAG, "Failed to save image: camera characteristics unavailable")
+                // 0.9.10：失败路径必须通知 UI 复位转圈（captureFailedEvent）
+                _captureFailedEvent.emit(Unit)
                 return
             }
             val photoId =
@@ -5333,45 +5377,59 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
             if (photoId == null) {
                 PLog.e(TAG, "Failed to save image")
+                // 0.9.10：失败路径必须通知 UI 复位转圈
+                _captureFailedEvent.emit(Unit)
                 return
             }
             ownsImage = false
             viewModelScope.launch(Dispatchers.IO) {
-                // Live 视频并行落地：旧逻辑先 await saveVideo（内含最长
-                // LIVE_PHOTO_VIDEO_TIMEOUT_MS 的 deferred 等待）再保存成片，
-                // 导致 live 模式相册缩略图要等视频就绪才刷新。改为并行，
-                // 成片与缩略图优先。
-                val videoSaveJob = async {
+                try {
+                    // 0.9.10 修复 LIVE 图无视频（对齐上游 v2 CameraViewModel 5937-5940
+                    // 严格串行语义）：先 saveVideo——内部 await 录制 deferred（含超时
+                    // 兜底），视频 copy 到 video.mp4 并写 presentationTimestampUs；
+                    // 然后 savePhoto——exportPhoto 的 Motion Photo 合成依赖
+                    // isLivePhoto = videoFile.exists()，此时视频必然就位。
+                    // 0.9.9 的并行化导致合成时 Video=0 字节、OppoMotionVideoExtender
+                    // 失败、发布无视频 live 图，且 TS=0——为回归根因。
+                    // 缩略图时序由下方 emit 后移保证，不再依赖并行提速。
                     GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+
+                    GalleryManager.savePhoto(
+                        context,
+                        photoId,
+                        image,
+                        previewThumbnail,
+                        rotation,
+                        aspectRatio,
+                        resolvedCharacteristics,
+                        captureResult,
+                        shouldAutoSave,
+                        contentRepository.photoProcessor,
+                        sharpeningValue,
+                        noiseReductionValue,
+                        chromaNoiseReductionValue,
+                        photoQualityValue,
+                        exposureBias = captureExposureBias,
+                        captureExposureCompensationEv = captureExposureCompensationEv,
+                        exportDngWithRawExport = exportDngWithRawExport.value,
+                        capturePortraitMask = capturePortraitMask,
+                    )
+                    PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
+                    // 0.9.10 修复缩略图滞后一张：emit 从"保存启动前"移到"发布完成
+                    // 后"——UI 查 MediaStore 时本张已可见（IS_PENDING=0），
+                    // firstOrNull 必中本张而非上一张。
+                    _imageSavedEvent.emit(Unit)
+                } catch (e: Exception) {
+                    // 0.9.10 加固：保存协程此前无 try/catch——异常击穿全局 handler
+                    // （闪退）且不通知 UI（转圈永久）。现捕获 + 复位转圈。
+                    PLog.e(TAG, "Failed to save photo pipeline", e)
+                    _captureFailedEvent.emit(Unit)
                 }
-
-                GalleryManager.savePhoto(
-                    context,
-                    photoId,
-                    image,
-                    previewThumbnail,
-                    rotation,
-                    aspectRatio,
-                    resolvedCharacteristics,
-                    captureResult,
-                    shouldAutoSave,
-                    contentRepository.photoProcessor,
-                    sharpeningValue,
-                    noiseReductionValue,
-                    chromaNoiseReductionValue,
-                    photoQualityValue,
-                    exposureBias = captureExposureBias,
-                    captureExposureCompensationEv = captureExposureCompensationEv,
-                    exportDngWithRawExport = exportDngWithRawExport.value,
-                    capturePortraitMask = capturePortraitMask,
-                )
-
-                videoSaveJob.await()
             }
-            PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
-            _imageSavedEvent.emit(Unit)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to save image", e)
+            // 0.9.10：失败路径必须通知 UI 复位转圈
+            _captureFailedEvent.emit(Unit)
         } finally {
             if (ownsImage) {
                 image.close()
@@ -5615,6 +5673,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.forceResetCaptureState(
                     "multi-frame sequence no frames (requested=$requested captured=$captured failed=$failed)",
                 )
+                // 0.9.10：无帧兜底 = 本次拍摄无出片，通知 UI 复位转圈
+                _captureFailedEvent.emit(Unit)
                 return@launch
             }
             PLog.w(
@@ -5629,6 +5689,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 类型上不可达（pendingCount > 0 保证 buffered 非空），防御兜底仍需关图防泄漏
                 buffered.forEach { runCatching { it.frame.image.close() } }
                 cameraController.forceResetCaptureState("multi-frame converge: no reference frame")
+                _captureFailedEvent.emit(Unit)
                 return@launch
             }
             val characteristics = pendingMultiFrameCharacteristics
@@ -5699,7 +5760,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 应用方向偏移
             val rotation = (baseRotation + orientationOffset) % 360
 
-            val rawMaxMode = MgcRawMaxMode.SPATIAL
+            // 0.9.10：融合模式由 prefs 持久化（上游 MAX&HDR 菜单 Sabre/Spatial），
+            // 替代 0.9.x 的 SPATIAL 硬编码；非法值容错回退 SPATIAL
+            val rawMaxMode = runCatching {
+                MgcRawMaxMode.valueOf(userPrefs?.rawMaxMergeMode ?: MgcRawMaxMode.SPATIAL.name)
+            }.getOrDefault(MgcRawMaxMode.SPATIAL)
             val rawSpatialOutputMode = if (isRawStack) {
                 rawMaxMode.outputMode
             } else {
@@ -5838,6 +5903,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (characteristics == null) {
                 PLog.e(TAG, "processStacking aborted: characteristics unavailable")
                 frames.forEach { it.image.close() }
+                // 0.9.10：失败路径必须通知 UI 复位转圈
+                _captureFailedEvent.emit(Unit)
                 return
             }
             val photoId = GalleryManager.preparePhoto(
@@ -5856,15 +5923,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 否则 isCapturing 永久卡死（同 characteristics null 路径）。
                 PLog.e(TAG, "Failed to save burst image")
                 frames.forEach { it.image.close() }
+                // 0.9.10：失败路径必须通知 UI 复位转圈
+                _captureFailedEvent.emit(Unit)
                 return
             }
 
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    // Live 视频并行落地：同上，成片与缩略图优先，不等待视频 deferred。
-                    val videoSaveJob = async {
-                        GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
-                    }
+                    // 0.9.10 修复 LIVE 图无视频（对齐上游 v2 CameraViewModel 5937-5940
+                    // 严格串行语义，同单帧路径）：先 saveVideo（await 录制 deferred，
+                    // 视频落地 video.mp4 + 写 TS 元数据），再 saveStackedPhoto——
+                    // exportPhoto 的 Motion Photo 合成依赖 videoFile 已就位。
+                    // 0.9.9 并行化导致 Video=0 字节合成失败，为回归根因。
+                    GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
 
                     GalleryManager.saveStackedPhoto(
                         context,
@@ -5892,19 +5963,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         rawMaxSpatialOutputMode = rawSpatialOutputMode,
                         rawMaxMergeMethod = rawMaxMergeMethod,
                     )
-
-                    videoSaveJob.await()
+                    PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
+                    // 0.9.10 修复缩略图滞后一张：emit 移到发布完成后（同单帧路径）
+                    _imageSavedEvent.emit(Unit)
                 } catch (e: Exception) {
                     // 0.9.6 加固：保存异常不得逃逸 IO 协程（击穿全局 handler = 闪退），
                     // 且必须关图防泄漏——泄漏会卡死 onImageRelease 的复位链，让 isCapturing 永久 true
                     PLog.e(TAG, "Failed to save stacked photo", e)
                     images.forEach { runCatching { it.close() } }
+                    // 0.9.10：失败路径必须通知 UI 复位转圈
+                    _captureFailedEvent.emit(Unit)
                 }
             }
-            PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
-            _imageSavedEvent.emit(Unit)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to save image", e)
+            // 0.9.10：失败路径必须通知 UI 复位转圈
+            _captureFailedEvent.emit(Unit)
         }
     }
 

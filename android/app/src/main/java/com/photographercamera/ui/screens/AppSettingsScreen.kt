@@ -6,7 +6,8 @@
  *   对焦与镜头：自动对焦 / 镜头选择 / 默认焦段 / 相机校正 / 镜头发现 / 镜头信息
  *               （上游 autofocus + lens_selection + default_focal_length +
  *                calibration + lens_discovery 对齐；不含虚拟镜头与景深）
- *   成像与色彩：降噪等级 / 锐化等级 / RAW MAX 锐化 / 亮度降噪 / 色度降噪 / 输出倍率 /
+ *   成像与色彩：RAW MAX 画质调优 / Ultra HDR 增益图 / 融合模式 / 降噪等级 / 锐化等级 /
+ *               RAW MAX 锐化 / 亮度降噪 / 色度降噪 / 输出倍率 /
  *               JPEG 4:4:4 / RAW 渲染引擎（0.9.9 默认 AgX）/ 配置文件色调映射
  *               （0.9.0 移除引擎无对应物的开关：tonemap sRGB、修复预览/拍摄异常、HLG×2；
  *                0.9.9 移除 P3 色域与 P010 10位YUV——用户指令固定为关）
@@ -284,9 +285,17 @@ fun AppSettingsScreen(
                     }
                 }
                 // 0.9.6：多帧帧数（上游 SettingsScreen 同款滑杆，VM StateFlow 实时订阅 + DataStore 持久化）
+                // 0.9.10 修复滑块跳动：pending 确认模式锁定提交值直至 flow 回流追上
                 val jpgFrameFlow = photonVm?.jpgMultiFrameDenoiseFrameCount?.collectAsState()
                 var jpgFrameDrag by remember { mutableStateOf<Int?>(null) }
+                var jpgFramePending by remember { mutableStateOf<Int?>(null) }
+                LaunchedEffect(jpgFrameFlow?.value) {
+                    if (jpgFramePending != null && jpgFrameFlow?.value == jpgFramePending) {
+                        jpgFramePending = null
+                    }
+                }
                 val jpgFrameCount = jpgFrameDrag
+                    ?: jpgFramePending
                     ?: jpgFrameFlow?.value
                     ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT
                 Column(Modifier.fillMaxWidth()) {
@@ -310,7 +319,10 @@ fun AppSettingsScreen(
                         value = jpgFrameCount.toFloat(),
                         onValueChange = { jpgFrameDrag = it.roundToInt() },
                         onValueChangeFinished = {
-                            jpgFrameDrag?.let { v -> photonVm?.setJpgMultiFrameDenoiseFrameCount(v) }
+                            jpgFrameDrag?.let { v ->
+                                jpgFramePending = v
+                                photonVm?.setJpgMultiFrameDenoiseFrameCount(v)
+                            }
                             jpgFrameDrag = null
                         },
                         valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
@@ -320,7 +332,14 @@ fun AppSettingsScreen(
                 }
                 val hdrFrameFlow = photonVm?.hdrPlusFrameCount?.collectAsState()
                 var hdrFrameDrag by remember { mutableStateOf<Int?>(null) }
+                var hdrFramePending by remember { mutableStateOf<Int?>(null) }
+                LaunchedEffect(hdrFrameFlow?.value) {
+                    if (hdrFramePending != null && hdrFrameFlow?.value == hdrFramePending) {
+                        hdrFramePending = null
+                    }
+                }
                 val hdrFrameCount = hdrFrameDrag
+                    ?: hdrFramePending
                     ?: hdrFrameFlow?.value
                     ?: MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT
                 Column(Modifier.fillMaxWidth()) {
@@ -344,7 +363,10 @@ fun AppSettingsScreen(
                         value = hdrFrameCount.toFloat(),
                         onValueChange = { hdrFrameDrag = it.roundToInt() },
                         onValueChangeFinished = {
-                            hdrFrameDrag?.let { v -> photonVm?.setHdrPlusFrameCount(v) }
+                            hdrFrameDrag?.let { v ->
+                                hdrFramePending = v
+                                photonVm?.setHdrPlusFrameCount(v)
+                            }
                             hdrFrameDrag = null
                         },
                         valueRange = MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT.toFloat()..
@@ -556,6 +578,40 @@ fun AppSettingsScreen(
                         DebugLog.log("SETTINGS", "edge level -> $level")
                     }
                 }
+                // 0.9.10：RAW MAX 组头部（上游 release MAX&HDR 菜单同款三控件）
+                SettingsCard {
+                    // RAWmax 画质调优总开关（默认开；关 = 忽略下方调优滑杆，按默认成像参数出片）
+                    val tuningFlow = photonVm?.rawMaxQualityTuning?.collectAsState()
+                    SwitchRow(
+                        "RAW MAX 画质调优",
+                        "按当前物理传感器尺寸应用融合、降噪和锐化调优；关闭时使用默认成像参数",
+                        tuningFlow?.value ?: true,
+                    ) {
+                        photonVm?.setRawMaxQualityTuning(it)
+                        DebugLog.log("SETTINGS", "raw max quality tuning -> $it")
+                    }
+                    // Ultra HDR 增益图（上游默认关；链路已有：prefs + setUltraHdrGainMapEnabled
+                    // + professional 模式消费端，本轮仅补 UI 入口）
+                    val gainmapFlow = photonVm?.ultraHdrGainMapEnabled?.collectAsState()
+                    SwitchRow(
+                        "Ultra HDR 增益图",
+                        "成片嵌入 Ultra HDR 增益图（专业模式 RAW 出图时生效）",
+                        gainmapFlow?.value ?: false,
+                    ) {
+                        photonVm?.setUltraHdrGainMapEnabled(it)
+                        DebugLog.log("SETTINGS", "ultra hdr gainmap -> $it")
+                    }
+                    // RAWmax 融合模式（上游 MAX&HDR 菜单 Sabre/Spatial；替代 0.9.x SPATIAL 硬编码）
+                    val mergeFlow = photonVm?.rawMaxMergeMode?.collectAsState()
+                    ChoiceRow(
+                        "RAW MAX 融合模式",
+                        listOf("Spatial", "Sabre"),
+                        if (mergeFlow?.value == "SABRE") "Sabre" else "Spatial",
+                    ) { picked ->
+                        photonVm?.setRawMaxMergeMode(if (picked == "Sabre") "SABRE" else "SPATIAL")
+                        DebugLog.log("SETTINGS", "raw max merge mode -> $picked")
+                    }
+                }
                 // RAW MAX 画质组（上游 PROFESSIONAL「画质」组：锐化 / 亮度降噪 / 色度降噪 / 输出倍率；
                 // 均为连续滑杆 + 松手提交，与上游 SliderSettingItem 交互一致）
                 SettingsCard {
@@ -696,7 +752,7 @@ fun AppSettingsScreen(
                 // 0.7.5：AboutCard 包进卡片留出两侧边距（此前直贴 Column 顶边）
                 SettingsCard {
                     AboutCard("多帧融合", "JPEG MAX · 默认 6 帧 · Spatial 融合", OkGreen, "已参与成像管线（GlesYuvStacker）")
-                    AboutCard("RAW MAX", "Spatial 融合模式 · 默认启用", OkGreen, "已参与成像管线（GlesMgcRawSpatialStacker）")
+                    AboutCard("RAW MAX", "Spatial/Sabre 融合模式可选 · 画质调优默认启用", OkGreen, "已参与成像管线（GlesMgcRawSpatialStacker）")
                     AboutCard("照片质量", "JPEG 质量 100", OkGreen, "已参与成像管线（ImageCapture.setJpegQuality）")
                     AboutCard("镜头阴影校正", "已开启（写死）", OkGreen, "RAW 显影管线内已实现")
                     AboutCard("拍摄后自动保存", "已开启", OkGreen, "已参与成像管线（photon GalleryManager）")
@@ -815,7 +871,17 @@ private fun FloatSliderRow(
     onCommit: (Float) -> Unit,
 ) {
     var drag by remember { mutableStateOf<Float?>(null) }
-    val shown = drag ?: flowValue ?: fallback
+    // 0.9.10 修复滑块跳动（pending 确认模式）：松手后 setter 异步写 DataStore，
+    // flow 回流滞后一拍——drag=null 直接回退旧值再跳新值 = "反复跳动"。
+    // pending 锁定提交值直至 flow 追上（0.005 容差覆盖 normalize 舍入）。
+    var pending by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(flowValue) {
+        val p = pending
+        if (p != null && flowValue != null && kotlin.math.abs(p - flowValue) < 0.005f) {
+            pending = null
+        }
+    }
+    val shown = drag ?: pending ?: flowValue ?: fallback
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -833,7 +899,10 @@ private fun FloatSliderRow(
             value = shown,
             onValueChange = { drag = it },
             onValueChangeFinished = {
-                drag?.let(onCommit)
+                drag?.let { v ->
+                    pending = v
+                    onCommit(v)
+                }
                 drag = null
             },
             valueRange = range,

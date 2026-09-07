@@ -74,14 +74,29 @@
 ---
 
 ## 交付清单
-- [x] 点1 Live 整体移植上游 recorder（+fork shim）
+- [x] 点1 Live 整体移植上游 recorder（+fork shim；含 CircularSampleRecorder 升级：
+      补 retainedStarts 保留区 + retainFrom/releaseRetention + trimStorage 保留优先，
+      支撑预采集缓冲不被裁剪）
 - [x] 点2/3 帧数默认 5 + 旧值迁移；HDR+ 答疑
 - [x] 点4 P3/P010 移除并固定关
 - [x] 点5 配置文件色调映射保留（有用）
 - [x] 点6 降噪/锐化等级加回；修复×2 不恢复（上游无）
 - [x] 点7 RAW MAX 五项 UI 接回（引擎侧全在）
 - [x] 点8 默认 AgX + 引擎选择器
-- [x] 点9 埋点定位（静态无决定性分歧）
-- [x] 点10 缩略图先预览帧后成片
+- [x] 点9 埋点定位（静态无决定性分歧）：exportPhoto 最终 JPEG 记录
+      输入/输出 bitmap 尺寸 + quality + 字节数（log key: exportPhoto JPEG result）
+- [x] 点10 缩略图先预览帧后成片（BottomPanel→LastCaptureThumb 接 processingPreview）
 - [x] 点11 预览钳制删除
 - [x] 版本 0.9.8 → 0.9.9（code 39）+ 编译 + R2 发布
+- [x] 附加修复：bugly `latest.release` 动态版本钉死 4.1.9.3（动态版本每次构建需联网
+      查元数据，网络抖动直接 fail build，本次复现）
+- [x] git 提交 1bf9c4a 推送 GitHub（补齐 0.9.7/0.9.8 包迁移的 catch-up）
+
+## 编译与发布记录
+- BUILD SUCCESSFUL（gradle-9.6.0 assembleDebug，4m27s；首轮失败 =
+  bugly 动态版本元数据解析 + LivePhotoRecorder shim 引用不存在的
+  captureStartTimestampUs 字段（改用 captureMinimumTimestampUs）+
+  CircularSampleRecorder 缺保留区 API，均已修复）
+- APK: PhotographerCamera-0.9.9.apk，69,613,650 字节
+- 公网: https://app.tybtool.top/PhotographerCamera-0.9.9.apk （HTTP 200，
+  Content-Length 一致）；version.json → versionName 0.9.9 / versionCode 39

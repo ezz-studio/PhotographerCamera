@@ -134,6 +134,11 @@ data class UserPreferences(
     val rawMaxSharpening: Float = RawSharpeningDefaults.DEFAULT_STRENGTH,
     val rawMaxNoiseReduction: Float = RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH,
     val rawMaxChromaNoiseReduction: Float = RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH,
+    // 0.9.10：RAWmax 画质调优总开关（上游 release MAX&HDR 菜单同款语义，默认开；
+    // 关 = 忽略用户调优滑杆，按默认成像参数出片）
+    val rawMaxQualityTuning: Boolean = true,
+    // 0.9.10：RAWmax 融合模式（"SPATIAL"/"SABRE"，上游 MAX&HDR 菜单同款；替代 VM 硬编码）
+    val rawMaxMergeMode: String = "SPATIAL",
     val exportDngWithRawExport: Boolean = false,
     val frameId: String? = null,
     val phantomFrameId: String? = null,
@@ -461,6 +466,9 @@ class UserPreferencesRepository(private val context: Context) {
         private val VIDEO_CODEC = stringPreferencesKey("video_codec")
         // Keep the persisted key for compatibility with existing installations.
         private val ULTRA_HDR_GAIN_MAP_ENABLED = booleanPreferencesKey("auto_enable_hdr_for_hdr_capture")
+        // 0.9.10：RAWmax 画质调优总开关 + 融合模式（上游 MAX&HDR 菜单同款语义）
+        private val RAW_MAX_QUALITY_TUNING = booleanPreferencesKey("raw_max_quality_tuning")
+        private val RAW_MAX_MERGE_MODE = stringPreferencesKey("raw_max_merge_mode")
         private val PHANTOM_MODE = booleanPreferencesKey("phantom_mode")
         private val PHANTOM_BUTTON_HIDDEN = booleanPreferencesKey("phantom_button_hidden")
         private val LAUNCH_CAMERA_ON_PHANTOM_MODE = booleanPreferencesKey("launch_camera_on_phantom_mode")
@@ -764,6 +772,8 @@ class UserPreferencesRepository(private val context: Context) {
                     preferences[VIDEO_CODEC] ?: com.photographercamera.photon.video.VideoCodec.H264.name
                 ),
                 ultraHdrGainMapEnabled = preferences[ULTRA_HDR_GAIN_MAP_ENABLED] ?: false,
+                rawMaxQualityTuning = preferences[RAW_MAX_QUALITY_TUNING] ?: true,
+                rawMaxMergeMode = preferences[RAW_MAX_MERGE_MODE] ?: "SPATIAL",
                 phantomMode = preferences[PHANTOM_MODE] ?: false,
                 phantomButtonHidden = preferences[PHANTOM_BUTTON_HIDDEN] ?: false,
                 launchCameraOnPhantomMode = preferences[LAUNCH_CAMERA_ON_PHANTOM_MODE] ?: false,
@@ -2106,6 +2116,20 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveUltraHdrGainMapEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = enabled
+        }
+    }
+
+    /** 0.9.10：保存 RAWmax 画质调优总开关（默认开；关 = 默认成像参数） */
+    suspend fun saveRawMaxQualityTuning(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_MAX_QUALITY_TUNING] = enabled
+        }
+    }
+
+    /** 0.9.10：保存 RAWmax 融合模式（"SPATIAL"/"SABRE"） */
+    suspend fun saveRawMaxMergeMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[RAW_MAX_MERGE_MODE] = mode
         }
     }
 

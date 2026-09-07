@@ -283,6 +283,8 @@ fun CameraScreen(navController: NavController) {
     // 与上游一致；设置页开关走 pvm.setShutterSoundEnabled），UI 层 MediaActionSound 移除
     // 防重入：一次快门 = 一次拍摄。即便 UI 在短时间内触发两次 doCapture，也只拍一张。
     var capturing by remember { mutableStateOf(false) }
+    // 0.9.10：guard 兜底协程句柄（每次快门取消上一发，防堆积）
+    var captureGuardJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var countdownSec by remember { mutableIntStateOf(0) }
 
     // Capture feedback animations (replaced the old Toast):
@@ -436,10 +438,14 @@ fun CameraScreen(navController: NavController) {
             return
         }
         capturing = true
-        // 安全兜底：guard 绑定本次拍摄（0.8.3 修复——旧实现 8s 后无条件复位，
-        // 会在下一次拍摄进行中误杀 capturing，表现为"拍了但没照片，只有动画"）。
-        val guardJob = scope.launch {
-            kotlinx.coroutines.delay(8000)
+        // 0.9.10 修复：guard 兜底此前在 pvm.capture() 返回后立即被 finally 取消
+        //（capture 非 suspend、瞬时返回）→ 8s 兜底从未生效，转圈复位单点依赖
+        // imageSavedEvent，保存失败时永久转圈。现 guard 独立驻留 30s（与控制器
+        // capture watchdog 对齐）：imageSavedEvent / captureFailedEvent 先到则
+        // capturing 已复位，guard 到期空转；每次快门取消上一发 guard 防堆积。
+        captureGuardJob?.cancel()
+        captureGuardJob = scope.launch {
+            kotlinx.coroutines.delay(30_000)
             if (capturing) {
                 DebugLog.log("SHOT", "capture guard timeout — auto reset")
                 capturing = false
@@ -450,14 +456,21 @@ fun CameraScreen(navController: NavController) {
         // 全部由 CameraViewModel.capture() 内部完成，UI 仅触发快门动画。
         // 0.9.8 修复：处理中动画的停止与"存入相册闪屏"改由 imageSavedEvent 驱动，
         // 与真实存储进度严格对齐（旧实现固定 delay(1200)，动画早停很久才落盘）。
+        // 0.9.10：不再在 finally 取消 guard（见上），失败复位由 captureFailedEvent 承担。
         scope.launch {
             try {
                 pvm.capture()
             } catch (t: Throwable) {
                 DebugLog.logError("SHOT", "photon capture failed", t)
-            } finally {
-                guardJob.cancel()
             }
+        }
+    }
+
+    // 0.9.10 修复：保存/拍摄失败事件 → 复位处理中转圈（无闪屏、无缩略图动画）。
+    // 覆盖保存异常、early-return、onCameraError、多帧无帧兜底等全部失败路径。
+    LaunchedEffect(Unit) {
+        pvm.captureFailedEvent.collect {
+            capturing = false
         }
     }
 
