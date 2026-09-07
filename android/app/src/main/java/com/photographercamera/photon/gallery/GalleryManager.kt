@@ -1440,6 +1440,17 @@ object GalleryManager {
                     "exportPhoto JPEG encode took ${exportWriteElapsed}ms, " +
                         "jpeg444=$shouldPreferJpeg444, success=$jpegEncoded"
                 )
+                // 0.9.9 点9 埋点：对比上游成片体积（上游 5MB+ / 本 APP 1MB）。
+                // 输出最终 JPEG 的 bitmap 尺寸、压缩质量、字节数与输入位图尺寸，
+                // 真机日志用于定位管线分歧（分辨率缩水 / 质量过低 / 位图被缩放）。
+                PLog.i(
+                    TAG,
+                    "exportPhoto JPEG result: output=${outputBitmap.width}x${outputBitmap.height}" +
+                        "(${outputBitmap.config}, ${outputBitmap.colorSpace?.name}), " +
+                        "input=${exportInputBitmap?.width}x${exportInputBitmap?.height}, " +
+                        "quality=$photoQuality, jpeg444=$shouldPreferJpeg444, " +
+                        "bytes=${tempExportFile.length()}, encodeMs=$exportWriteElapsed, success=$jpegEncoded"
+                )
                 if (!jpegEncoded) {
                     if (outputBitmap !== processedBitmap && !outputBitmap.isRecycled) {
                         outputBitmap.recycle()

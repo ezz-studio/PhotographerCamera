@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Single source of truth for the app version: defaultConfig.versionName AND the
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
-val APP_VERSION_NAME = "0.9.6"
-val APP_VERSION_CODE = 36
+val APP_VERSION_NAME = "0.9.9"
+val APP_VERSION_CODE = 39
 
 plugins {
     id("com.android.application")
@@ -179,8 +179,10 @@ dependencies {
     implementation("androidx.heifwriter:heifwriter:1.1.0")
     // okhttp（OpenAIApiClient / 网络，上游 4.12.0）
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Bugly（default flavor 崩溃上报；上游 latest.release）
-    implementation("com.tencent.bugly:crashreport:latest.release")
+    // Bugly（default flavor 崩溃上报；上游 latest.release）。
+    // 0.9.9：钉死 4.1.9.3——latest.release 动态版本每次构建都需联网查元数据，
+    // 网络抖动会直接 fail build（本次已复现）；且动态版本破坏构建可重现性。
+    implementation("com.tencent.bugly:crashreport:4.1.9.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling:1.7.2")
 }

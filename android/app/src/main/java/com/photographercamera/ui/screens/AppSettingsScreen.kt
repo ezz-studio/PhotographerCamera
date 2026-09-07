@@ -6,8 +6,10 @@
  *   对焦与镜头：自动对焦 / 镜头选择 / 默认焦段 / 相机校正 / 镜头发现 / 镜头信息
  *               （上游 autofocus + lens_selection + default_focal_length +
  *                calibration + lens_discovery 对齐；不含虚拟镜头与景深）
- *   成像与色彩：色彩映射(P3 色域) / 配置文件色调映射 / P010 10位YUV
- *               （0.9.0 移除引擎无对应物的开关：tonemap sRGB、修复预览/拍摄异常、HLG×2）
+ *   成像与色彩：降噪等级 / 锐化等级 / RAW MAX 锐化 / 亮度降噪 / 色度降噪 / 输出倍率 /
+ *               JPEG 4:4:4 / RAW 渲染引擎（0.9.9 默认 AgX）/ 配置文件色调映射
+ *               （0.9.0 移除引擎无对应物的开关：tonemap sRGB、修复预览/拍摄异常、HLG×2；
+ *                0.9.9 移除 P3 色域与 P010 10位YUV——用户指令固定为关）
  *   维护：检查更新 / 调试日志 / 恢复内置预设
  *   关于相机：写死成像参数清单 + 每项的管线参与状态（代码级验证结论）
  * 按指导手册不包含：AI 服务、界面样式、幻影、内容管理、数据维护、多重曝光、
@@ -50,6 +52,8 @@ import com.photographercamera.photon.camera.CameraInfo
 import com.photographercamera.photon.camera.LensType
 import com.photographercamera.photon.camera.MultiFrameConfig
 import com.photographercamera.photon.data.VolumeKeyAction
+import com.photographercamera.photon.processor.DenoiseStrength
+import com.photographercamera.photon.raw.RawRenderingEngine
 import com.photographercamera.photon.viewmodel.CameraViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -71,6 +75,23 @@ private enum class SettingsPage { CAPTURE, LENS, IMAGING, MAINTENANCE, ABOUT }
 /** 上游默认焦段选项（default_focal_length：0 = 不设置）。 */
 private val FOCAL_OPTIONS = listOf(0f, 24f, 28f, 35f, 50f, 85f)
 private fun focalLabel(f: Float) = if (f <= 0f) "不设置" else "${f.toInt()}mm"
+
+/** 降噪等级（上游 nr_level 0-4，默认 2；文案对齐上游 OFF/FAST/HIGH_QUALITY/ZSL/MINIMAL）。 */
+private val NR_LEVELS = listOf("关闭", "快速", "高质量", "零快门延迟", "最小")
+
+/** 锐化等级（上游 edge_level 0-3，默认 1；文案对齐上游 OFF/FAST/HIGH_QUALITY/ZSL）。 */
+private val EDGE_LEVELS = listOf("关闭", "快速", "高质量", "零快门延迟")
+
+/** RAW 渲染引擎显示名（上游引擎枚举顺序）。 */
+private fun engineLabel(e: RawRenderingEngine): String = when (e) {
+    RawRenderingEngine.AdobeCurve -> "Adobe 曲线"
+    RawRenderingEngine.HncsCcm -> "HNCS CCM"
+    RawRenderingEngine.HncsLut -> "HNCS LUT"
+    RawRenderingEngine.AgX -> "AgX"
+    RawRenderingEngine.Spektrafilm -> "Spektrafilm"
+    RawRenderingEngine.DarktableSigmoid -> "Sigmoid"
+    RawRenderingEngine.DarktableFilmic -> "Filmic"
+}
 
 @Composable
 fun AppSettingsScreen(
@@ -136,9 +157,8 @@ fun AppSettingsScreen(
     }
 
     // ---- 成像与色彩组状态（与上游同名 key 同默认值；0.9.0 移除引擎无对应物的开关）--
-    var useP3 by remember { mutableStateOf(sp.getBoolean("use_p3_color_space", false)) }
+    // 0.9.9：P3 / P010 开关移除（用户指令），两个能力固定为关（引擎端映射已强制 false）。
     var useProfileToneMap by remember { mutableStateOf(sp.getBoolean("use_profile_tone_map", true)) }
-    var useP010 by remember { mutableStateOf(sp.getBoolean("use_p010", false)) }
 
     // ---- 维护组状态 ----------------------------------------------------------
     var restoreMsg by remember { mutableStateOf<String?>(null) }
@@ -518,16 +538,107 @@ fun AppSettingsScreen(
             }
 
             SettingsPage.IMAGING -> {
-                // 色彩映射（上游 use_p3_color_space；0.9.0 接引擎 DataStore）
+                // 降噪 / 锐化等级（上游 PHOTO_MODE 页顺序；0.9.9 按上游 UI 与接线放回，
+                // 全链路 nr_level / edge_level 本就存在，此前仅缺 UI 入口）
                 SettingsCard {
-                    SwitchRow("P3 色域", "在支持的设备上启用 Display P3 输出。默认关闭。", useP3) {
-                        useP3 = it
-                        sp.edit().putBoolean("use_p3_color_space", it).apply()
-                        photonVm?.setUseP3ColorSpace(it)
-                        DebugLog.log("SETTINGS", "p3 color space -> $it")
+                    val nrFlow = photonVm?.nrLevel?.collectAsState()
+                    val nrIdx = (nrFlow?.value ?: 2).coerceIn(0, NR_LEVELS.lastIndex)
+                    ChoiceRow("降噪等级", NR_LEVELS, NR_LEVELS[nrIdx]) { picked ->
+                        val level = NR_LEVELS.indexOf(picked)
+                        photonVm?.setNRLevel(level)
+                        DebugLog.log("SETTINGS", "nr level -> $level")
+                    }
+                    val edgeFlow = photonVm?.edgeLevel?.collectAsState()
+                    val edgeIdx = (edgeFlow?.value ?: 1).coerceIn(0, EDGE_LEVELS.lastIndex)
+                    ChoiceRow("锐化等级", EDGE_LEVELS, EDGE_LEVELS[edgeIdx]) { picked ->
+                        val level = EDGE_LEVELS.indexOf(picked)
+                        photonVm?.setEdgeLevel(level)
+                        DebugLog.log("SETTINGS", "edge level -> $level")
                     }
                 }
-                // 配置文件色调映射（上游 use_profile_tone_map，默认开；0.9.0 接引擎 RAW 显影曲线）
+                // RAW MAX 画质组（上游 PROFESSIONAL「画质」组：锐化 / 亮度降噪 / 色度降噪 / 输出倍率；
+                // 均为连续滑杆 + 松手提交，与上游 SliderSettingItem 交互一致）
+                SettingsCard {
+                    val sharpeningFlow = photonVm?.rawMaxSharpening?.collectAsState()
+                    FloatSliderRow(
+                        title = "RAW MAX 锐化",
+                        subtitle = "RAW max 合成后的锐化强度",
+                        flowValue = sharpeningFlow?.value,
+                        fallback = 0.4f,
+                        range = 0f..1f,
+                    ) { v ->
+                        photonVm?.setRawMaxSharpening(v)
+                        DebugLog.log("SETTINGS", "raw max sharpening -> $v")
+                    }
+                    val lumaFlow = photonVm?.rawMaxNoiseReduction?.collectAsState()
+                    FloatSliderRow(
+                        title = "亮度降噪",
+                        subtitle = "RAW max 亮度通道降噪强度",
+                        flowValue = lumaFlow?.value,
+                        fallback = 1.0f,
+                        range = DenoiseStrength.valueRange,
+                    ) { v ->
+                        photonVm?.setRawMaxNoiseReduction(v)
+                        DebugLog.log("SETTINGS", "raw max luma nr -> $v")
+                    }
+                    val chromaFlow = photonVm?.rawMaxChromaNoiseReduction?.collectAsState()
+                    FloatSliderRow(
+                        title = "色度降噪",
+                        subtitle = "RAW max 色度通道降噪强度",
+                        flowValue = chromaFlow?.value,
+                        fallback = 1.0f,
+                        range = DenoiseStrength.valueRange,
+                    ) { v ->
+                        photonVm?.setRawMaxChromaNoiseReduction(v)
+                        DebugLog.log("SETTINGS", "raw max chroma nr -> $v")
+                    }
+                    val scaleFlow = photonVm?.rawMaxOutputScale?.collectAsState()
+                    FloatSliderRow(
+                        title = "输出倍率",
+                        subtitle = "RAW max 输出分辨率倍率（1x = 传感器原生尺寸）",
+                        flowValue = scaleFlow?.value,
+                        fallback = 1.0f,
+                        range = MultiFrameConfig.MIN_OUTPUT_SCALE..MultiFrameConfig.MAX_OUTPUT_SCALE,
+                        display = { v -> "x%.1f".format(v) },
+                    ) { v ->
+                        photonVm?.setRawMaxOutputScale(v)
+                        DebugLog.log("SETTINGS", "raw max output scale -> $v")
+                    }
+                }
+                // JPEG 4:4:4（上游 CAPTURE_STORAGE 组 use_jpeg_444_export，默认关；
+                // 无 StateFlow，走 pc_settings 镜像 + VM setter）
+                SettingsCard {
+                    var useJpeg444 by remember {
+                        mutableStateOf(sp.getBoolean("use_jpeg_444_export", false))
+                    }
+                    SwitchRow(
+                        "JPEG 4:4:4",
+                        "JPEG 保存使用 4:4:4 色度全采样，减少色彩损失（文件更大）",
+                        useJpeg444,
+                    ) {
+                        useJpeg444 = it
+                        sp.edit().putBoolean("use_jpeg_444_export", it).apply()
+                        photonVm?.setUseJpeg444Export(it)
+                        DebugLog.log("SETTINGS", "jpeg 444 -> $it")
+                    }
+                }
+                // RAW 渲染引擎（0.9.9 默认 AgX，参数沿用上游默认；切换入口对齐上游）
+                SettingsCard {
+                    val engineFlow = photonVm?.rawRenderingEngine?.collectAsState()
+                    val engine = engineFlow?.value ?: RawRenderingEngine.AgX
+                    ChoiceRow(
+                        "RAW 渲染引擎",
+                        RawRenderingEngine.entries.map { engineLabel(it) },
+                        engineLabel(engine),
+                    ) { picked ->
+                        val pickedEngine = RawRenderingEngine.entries
+                            .firstOrNull { engineLabel(it) == picked } ?: RawRenderingEngine.AgX
+                        photonVm?.setRawColorEngine(pickedEngine)
+                        DebugLog.log("SETTINGS", "raw engine -> ${pickedEngine.name}")
+                    }
+                }
+                // 配置文件色调映射（上游 use_profile_tone_map，默认开；0.9.9 确认有用：
+                // 控制 RAW 显影走配置文件色调映射曲线 vs 默认曲线，保留）
                 SettingsCard {
                     SwitchRow("配置文件色调映射", "RAW 显影使用配置文件色调映射曲线", useProfileToneMap) {
                         useProfileToneMap = it
@@ -536,21 +647,10 @@ fun AppSettingsScreen(
                         DebugLog.log("SETTINGS", "profile tone map -> $it")
                     }
                 }
-                // P010 10位 YUV（上游同款；0.9.0 接引擎）
-                SettingsCard {
-                    SwitchRow(
-                        "P010 (10位 YUV)",
-                        "启用 10位 YUV 输出以获得更好的图像数据精度。仅在支持的设备上且 RAW 关闭时生效。",
-                        useP010,
-                    ) {
-                        useP010 = it
-                        sp.edit().putBoolean("use_p010", it).apply()
-                        photonVm?.setUseP010(it)
-                        DebugLog.log("SETTINGS", "p010 -> $it")
-                    }
-                }
-                // 0.9.0 移除（引擎无对应物）：tonemap_mode / fix_preview_anomaly /
-                // fix_capture_anomaly / use_hlg10 / hlg_compatibility（旧引擎时代遗留）
+                // 0.9.0 移除（引擎无对应物，上游亦无）：tonemap_mode / fix_preview_anomaly /
+                // fix_capture_anomaly / use_hlg10 / hlg_compatibility（旧引擎时代遗留）。
+                // 0.9.9：P3 / P010 开关移除（用户指令），能力固定为关
+                // （引擎端 UserPreferencesRepository 映射已强制 useP010=false / useP3ColorSpace=false）。
             }
 
             SettingsPage.MAINTENANCE -> SettingsCard {
@@ -699,6 +799,46 @@ private fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChan
             }
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** 连续值滑杆行（上游 SliderSettingItem 交互：拖动暂存 UI 状态，松手一次性提交）。 */
+@Composable
+private fun FloatSliderRow(
+    title: String,
+    subtitle: String,
+    flowValue: Float?,
+    fallback: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    display: (Float) -> String = { v -> "%.2f".format(v) },
+    onCommit: (Float) -> Unit,
+) {
+    var drag by remember { mutableStateOf<Float?>(null) }
+    val shown = drag ?: flowValue ?: fallback
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = TextPrimary, fontSize = 14.sp)
+                Text(subtitle, color = TextSecondary, fontSize = 11.sp)
+            }
+            Text(
+                display(shown),
+                color = Accent,
+                fontSize = 14.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            )
+        }
+        Slider(
+            value = shown,
+            onValueChange = { drag = it },
+            onValueChangeFinished = {
+                drag?.let(onCommit)
+                drag = null
+            },
+            valueRange = range,
+            steps = steps,
+        )
     }
 }
 

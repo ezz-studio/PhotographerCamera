@@ -1038,14 +1038,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun resolveCaptureRawRenderingEngine(userPrefs: UserPreferences?): RawRenderingEngine {
-        return userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AdobeCurve
+        // 0.9.9：渲染引擎默认 AgX（用户指令）
+        return userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AgX
     }
 
     private fun resolveCaptureRawToneMappingParameters(
         userPrefs: UserPreferences?
     ): RawToneMappingParameters {
         val base = userPrefs?.rawToneMappingParameters ?: RawToneMappingParameters.DEFAULT
+        // 0.9.8：profile 高光/阴影注入 RAW 去马赛克（JPEG 生成前动态影响高光/阴影）
+        val recipe = currentRecipeParams.value
         return base.withPhotonHdr(true)
+            .copy(profileHighlights = recipe.highlights, profileShadows = recipe.shadows)
     }
 
     fun savePreset(preset: com.photographercamera.photon.model.CameraPreset) {
@@ -1250,16 +1254,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** 按当前设备摄像头实际能力算出的原生最大变焦（未叠加数字变焦）。 */
     val nativeMaxZoom: Float
         get() = state.value.availableCameras.filter { it.lensType != LensType.FRONT }.maxOfOrNull { it.maxZoom * it.displayIntrinsicZoomRatio } ?: 20f
-    /** 最大缩放 = 最长焦镜头（后置非微距中 displayIntrinsicZoomRatio 最大者）的两倍，如 0.6x/1x/3x → 0.6~6x。 */
+    /**
+     * 最大缩放 = 最长焦镜头（后置非微距中 displayIntrinsicZoomRatio 最大者）的两倍，如 0.6x/1x/3x → 0.6~6x。
+     * 0.9.6 指令修正：任何机型一律"最长焦段镜头 × 2"，不回退 HAL 数字变焦上限——
+     * 单摄/双摄机型最长焦即主摄（ratio=1.0）→ 上限 2x；完全无镜头数据时钳 1x（不猜测）。
+     */
     val globalMaxZoom: Float
         get() {
             val telephotoDisplayZoom = state.value.availableCameras
                 .filter { it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO }
                 .maxOfOrNull { it.displayIntrinsicZoomRatio.takeIf { ratio -> ratio > 0f } ?: 0f }
                 ?: 0f
-            // 用户指令：最大倍数=长焦镜头的两倍（3x 长焦 → 6x）。
-            // 无独立长焦镜头（tele <= 1f）的机型回退 HAL 数字变焦上限，保证连续变焦可用。
-            return if (telephotoDisplayZoom > 1f) telephotoDisplayZoom * 2f else nativeMaxZoom
+            return if (telephotoDisplayZoom > 0f) telephotoDisplayZoom * 2f else 1f
         }
 
     // 付费弹窗状态
@@ -1320,7 +1326,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             .stateIn(viewModelScope, SharingStarted.Eagerly, CustomVendorKeySettings.Empty)
     val rawRenderingEngine: StateFlow<RawRenderingEngine> = userPreferencesRepository.userPreferences
         .map { it.rawRenderingEngine }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, RawRenderingEngine.AdobeCurve)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, RawRenderingEngine.AgX) // 0.9.9：默认 AgX
     val rawToneMappingParameters: StateFlow<RawToneMappingParameters> = userPreferencesRepository.userPreferences
         .map { it.rawToneMappingParameters }
         .stateIn(viewModelScope, SharingStarted.Eagerly, RawToneMappingParameters.DEFAULT)
@@ -1706,6 +1712,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 0.9.6：多帧 burst 首帧 characteristics 缓存（部分帧被 HAL 拒绝时收敛出片用）
     private var pendingMultiFrameCharacteristics: CameraCharacteristics? = null
     private var multiFrameConvergeJob: Job? = null
+    // 正常路径（onImageCaptured 收齐帧）已启动 processStacking 后为 true，
+    // 用于让兜底看门狗区分"已收齐并分发处理"与"确实无帧"，避免成功拍摄后被误杀。
+    private var multiFrameDispatched = false
 
     private val hdrBracketImages = mutableListOf<SafeImage>()
     private var hdrBracketCaptureInfo: CaptureInfo? = null
@@ -1844,6 +1853,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 )
                 if (pendingRawStackFrames.size >= count) {
+                    multiFrameDispatched = true
+                    multiFrameConvergeJob?.cancel()
                     val burstPlanningStartedAtMs = SystemClock.elapsedRealtime()
                     val chronologicalFrames = pendingRawStackFrames
                         .sortedBy { it.frame.sensorTimestampNs }
@@ -2980,6 +2991,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun capture() {
+        multiFrameDispatched = false
         if (state.value.captureMode == CaptureMode.VIDEO) {
             if (state.value.videoRecordingState.isProcessing) {
                 return
@@ -5579,6 +5591,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 延迟给在途图像留时间；期间若正常路径收齐帧，本 job 已被取消或直接退出。
             delay(2_000L)
             val pendingCount = pendingRawStackFrames.size
+            // 正常路径已收齐帧并启动 processStacking（列表已清空），本次为成功拍摄，
+            // 不可再 forceResetCaptureState（否则在较慢设备上会打断 GLES 堆叠/存盘，
+            // 表现成"多帧不融合/不出片"）。
+            if (multiFrameDispatched) {
+                PLog.d(
+                    TAG,
+                    "Multi-frame convergence skipped: processing already dispatched " +
+                        "(requested=$requested captured=$captured failed=$failed)"
+                )
+                return@launch
+            }
             if (pendingCount >= requested) return@launch
             if (pendingCount == 0) {
                 if (captured > 0) {

@@ -1840,6 +1840,10 @@ class Camera2Controller(private val context: Context) {
         clearCameraSessionState(reason)
         closeCameraDeviceAndAwait(camera, reason)
         clearCameraCapabilityCache()
+        // 0.9.7：相机没了，这一拍的成片永远不会来。必须显式放弃挂起的 Live Photo
+        // 拍摄——否则 isCapturing 永久为 true，stopRecording() 只会挂起释放，录制器
+        // 再也回不到可用状态（真机表现：之后 live 拍摄一律卡死）。
+        livePhotoRecorder.cancelPendingCapture("camera device unavailable: $reason")
         livePhotoRecorder.stopRecording()
         setCameraInactive(resetVideoState)
     }
@@ -2553,7 +2557,7 @@ class Camera2Controller(private val context: Context) {
                     PLog.d(TAG, "Camera opened: ${camera.id}")
                     cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
                     cameraDevice = camera
-                    if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
+                    if (restartCameraForCaptureOutputMismatch("camera opened")) {
                         return
                     }
                     createPreviewSession(openGeneration = openGeneration)
@@ -3449,36 +3453,47 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
-     * RAW is an ImageReader/session-level choice. If the desired state changes after an
-     * ImageReader has already been created, changing [CameraState.useRaw] alone leaves the
-     * active capture output in the old format.
+     * The capture output format (RAW / P010 / YUV) is an ImageReader + session-level choice.
+     * If the desired state changes after an ImageReader has already been created, changing
+     * [CameraState.useRaw] / [CameraState.useP010] alone leaves the active capture output in
+     * the old format.
+     *
+     * 0.9.7：P010 之前只写 state 而不重建会话，用户在设置里关掉 P010 后当前会话仍是
+     * P010（真机上表现为「关了也没用」）。这里把 P010 与 RAW 一起纳入失配检测。
      *
      * This check also runs from CameraDevice.onOpened so a preference restored while the
      * initial camera open is in flight is applied before the first preview session starts.
      */
-    private fun restartCameraForRawCaptureOutputMismatch(reason: String): Boolean {
+    private fun restartCameraForCaptureOutputMismatch(reason: String): Boolean {
         val currentState = _state.value
         if (currentState.captureMode != CaptureMode.PHOTO) return false
 
         val currentReader = imageReader ?: return false
         val expectsRawOutput = requestedRawCaptureEnabled && isRawSupported
         val hasRawOutput = isRawCaptureReader(currentReader)
-        if (expectsRawOutput == hasRawOutput) return false
+        val expectsP010Output = !expectsRawOutput &&
+            isP010Supported &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            currentState.useP010
+        val hasP010Output = currentReader.imageFormat == ImageFormat.YCBCR_P010
+        if (expectsRawOutput == hasRawOutput && expectsP010Output == hasP010Output) return false
 
         val surfaceTexture = previewSurfaceTexture ?: return false
         if (cameraDevice == null) {
             PLog.d(
                 TAG,
-                "RAW capture output update is waiting for camera open: " +
-                        "reason=$reason, expectedRaw=$expectsRawOutput, actualRaw=$hasRawOutput"
+                "Capture output update is waiting for camera open: " +
+                        "reason=$reason, expectedRaw=$expectsRawOutput, actualRaw=$hasRawOutput, " +
+                        "expectedP010=$expectsP010Output, actualP010=$hasP010Output"
             )
             return false
         }
 
         PLog.i(
             TAG,
-            "Restarting camera for RAW capture output update: " +
-                    "reason=$reason, expectedRaw=$expectsRawOutput, actualRaw=$hasRawOutput"
+            "Restarting camera for capture output update: " +
+                    "reason=$reason, expectedRaw=$expectsRawOutput, actualRaw=$hasRawOutput, " +
+                    "expectedP010=$expectsP010Output, actualP010=$hasP010Output"
         )
         openCamera(surfaceTexture)
         return true
@@ -4553,7 +4568,12 @@ class Camera2Controller(private val context: Context) {
             val characteristics = resolveZoomRequestCharacteristics(openCameraId)
             val maxZoom = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
             val zoomRatioRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-            val minZoom = zoomRatioRange?.lower ?: 1f
+            // 0.9.8 修复：1x→广角不可用——旧实现把下钳位死在 zoomRatioRange.lower(=1f)，
+            // 导致无法路由到超广角物理镜头。下钳位改取全部物理镜头最小 intrinsicZoomRatio
+            // （如 0.5x），让 resolveOutputPhysicalCameraId 选到广角镜头、再由
+            // recreateSessionForPhysicalZoomIfNeeded 切换物理输出。1x→广角为直接切镜，无取景框动画。
+            val wideMinZoom = _state.value.getCurrentCameraInfo()?.minZoom ?: 1f
+            val minZoom = minOf(zoomRatioRange?.lower ?: 1f, wideMinZoom)
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
             // 原生最大 2 倍：超 HAL 上限部分走 SCALER_CROP_REGION 数字变焦
             val hardMaxZoom = maxSupportedZoom * 2f
@@ -4592,11 +4612,12 @@ class Camera2Controller(private val context: Context) {
         resetCropAtUnitZoom: Boolean,
         forPreview: Boolean = false
     ) {
-        // 预览框在 >1x 时钳到 1x（显示广角静止画面），取景框负责表达实际缩放；
-        // 拍照/成片路径用真实 zoomRatio（可超过 HAL CONTROL_ZOOM_RATIO 上限，
-        // 此时回退 SCALER_CROP_REGION 数字变焦，最高到原生 2 倍）。
+        // 0.9.9 修复：1x 以下缩放不可用——旧实现预览把 zoomRatio 钳到 1x（0.9.6 取景框
+        // 冻结设计），用户拖到 <1x 时取景毫无变化。上游预览直接提交真实 ratio（含 <1f，
+        // 依赖逻辑相机 CONTROL_ZOOM_RATIO_RANGE.lower<1f）。现与上游逐字一致：预览与拍照
+        // 均提交真实 zoomRatio；1x↔广角切换无取景框动画（UI 层本就无动画）。
         val maxSupportedZoom = zoomRatioRange?.upper ?: Float.MAX_VALUE
-        val effectiveZoom = if (forPreview) minOf(zoomRatio, 1f) else zoomRatio
+        val effectiveZoom = zoomRatio
 
         if (shouldUseControlZoomRatio(zoomRatioRange) && effectiveZoom <= maxSupportedZoom) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, effectiveZoom)
@@ -5046,11 +5067,11 @@ class Camera2Controller(private val context: Context) {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
             handler.post {
-                restartCameraForRawCaptureOutputMismatch("RAW setting changed")
+                restartCameraForCaptureOutputMismatch("RAW setting changed")
             }
             return
         }
-        restartCameraForRawCaptureOutputMismatch("RAW setting changed")
+        restartCameraForCaptureOutputMismatch("RAW setting changed")
     }
 
     fun setRawMinShutterSpeedNs(value: Long) {
@@ -5811,7 +5832,12 @@ class Camera2Controller(private val context: Context) {
             val characteristics = resolveZoomRequestCharacteristics(openCameraId)
             val maxZoom = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
             val zoomRatioRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-            val minZoom = zoomRatioRange?.lower ?: 1f
+            // 0.9.8 修复：1x→广角不可用——旧实现把下钳位死在 zoomRatioRange.lower(=1f)，
+            // 导致无法路由到超广角物理镜头。下钳位改取全部物理镜头最小 intrinsicZoomRatio
+            // （如 0.5x），让 resolveOutputPhysicalCameraId 选到广角镜头、再由
+            // recreateSessionForPhysicalZoomIfNeeded 切换物理输出。1x→广角为直接切镜，无取景框动画。
+            val wideMinZoom = _state.value.getCurrentCameraInfo()?.minZoom ?: 1f
+            val minZoom = minOf(zoomRatioRange?.lower ?: 1f, wideMinZoom)
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
             // 原生最大 2 倍：超过 HAL CONTROL_ZOOM_RATIO 上限的部分由
             // SCALER_CROP_REGION 数字变焦兜底（applyZoomRequestSettings）。
@@ -7398,7 +7424,20 @@ class Camera2Controller(private val context: Context) {
             // 手动曝光模式下，AE_PRECAPTURE_TRIGGER 不生效（因为 AE_MODE=OFF），直接拍照
             val currentState = _state.value
             if (currentState.requiresMultiFrameCaptureSequence) {
-                burstGyroRecorder.start(cameraHandler)
+                // 0.9.7：陀螺仪只是卷帘快门补偿的辅助输入，注册失败（权限缺失 / 硬件
+                // 缺失 / OEM 限制）绝不允许中断多帧拍摄。此前这一行在 try 之外，
+                // API 31+ 上 registerListener 抛出的 SecurityException 会一路冒到本方法
+                // 的 catch，把 JPEG MAX / RAW MAX 两种模式打成 “capture setup FAILED”，
+                // 真机表现为「RAW 开关开与关都拍不出照片」。
+                try {
+                    burstGyroRecorder.start(cameraHandler)
+                } catch (e: Exception) {
+                    PLog.w(TAG, "Burst gyro unavailable; continuing multi-frame capture without gyro", e)
+                    com.photographercamera.core.debug.DebugLog.log(
+                        "SHOT",
+                        "burst gyro start FAILED: ${e.javaClass.name}: ${e.message}",
+                    )
+                }
                 try {
                     prepareMultiFrameFocusForCapture(device, reader, baseExposureResult)
                 } catch (e: Exception) {
@@ -7444,6 +7483,8 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to capture", e)
             PLog.e(TAG, "拍照失败", e)
             // 复位对齐上游（0.9.4 曾误删——失败后 isCapturing 卡 true 会拦截后续拍摄）
+            // 0.9.7：同时放弃挂起的 Live Photo 拍摄，避免录制器停在 isCapturing=true。
+            livePhotoRecorder.cancelPendingCapture("capture setup failure")
             _state.value = _state.value.copy(isCapturing = false)
             burstGyroRecorder.stop()
             clearMultiFrameFocusState("capture setup failure")
@@ -8413,6 +8454,9 @@ class Camera2Controller(private val context: Context) {
                         failure: CaptureFailure
                     ) {
                         PLog.e(TAG, "Capture failed: ${failure.reason}")
+                        // 0.9.7：这一拍不会有成片，放弃挂起的 Live Photo 拍摄，
+                        // 否则录制器会一直停在 isCapturing=true。
+                        livePhotoRecorder.cancelPendingCapture("single capture failed: ${failure.reason}")
                         _state.value = _state.value.copy(isCapturing = false)
                         resetPreviewAfterCapture()
                     }
@@ -8421,6 +8465,7 @@ class Camera2Controller(private val context: Context) {
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to perform capture", e)
+            livePhotoRecorder.cancelPendingCapture("perform capture exception")
             _state.value = _state.value.copy(isCapturing = false)
             burstGyroRecorder.stop()
             resetPreviewAfterCapture()
@@ -8956,7 +9001,20 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setUseP010(enabled: Boolean) {
+        val changed = _state.value.useP010 != enabled
         _state.value = _state.value.copy(useP010 = enabled)
+        if (!changed) return
+        // 0.9.7：P010 与 RAW 一样是 ImageReader/会话级选择，只改 state 不会生效。
+        // 真机上出现过「用户关掉 P010 但当前会话仍是 P010」，Live Photo 依旧在
+        // 10-bit 大缓冲 + 并发编码下把相机 HAL 打崩（camera error 4）。
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post {
+                restartCameraForCaptureOutputMismatch("P010 setting changed")
+            }
+            return
+        }
+        restartCameraForCaptureOutputMismatch("P010 setting changed")
     }
 
     fun setUseP3ColorSpace(enabled: Boolean) {
@@ -8978,9 +9036,15 @@ class Camera2Controller(private val context: Context) {
     /**
      * 开始后台录制导出视频（在获得照片精确时间戳后调用）
      * @param timestampUs 精确的拍照瞬间时间戳（纳秒/1000）
+     * @param captureStartTimestampUs 手电筒拍摄流的关键帧起点（非闪光灯路径传 null，
+     *        0.9.9 移植上游后由预采集缓冲保证关键帧起点）
      */
-    fun recordLivePhotoVideo(timestampUs: Long? = null, onCaptured: ((java.io.File, Long) -> Unit)? = null) {
-        livePhotoRecorder.recordVideo(timestampUs) { file, timestamp ->
+    fun recordLivePhotoVideo(
+        timestampUs: Long? = null,
+        captureStartTimestampUs: Long? = null,
+        onCaptured: ((java.io.File, Long) -> Unit)? = null
+    ) {
+        livePhotoRecorder.recordVideo(timestampUs, captureStartTimestampUs) { file, timestamp ->
             onCaptured?.invoke(file, timestamp)
             onLivePhotoVideoCaptured?.invoke(file, timestamp)
         }

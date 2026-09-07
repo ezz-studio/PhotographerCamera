@@ -63,3 +63,11 @@ _s0*.json
 # server upload token (secret - never commit)
 server/upload.token.local
 build2/
+
+# R2 release temp artifacts (regenerated per release)
+/_r2urls.txt
+/android/_r2_version.json
+
+# one-off refactor scripts (0.9.7 core->photon package migration)
+/_core_photon_closure.py
+/_core_photon_keep.txt

@@ -13,7 +13,9 @@ object MultiFrameConfig {
     const val DEFAULT_DENOISE_FRAME_COUNT = 5
     const val MIN_HDR_PLUS_FRAME_COUNT = 1
     const val MIN_HDR_PLUS_BRACKET_FRAME_COUNT = 2
-    const val DEFAULT_HDR_PLUS_FRAME_COUNT = 3
+    // 0.9.9：用户指令——RAW MAX HDR+ 默认帧数 3 → 5（上游默认 3）。
+    // 旧默认 3 已被持久化的设备，由 UserPreferencesRepository 读取处一次性迁移。
+    const val DEFAULT_HDR_PLUS_FRAME_COUNT = 5
     const val MAX_FRAME_COUNT = 20
     const val DEFAULT_HDR_PLUS_BRACKET_EXPOSURE = false
     const val MIN_OUTPUT_SCALE = 1f

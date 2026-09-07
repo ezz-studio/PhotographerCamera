@@ -9,7 +9,10 @@ data class RawToneMappingParameters(
     val filmicWhiteRelativeExposure: Float = FILMIC_WHITE_RELATIVE_EXPOSURE_DEFAULT,
     val useProfileToneMap: Boolean = true,
     val useOppoMasterToneMap: Boolean = false,
-    val usePhotonHdr: Boolean = PHOTON_HDR_DEFAULT
+    val usePhotonHdr: Boolean = PHOTON_HDR_DEFAULT,
+    // 0.9.8：profile 高光/阴影注入 RAW 去马赛克阶段（JPEG 生成前动态影响高光/阴影）
+    val profileHighlights: Float = 0f,
+    val profileShadows: Float = 0f
 ) {
     val profileToneMapMode: RawProfileToneMapMode
         get() = when {
@@ -41,7 +44,9 @@ data class RawToneMappingParameters(
             agxToe = agxToe.coerceIn(AGX_TOE_MIN, AGX_TOE_MAX),
             agxShoulder = agxShoulder.coerceIn(AGX_SHOULDER_MIN, AGX_SHOULDER_MAX),
             filmicBlackRelativeExposure = minOf(blackFilmic, whiteFilmic - MIN_DYNAMIC_RANGE_EV),
-            filmicWhiteRelativeExposure = maxOf(whiteFilmic, blackFilmic + MIN_DYNAMIC_RANGE_EV)
+            filmicWhiteRelativeExposure = maxOf(whiteFilmic, blackFilmic + MIN_DYNAMIC_RANGE_EV),
+            profileHighlights = profileHighlights,
+            profileShadows = profileShadows
         )
     }
 

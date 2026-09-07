@@ -114,7 +114,7 @@ data class UserPreferences(
     val rawHncsProfileId: String? = null,
     val rawHncsRenderIntent: HncsRenderIntent = HncsRenderIntent.Standard,
     val rawHncsFilmCurveMode: HncsFilmCurveMode = HncsFilmCurveMode.Standard,
-    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve,
+    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AgX, // 0.9.9：默认 AgX
     val rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
     val rawExposureCompensation: Float = 0f,
     val rawAutoExposure: Boolean = false,
@@ -680,10 +680,14 @@ class UserPreferencesRepository(private val context: Context) {
                 useJpgMax = useJpgMax,
                 useJpgMaxHdrComposition = false,
                 jpgMultiFrameDenoiseFrameCount = preferences[JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]
+                    // 0.9.9：JPG MAX 默认帧数固定 5；旧版本默认 6 已被持久化的设备一次性迁移。
+                    ?.let { if (it == 6) MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT else it }
                     ?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
                     ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT,
                 useRawMax = useRawMax,
                 hdrPlusFrameCount = preferences[HDR_PLUS_FRAME_COUNT]
+                    // 0.9.9：RAW MAX HDR+ 默认帧数 3 → 5（用户指令）；旧默认 3 一次性迁移。
+                    ?.let { if (it == 3) MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT else it }
                     ?.let {
                         MultiFrameConfig.normalizeHdrPlusFrameCount(
                             it,
@@ -716,8 +720,10 @@ class UserPreferencesRepository(private val context: Context) {
                 colorSpace = ColorSpace.valueOf(preferences[COLOR_SPACE] ?: ColorSpace.SRGB.name),
                 logCurve = TransferCurve.fromPersistedName(preferences[LOG_CURVE] ?: TransferCurve.SRGB.name),
                 rawLuts = parseRawLuts(preferences),
-                useP010 = preferences[USE_P010] ?: false,
-                useP3ColorSpace = preferences[USE_P3_COLOR_SPACE] ?: false,
+                // 0.9.9：用户指令——P010 (10位YUV) 与 P3 色域固定为关，UI 开关已移除；
+                // 此处忽略历史存储值，保证所有消费端（会话色彩空间/输出格式）恒为 false。
+                useP010 = false,
+                useP3ColorSpace = false,
                 videoResolution = storedVideoResolution,
                 videoFps = storedVideoFps,
                 videoAspectRatio = VideoAspectRatio.valueOf(

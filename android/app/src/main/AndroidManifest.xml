@@ -28,6 +28,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 0.9.8 修复：Live Photo 用 AudioRecord 录制视频音轨（LivePhotoRecorder.initAudio）。
+         缺失时 initAudio 直接早退、视频合成失败，表现成"Live 只有图、没视频、没合成"。
+         普通权限，无需运行时弹窗（与 CAMERA 一并请求即可）。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 0.9.7 修复：多帧（JPEG MAX / RAW MAX）burst 用陀螺仪窗口做卷帘快门补偿，
+         注册采样周期为 0µs（SENSOR_DELAY_FASTEST / 200Hz 以上）在 API 31+ 需要此
+         普通权限；缺失时 registerListener 直接抛 SecurityException，整次拍摄被中断。 -->
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
 
     <!-- READ_PHONE_STATE is never declared by this app. It is silently IMPLIED
          into the merged manifest by the manifest merger because

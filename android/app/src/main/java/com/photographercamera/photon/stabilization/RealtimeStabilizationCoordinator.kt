@@ -688,13 +688,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         nativeLookaheadFrames = normalizedLookahead
         if (sensorThread == null) {
             val thread = HandlerThread("Photon-MGC-EIS-Gyro").apply { start() }
-            val registered = sensorManager.registerListener(
-                sensorListener,
-                sensor,
-                SensorManager.SENSOR_DELAY_FASTEST,
-                0,
-                Handler(thread.looper),
-            )
+            val registered = registerGyroListener(sensor, thread)
             if (!registered) {
                 thread.quitSafely()
                 nativeEngine.stop()
@@ -711,6 +705,33 @@ class RealtimeStabilizationCoordinator(context: Context) {
         activeSessionCount = activeSessions.size
         PLog.i(TAG, "MGC htd feeder started with gyro=${sensor.name}")
         resultSequence
+    }
+
+    /**
+     * 0.9.7：API 31+ 上 0µs（SENSOR_DELAY_FASTEST）采样需要 HIGH_SAMPLING_RATE_SENSORS，
+     * 缺失时 registerListener 抛 SecurityException。防抖只是增强项，注册失败必须优雅
+     * 降级（换更慢的周期），而不是把调用链打断。
+     */
+    private fun registerGyroListener(sensor: Sensor, thread: HandlerThread): Boolean {
+        val handler = Handler(thread.looper)
+        for (periodUs in intArrayOf(
+                SensorManager.SENSOR_DELAY_FASTEST,
+                5_000,
+                SensorManager.SENSOR_DELAY_GAME,
+            )
+        ) {
+            val registered = try {
+                sensorManager.registerListener(sensorListener, sensor, periodUs, 0, handler)
+            } catch (e: SecurityException) {
+                PLog.w(TAG, "MGC gyro period ${periodUs}us needs HIGH_SAMPLING_RATE_SENSORS: ${e.message}")
+                false
+            } catch (e: Exception) {
+                PLog.w(TAG, "MGC gyro registration failed at ${periodUs}us", e)
+                false
+            }
+            if (registered) return true
+        }
+        return false
     }
 
     private fun release(sessionId: Long) {

@@ -181,6 +181,9 @@ fun CameraScreen(navController: NavController) {
     // needs READ/WRITE_EXTERNAL_STORAGE — requested together, camera gate wins.
     val neededPerms = buildList {
         add(Manifest.permission.CAMERA)
+        // 0.9.8 修复：Live Photo / 视频录制需要麦克风权限录制音轨，否则
+        // LivePhotoRecorder.initAudio 提前返回 → 只有图片没有视频。
+        add(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             @Suppress("DEPRECATION")
             add(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -445,17 +448,25 @@ fun CameraScreen(navController: NavController) {
         DebugLog.log("SHOT", "shutter pressed (zoom=${state.zoomRatio}, focal=${state.getCurrentCameraInfo()?.focalLength35mmEquivalent ?: 26f})")
         // photon 引擎全链路拍照：多帧融合/RAW 开发/色彩配方/MediaStore 保存
         // 全部由 CameraViewModel.capture() 内部完成，UI 仅触发快门动画。
+        // 0.9.8 修复：处理中动画的停止与"存入相册闪屏"改由 imageSavedEvent 驱动，
+        // 与真实存储进度严格对齐（旧实现固定 delay(1200)，动画早停很久才落盘）。
         scope.launch {
             try {
                 pvm.capture()
-                triggerCaptureFeedback()
             } catch (t: Throwable) {
                 DebugLog.logError("SHOT", "photon capture failed", t)
             } finally {
                 guardJob.cancel()
-                kotlinx.coroutines.delay(1200)
-                capturing = false
             }
+        }
+    }
+
+    // 0.9.8 修复：存储完成事件驱动——停止处理中动画 + 播放存入相册闪屏，
+    // 与真实落盘进度严格对齐（详见上方 doCapture 说明）。
+    LaunchedEffect(Unit) {
+        pvm.imageSavedEvent.collect {
+            capturing = false
+            triggerCaptureFeedback()
         }
     }
 
@@ -955,6 +966,8 @@ fun CameraScreen(navController: NavController) {
             onTimerToggle = { timerSec = when (timerSec) { 0 -> 3; 3 -> 10; else -> 0 } },
             onFlip = { pvm.switchCamera() },
             lastCapture = lastCapture,
+            // 0.9.9：处理中缩略图显示第一帧原始预览（VM 快门早期 generateThumbnail 产出）
+            processingPreview = pvm.previewThumbnail,
             thumbScale = thumbAnim.value,
             shutterScale = shutterAnim.value,
             onGalleryClick = { navController.navigate("gallery") },
@@ -1044,12 +1057,15 @@ fun CameraScreen(navController: NavController) {
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "色温 ${adjWbTemp.roundToInt()}K",
+                                // 0.9.8 修复：AUTO(AWB 开) 下显示相机实测色温（actualAwbTemperature），
+                                // 默认不再显示静态 5000K；手动(AWB 关) 才用冻结的 adjWbTemp。
+                                "色温 ${(if (awbOn) (state.actualAwbTemperature ?: state.awbTemperature) else adjWbTemp.roundToInt())}K",
                                 color = if (awbOn) TextSecondary else TextPrimary,
                                 fontSize = 13.sp,
                             )
                             AdjustSlider(
-                                value = adjWbTemp,
+                                // 0.9.8 修复：AUTO 下滑块值跟随实测色温（仅显示，滑块灰置）
+                                value = if (awbOn) (state.actualAwbTemperature ?: state.awbTemperature).toFloat() else adjWbTemp,
                                 center = 5000f,
                                 // 0.9.1 对齐引擎常量 AWB_TEMPERATURE_MIN/MAX = 2000..8000
                                 //（旧 2500..9900 右端 1900K 是引擎钳制死区，拖动无效）
@@ -1568,6 +1584,8 @@ private fun BottomPanel(
     onTimerToggle: () -> Unit,
     onFlip: () -> Unit,
     lastCapture: SavedPhoto?,
+    // 0.9.9 保存动画（上游语义）：处理中缩略图先显示第一帧原始预览
+    processingPreview: Bitmap? = null,
     thumbScale: Float,
     shutterScale: Float,
     onGalleryClick: () -> Unit,
@@ -1641,7 +1659,14 @@ private fun BottomPanel(
             ShutterButton(onClick = onShutter, scale = shutterScale, isProcessing = isProcessing)
 
             // Last capture thumbnail (right)
-            LastCaptureThumb(lastCapture, onGalleryClick, scale = thumbScale)
+            // 0.9.9 保存动画：处理中优先显示第一帧原始预览，处理完成（lastCapture 刷新）后显示成片
+            LastCaptureThumb(
+                lastCapture,
+                onGalleryClick,
+                scale = thumbScale,
+                processingPreview = processingPreview,
+                isProcessing = isProcessing,
+            )
         }
     }
 }
@@ -1831,7 +1856,15 @@ private fun ShutterButton(onClick: () -> Unit, scale: Float = 1f, isProcessing: 
 }
 
 @Composable
-private fun LastCaptureThumb(photo: SavedPhoto?, onClick: () -> Unit, scale: Float = 1f) {
+private fun LastCaptureThumb(
+    photo: SavedPhoto?,
+    onClick: () -> Unit,
+    scale: Float = 1f,
+    // 0.9.9 保存动画（上游语义）：快门后处理期间先显示第一帧原始预览缩略图，
+    // 处理完成后 lastCapture 刷新、isProcessing 置否，自动切回成片。
+    processingPreview: Bitmap? = null,
+    isProcessing: Boolean = false,
+) {
     val context = LocalContext.current
     Box(
         modifier = Modifier
@@ -1842,7 +1875,14 @@ private fun LastCaptureThumb(photo: SavedPhoto?, onClick: () -> Unit, scale: Flo
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (photo != null) {
+        if (isProcessing && processingPreview != null) {
+            Image(
+                bitmap = processingPreview.asImageBitmap(),
+                contentDescription = "正在处理",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else if (photo != null) {
             // Coil: async MediaStore load with built-in downsampling + caching
             coil.compose.AsyncImage(
                 model = photo.uri,

@@ -4,12 +4,18 @@ import android.media.MediaCodec
 import com.photographercamera.photon.utils.PLog
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.concurrent.ConcurrentSkipListSet
 
 /**
  * 循环采样缓冲器
  *
  * 存储由 MediaCodec 编码后的数据样本 (Samples)。
  * 相比存储原始像素，这种方式内存占用极低 (几百 KB vs 几百 MB)，彻底解决 OOM 问题。
+ *
+ * 0.9.9：对齐上游（hinnka/mycamera CircularSampleRecorder）——新增 in-flight 拍摄
+ * 保留区（retainedStarts + retainFrom/releaseRetention）：挂起拍摄的起点时间戳
+ * 之前的历史样本不会被 trimStorage 裁掉，保证 recordVideo 快照能取到从起点
+ * （含关键帧）开始的完整缓冲；这是上游「预采集缓冲 + 关键帧保底」机制的支撑部分。
  */
 class CircularSampleRecorder(
     private val bufferDurationMs: Long = 1500L
@@ -25,6 +31,7 @@ class CircularSampleRecorder(
     )
 
     private val samples = ConcurrentLinkedDeque<Sample>()
+    private val retainedStarts = ConcurrentSkipListSet<Long>()
 
     @Volatile
     var isRecording: Boolean = false
@@ -35,7 +42,17 @@ class CircularSampleRecorder(
      */
     fun startRecording() {
         samples.clear()
+        retainedStarts.clear()
         isRecording = true
+    }
+
+    /** Keep an in-flight capture's start until its export has taken a snapshot. */
+    fun retainFrom(timestampUs: Long) {
+        retainedStarts.add(timestampUs)
+    }
+
+    fun releaseRetention(timestampUs: Long) {
+        retainedStarts.remove(timestampUs)
     }
 
     /**
@@ -73,7 +90,10 @@ class CircularSampleRecorder(
         if (samples.isEmpty()) return
 
         val lastTimestamp = samples.last().info.presentationTimeUs
-        val threshold = lastTimestamp - bufferDurationMs * 1000
+        val rollingThreshold = lastTimestamp - bufferDurationMs * 1000
+        // 保留区优先：挂起拍摄起点之前的历史样本一律保留（上游同款）
+        val threshold = retainedStarts.firstOrNull()?.let { minOf(it, rollingThreshold) }
+            ?: rollingThreshold
 
         while (samples.size > 1) {
             val first = samples.first()

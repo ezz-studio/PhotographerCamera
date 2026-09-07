@@ -3525,9 +3525,10 @@ class RawDemosaicProcessor {
                 applyDngBaselineExposure = applyProfileDngBaselineExposure,
                 useRamp = useProfileExposureRamp
             )
+            // 0.9.8：profile 高光/阴影在去马赛克阶段叠加（JPEG 生成前动态影响高光/阴影）
             val shadowsHighlightsParams = ShadowsHighlightsParams(
-                highlights = effectiveHighlightsAdjustment,
-                shadows = rawShadowsAdjustment,
+                highlights = effectiveHighlightsAdjustment + rawToneMappingParameters.profileHighlights,
+                shadows = rawShadowsAdjustment + rawToneMappingParameters.profileShadows,
             )
             PLog.d(
                 TAG,
