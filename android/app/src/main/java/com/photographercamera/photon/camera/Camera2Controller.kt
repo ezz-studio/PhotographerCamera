@@ -7371,14 +7371,51 @@ class Camera2Controller(private val context: Context) {
             val currentState = _state.value
             if (currentState.requiresMultiFrameCaptureSequence) {
                 burstGyroRecorder.start(cameraHandler)
-                prepareMultiFrameFocusForCapture(device, reader, baseExposureResult)
+                try {
+                    prepareMultiFrameFocusForCapture(device, reader, baseExposureResult)
+                } catch (e: Exception) {
+                    // 0.9.5：对齐上游健壮性——对焦准备段（快照求值/AF 触发提交）异常时，
+                    // 按上游 completePendingMultiFrameFocusWithFallback 的方法用固定焦点
+                    // 快照继续多帧拍摄（不降级单帧、不丢弃本次快门）。部分 OEM HAL 在
+                    // AF 模式解析/触发提交阶段可能抛运行时异常，上游以 fallback 快照兜底。
+                    PLog.e(TAG, "Multi-frame focus preparation failed; falling back to fixed-focus multi-frame", e)
+                    com.photographercamera.core.debug.DebugLog.log(
+                        "SHOT",
+                        "multi-frame focus prep FAILED: ${e.javaClass.name}: ${e.message}"
+                    )
+                    clearPendingMultiFrameFocusPreparation()
+                    val focusDistance = resolveValidFocusDistance(baseExposureResult, currentState)
+                    val fallbackMode = when {
+                        availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_OFF) && focusDistance != null ->
+                            CaptureRequest.CONTROL_AF_MODE_OFF
+                        availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) ->
+                            CaptureRequest.CONTROL_AF_MODE_AUTO
+                        else -> resolveAutoFocusMode(currentState.captureMode)
+                    }
+                    activeMultiFrameFocusSnapshot = createMultiFrameFocusSnapshot(
+                        result = baseExposureResult,
+                        fallbackAfMode = fallbackMode,
+                        source = "focus_prep_exception",
+                    ).copy(afMode = fallbackMode)
+                    isCaptureFocusFrozen = true
+                    continueCaptureAfterFocusPreparation(device, reader, baseExposureResult)
+                }
                 return
             }
             continueCaptureAfterFocusPreparation(device, reader, baseExposureResult)
 
         } catch (e: Exception) {
+            // 0.9.5：异常摘要进 SHOT 远程通道（PLog 堆栈此前只进 logcat），
+            // 多帧准备阶段的未知异常从此一击定位。
+            val topFrames = e.stackTrace.take(3)
+                .joinToString(" <- ") { "${it.fileName}:${it.lineNumber}" }
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "capture setup FAILED: ${e.javaClass.name}: ${e.message} @ $topFrames"
+            )
             PLog.e(TAG, "Failed to capture", e)
             PLog.e(TAG, "拍照失败", e)
+            // 复位对齐上游（0.9.4 曾误删——失败后 isCapturing 卡 true 会拦截后续拍摄）
             _state.value = _state.value.copy(isCapturing = false)
             burstGyroRecorder.stop()
             clearMultiFrameFocusState("capture setup failure")

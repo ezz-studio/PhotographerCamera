@@ -119,8 +119,14 @@ object PLog {
 
         // 0.8.3：photon 内部日志桥接远程调试通道（App 启动时挂接）。
         // 拍摄保存/失败、手动 WB 拒绝等关键行为此前对远程日志不可见。
+        // 0.9.5：转发附带异常摘要（类名:消息 + 栈顶帧）——此前 PLog.e 的堆栈
+        // 只进 logcat 不进远程通道，导致"Failed to capture"类问题无法远程定位。
         try {
-            remoteForwarder?.invoke(tag, "${level.name.first()}/$message")
+            val throwableSummary = throwable?.let { t ->
+                val frames = t.stackTrace.take(3).joinToString(" <- ") { "${it.fileName}:${it.lineNumber}" }
+                " | ${t.javaClass.simpleName}: ${t.message} @ $frames"
+            } ?: ""
+            remoteForwarder?.invoke(tag, "${level.name.first()}/$message$throwableSummary")
         } catch (_: Throwable) {
         }
     }

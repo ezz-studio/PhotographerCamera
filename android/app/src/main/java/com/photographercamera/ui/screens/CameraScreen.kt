@@ -1254,11 +1254,19 @@ internal fun UpdateCheckRow() {
 
     // 0.7.1: DownloadManager 托管下载——进程被杀/黑屏后重进本页时续接状态。
     LaunchedEffect(Unit) {
-        val (id, code) = UpdateChecker.pendingDownload(context) ?: return@LaunchedEffect
-        if (code <= UpdateChecker.installedVersionCode(context)) {
-            UpdateChecker.clearDownloadState(context)
+        // 0.9.5：更新已装好（或无挂起下载）时清掉下载目录残留安装包，
+        // 满足"安装完成后旧安装包不留存"。
+        val pending = UpdateChecker.pendingDownload(context)
+        if (pending == null) {
+            UpdateChecker.purgeDownloadedApks(context)
             return@LaunchedEffect
         }
+        if (pending.second <= UpdateChecker.installedVersionCode(context)) {
+            UpdateChecker.clearDownloadState(context)
+            UpdateChecker.purgeDownloadedApks(context)
+            return@LaunchedEffect
+        }
+        val (id, code) = pending
         phase = UpdPhase.DOWNLOADING
         status = "恢复下载（系统下载器接管）…"
         val st = UpdateChecker.queryDownload(context, id)

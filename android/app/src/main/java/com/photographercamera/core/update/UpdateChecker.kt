@@ -54,6 +54,8 @@ object UpdateChecker {
     private const val PREFS = "update_state"
     private const val PREF_DL_ID = "download_id"
     private const val PREF_DL_CODE = "download_version_code"
+    private const val PREF_DL_SIZE = "download_expected_size"
+    private const val PREF_DL_FILE = "download_file_name"
 
     /** Legacy fallback: base URL from the shared log-shipper asset. */
     private fun legacyBase(context: Context): String {
@@ -120,10 +122,33 @@ object UpdateChecker {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private fun destDir(context: Context): File =
+        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+
+    /** 0.9.5：按版本命名下载文件，不同版本不共用文件，杜绝新旧任务写同一文件互相覆盖。 */
+    private fun apkFileName(info: UpdateInfo): String = "PhotographerCamera-${info.versionName}.apk"
+
+    private fun destFile(context: Context, info: UpdateInfo): File =
+        File(destDir(context), apkFileName(info))
+
+    /** 0.9.5：当前记录中的下载目标文件（兼容续接/查询路径）。 */
     private fun destFile(context: Context): File {
-        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: context.filesDir
-        return File(dir, "update.apk")
+        val name = prefs(context).getString(PREF_DL_FILE, null) ?: "update.apk"
+        return File(destDir(context), name)
+    }
+
+    /** 0.9.5：下载完成的包是否完整（size 与 version.json 契约一致；size 未知时仅要求非空）。 */
+    private fun isCompleteApk(f: File, expectedSize: Long): Boolean =
+        f.exists() && f.length() > 0 && (expectedSize <= 0 || f.length() == expectedSize)
+
+    /** 0.9.5：清理下载目录中的旧版本 APK 残留（用户要求：安装新包前删除旧安装包）。 */
+    private fun purgeStaleApks(context: Context, keep: String) {
+        destDir(context).listFiles()?.forEach { f ->
+            if (f.name.endsWith(".apk") && f.name != keep) {
+                runCatching { f.delete() }
+                    .onFailure { PLog.w("UpdateChecker", "purge failed: ${f.name}") }
+            }
+        }
     }
 
     /**
@@ -132,11 +157,24 @@ object UpdateChecker {
      * death), its id is returned instead of re-enqueueing.
      */
     fun startDownload(context: Context, info: UpdateInfo): Long {
-        pendingDownload(context)?.let { (id, code) ->
-            if (code == info.versionCode) return id
-        }
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val dest = destFile(context)
+        pendingDownload(context)?.let { (id, code) ->
+            if (code == info.versionCode) {
+                // 同版本任务：已完成且文件完整则直接复用，否则继续等系统任务
+                val st = queryDownload(context, id)
+                if (st?.status == DownloadManager.STATUS_SUCCESSFUL) {
+                    val f = destFile(context, info)
+                    if (isCompleteApk(f, info.sizeBytes)) return id
+                }
+                return id
+            }
+            // 0.9.5：异版本旧任务一律取消——PAUSED/RUNNING 的旧任务会晚于新任务
+            // 完成，把新包覆盖成旧包（"装到旧版"根因之一）。
+            runCatching { dm.remove(id) }
+        }
+        // 0.9.5：清理全部旧版本 APK 残留（含更早版本/半截文件），只保留本次目标
+        purgeStaleApks(context, apkFileName(info))
+        val dest = destFile(context, info)
         dest.parentFile?.mkdirs()
         if (dest.exists()) dest.delete()
         val req = DownloadManager.Request(Uri.parse(info.url)).apply {
@@ -151,6 +189,8 @@ object UpdateChecker {
         prefs(context).edit()
             .putLong(PREF_DL_ID, id)
             .putLong(PREF_DL_CODE, info.versionCode)
+            .putLong(PREF_DL_SIZE, info.sizeBytes)
+            .putString(PREF_DL_FILE, dest.name)
             .apply()
         return id
     }
@@ -173,15 +213,34 @@ object UpdateChecker {
     }
 
     fun clearDownloadState(context: Context) {
-        prefs(context).edit().remove(PREF_DL_ID).remove(PREF_DL_CODE).apply()
+        prefs(context).edit()
+            .remove(PREF_DL_ID)
+            .remove(PREF_DL_CODE)
+            .remove(PREF_DL_SIZE)
+            .remove(PREF_DL_FILE)
+            .apply()
+    }
+
+    /**
+     * 0.9.5：更新成功后（新版本首次启动）调用——删除下载目录中的全部安装包，
+     * 满足"安装完成后旧安装包不留存"的要求。
+     */
+    fun purgeDownloadedApks(context: Context) {
+        purgeStaleApks(context, keep = "")
     }
 
     /** The finished APK for [id] if the system download already succeeded. */
     fun downloadedFileNow(context: Context, id: Long): File? {
         val st = queryDownload(context, id) ?: return null
         if (st.status != DownloadManager.STATUS_SUCCESSFUL) return null
+        val expected = prefs(context).getLong(PREF_DL_SIZE, 0)
         val f = destFile(context)
-        return if (f.exists() && f.length() > 0) f else null
+        // 0.9.5：size 校验——不完整的/被旧任务覆盖的包拒绝进入安装流程并就地删除
+        if (!isCompleteApk(f, expected)) {
+            runCatching { f.delete() }
+            return null
+        }
+        return f
     }
 
     data class DlState(val status: Int, val received: Long, val total: Long)
@@ -216,8 +275,14 @@ object UpdateChecker {
             when (st?.status) {
                 DownloadManager.STATUS_SUCCESSFUL -> {
                     onProgress(st.total, st.total)
+                    val expected = prefs(context).getLong(PREF_DL_SIZE, 0)
                     val f = destFile(context)
-                    return@withContext if (f.exists() && f.length() > 0) f else null
+                    // 0.9.5：size 校验——半截包/被覆盖的旧包删掉重下，绝不进安装
+                    return@withContext if (isCompleteApk(f, expected)) f
+                    else {
+                        runCatching { f.delete() }
+                        null
+                    }
                 }
                 DownloadManager.STATUS_FAILED -> return@withContext null
                 null -> return@withContext null
