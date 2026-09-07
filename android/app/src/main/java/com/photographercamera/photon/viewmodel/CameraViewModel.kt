@@ -1247,8 +1247,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     var isZooming by mutableStateOf(false)
     val globalMinZoom: Float
         get() = state.value.availableCameras.filter { it.lensType != LensType.FRONT }.minOfOrNull { it.minZoom * it.displayIntrinsicZoomRatio } ?: 1f
-    val globalMaxZoom: Float
+    /** 按当前设备摄像头实际能力算出的原生最大变焦（未叠加数字变焦）。 */
+    val nativeMaxZoom: Float
         get() = state.value.availableCameras.filter { it.lensType != LensType.FRONT }.maxOfOrNull { it.maxZoom * it.displayIntrinsicZoomRatio } ?: 20f
+    /** 最大缩放 = 原生最大摄像头能力 × 2；超出 HAL 上限部分由 SCALER_CROP_REGION 数字变焦兜底。 */
+    val globalMaxZoom: Float
+        get() = nativeMaxZoom * 2f
 
     // 付费弹窗状态
     var showPaymentDialog by mutableStateOf(false)
@@ -5294,7 +5298,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             ownsImage = false
             viewModelScope.launch(Dispatchers.IO) {
-                GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                // Live 视频并行落地：旧逻辑先 await saveVideo（内含最长
+                // LIVE_PHOTO_VIDEO_TIMEOUT_MS 的 deferred 等待）再保存成片，
+                // 导致 live 模式相册缩略图要等视频就绪才刷新。改为并行，
+                // 成片与缩略图优先。
+                val videoSaveJob = async {
+                    GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                }
 
                 GalleryManager.savePhoto(
                     context,
@@ -5316,6 +5326,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     exportDngWithRawExport = exportDngWithRawExport.value,
                     capturePortraitMask = capturePortraitMask,
                 )
+
+                videoSaveJob.await()
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
             _imageSavedEvent.emit(Unit)
@@ -5740,7 +5752,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             viewModelScope.launch(Dispatchers.IO) {
-                GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                // Live 视频并行落地：同上，成片与缩略图优先，不等待视频 deferred。
+                val videoSaveJob = async {
+                    GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                }
 
                 GalleryManager.saveStackedPhoto(
                     context,
@@ -5768,6 +5783,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     rawMaxSpatialOutputMode = rawSpatialOutputMode,
                     rawMaxMergeMethod = rawMaxMergeMethod,
                 )
+
+                videoSaveJob.await()
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
             _imageSavedEvent.emit(Unit)

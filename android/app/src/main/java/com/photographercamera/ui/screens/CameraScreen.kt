@@ -615,22 +615,16 @@ fun CameraScreen(navController: NavController) {
         val fy = topReserve + (slotH - fh)                   // anchor to slot bottom
 
         // ---- inner capture box -----------------------------------------------
-        // photon 预览与成片共用同一 CONTROL_ZOOM_RATIO（Camera2Controller.
-        // applyZoomRequestSettings 预览/拍照同路径），HAL 已按 zoom 裁切出图
-        // → 照片 FOV = 预览全幅 FOV，所见即所得。盒子缩放是纯装饰性的跟手
-        // 反馈：值源与下发同源（zoomState 随 state.zoomRatio 逐帧回流）、
-        // 直驱无插值——旧 spring 的 200-500ms 尾焰与"数字段二次裁切"声称
-        // （该裁切路径已死）是"取景框动画与成像不符"的根因，均已移除。
+        // 取景框表示"实际拍摄画面"：预览 GL 在 >1x 钳到 1x 显示广角静止画面
+        // （见 Camera2Controller.applyZoomRequestSettings forPreview），取景框则按
+        // 1/zoomRatio 缩小，范围与成片 CONTROL_ZOOM_RATIO / SCALER_CROP_REGION 裁切
+        // 完全一致；≤1x 取景框不缩放（预览即拍摄框，所见即所得）。
         val camInfo = state.getCurrentCameraInfo()
         val eqBase = camInfo?.focalLength35mmEquivalent?.takeIf { it in 18f..40f } ?: 26f
-        val fTarget = if (zoomState > 1.001f) {
-            val t = ((zoomState - 1f) / (pvm.globalMaxZoom - 1f).coerceAtLeast(0.001f))
-                .coerceIn(0f, 1f)
-            1f - 0.12f * t
-        } else {
-            1f
-        }
-        val f = fTarget // 直驱：视觉缩放与 Camera2 下发值逐帧一致
+        // 取景框 = 实际拍摄画面：>1x 时缩放到 1/zoomRatio（与 CONTROL_ZOOM_RATIO /
+        // SCALER_CROP_REGION 实际裁切一致——预览 GL 在 >1x 钳到 1x 显示广角，
+        // 故取景框范围即真实裁切范围）；≤1x 不缩放（预览即拍摄框，所见即所得）。
+        val f = if (zoomState > 1.001f) (1f / zoomState) else 1f
         val bw = fw * f
         val bh = fh * f
         val bx = fx + (fw - bw) / 2f
@@ -885,6 +879,13 @@ fun CameraScreen(navController: NavController) {
             onEvClick = { sheetTarget = "EV" },
             onRawToggle = {
                 rawOn = !rawOn
+                if (rawOn) {
+                    // RAW 与动态照片互斥：开启 RAW 时关闭动态照片（避免并发占用相机
+                    // 在部分机型上触发 ERROR_CAMERA_DISABLED 导致无法保存）
+                    liveOn = false
+                    sp.edit().putBoolean("use_live_photo", false).apply()
+                    pvm.setUseLivePhoto(false)
+                }
                 sp.edit().putBoolean("raw_isp_enabled", rawOn).apply()
                 pvm.setUseRaw(rawOn)
                 Toast.makeText(
@@ -908,6 +909,13 @@ fun CameraScreen(navController: NavController) {
             },
             onLiveToggle = {
                 liveOn = !liveOn
+                if (liveOn) {
+                    // 动态照片与 RAW 互斥：开启动态照片时关闭 RAW（避免并发占用相机
+                    // 在部分机型上触发 ERROR_CAMERA_DISABLED 导致无法保存）
+                    rawOn = false
+                    sp.edit().putBoolean("raw_isp_enabled", false).apply()
+                    pvm.setUseRaw(false)
+                }
                 sp.edit().putBoolean("use_live_photo", liveOn).apply()
                 // 0.8.3 实装：驱动 photon 引擎并发录制 + 拍摄链路偏好（DataStore）
                 pvm.setUseLivePhoto(liveOn)

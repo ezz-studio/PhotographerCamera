@@ -293,6 +293,8 @@ class Camera2Controller(private val context: Context) {
     private var cameraDevice: CameraDevice? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
+    // 记录最近一次打开相机使用的预览 SurfaceTexture：相机被系统策略禁用后用于自动重开
+    private var lastOpenSurfaceTexture: android.graphics.SurfaceTexture? = null
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
@@ -1830,6 +1832,40 @@ class Camera2Controller(private val context: Context) {
         setCameraInactive(resetVideoState)
     }
 
+    /**
+     * 相机错误后延时自动重开。
+     *
+     * ERROR_CAMERA_DISABLED / DEVICE / SERVICE 在部分 OEM（如 ColorOS）上会由
+     * 动态照片、视频录制等并发占用相机触发；旧逻辑 canRetry=false 且直接关闭相机，
+     * 使相机永久不可用，后续拍摄被 capture() 的 guard 吞掉。这里延时重开以自恢复。
+     */
+    private fun scheduleCameraRecovery(error: Int) {
+        val handler = cameraHandler
+        val surfaceTexture = lastOpenSurfaceTexture
+        if (handler == null || surfaceTexture == null) {
+            PLog.w(TAG, "Camera recovery skipped: handler=$handler surface=$surfaceTexture")
+            return
+        }
+        val generationAtError = cameraOpenGeneration
+        val delayMs =
+            if (error == CameraDevice.StateCallback.ERROR_CAMERA_DISABLED) 1200L else 800L
+        PLog.w(TAG, "Scheduling camera recovery in ${delayMs}ms after error=$error")
+        handler.postDelayed({
+            if (generationAtError != cameraOpenGeneration) {
+                PLog.d(TAG, "Camera recovery skipped: generation changed")
+                return@postDelayed
+            }
+            if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN ||
+                cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING
+            ) {
+                PLog.d(TAG, "Camera recovery skipped: device already $cameraDeviceLifecycle")
+                return@postDelayed
+            }
+            PLog.w(TAG, "Recovering camera after error=$error")
+            openCamera(surfaceTexture, preserveVideoRecording = false)
+        }, delayMs)
+    }
+
     private fun handleCameraOpenFailure(
         cameraId: String,
         errorCode: Int,
@@ -2044,6 +2080,8 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        // 记住本次预览 SurfaceTexture：ERROR_CAMERA_DISABLED 等错误后自动重开时复用
+        lastOpenSurfaceTexture = surfaceTexture
         pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
@@ -2559,15 +2597,23 @@ class Camera2Controller(private val context: Context) {
                     )
 
                     // 判断是否可以重试
+                    // 0.9.4：相机被系统策略禁用（OEM 常见：动态照片/视频录制并发占用触发）
+                    // 旧逻辑 canRetry=false 且 handleCameraDeviceUnavailable 直接关闭相机
+                    // → 相机永久不可用，后续所有拍摄被 capture() 的 guard 吞掉（表现为
+                    // "普通/RAW 模式点击拍摄无法保存照片"）。这里改为可重试并延时自动重开。
                     val canRetry = when (error) {
                         ERROR_CAMERA_IN_USE,
                         ERROR_MAX_CAMERAS_IN_USE -> true
 
                         ERROR_CAMERA_DISABLED,
                         ERROR_CAMERA_DEVICE,
-                        ERROR_CAMERA_SERVICE -> false
+                        ERROR_CAMERA_SERVICE -> true
 
                         else -> false
+                    }
+
+                    if (canRetry) {
+                        scheduleCameraRecovery(error)
                     }
 
                     // 通知上层
@@ -3710,6 +3756,27 @@ class Camera2Controller(private val context: Context) {
         return kelvin.coerceIn(advertisedRange.lower, advertisedRange.upper)
     }
 
+    /**
+     * 需要反相 COLOR_CORRECTION_COLOR_TEMPERATURE 的 OEM（ColorOS 系）。
+     *
+     * 这些设备的 HAL 与该键的 CDD 语义相反（数值越大画面越暖），表现为色温滑条
+     * "左滑偏蓝、右滑偏黄"。注意只对 CCT 路径反相：MATRIX 路径的增益由本类
+     * kelvinToRggbGains 自行计算（算法与标准一致），不需要也不能反相。
+     */
+    private val invertHalColorTemperature: Boolean by lazy {
+        val manufacturer = Build.MANUFACTURER.orEmpty().lowercase()
+        val brand = Build.BRAND.orEmpty().lowercase()
+        val colorOsVendors = listOf("oppo", "oneplus", "realme")
+        manufacturer in colorOsVendors || brand in colorOsVendors
+    }
+
+    /** CCT 路径下发给 HAL 的色温值（对反相 OEM 做镜像，保证低 K=暖、高 K=冷）。 */
+    private fun halCctKelvin(kelvin: Int): Int {
+        val range = resolveAwbTemperatureRange()
+        val clamped = kelvin.coerceIn(range.lower, range.upper)
+        return if (invertHalColorTemperature) range.lower + range.upper - clamped else clamped
+    }
+
     private fun supportsCctWhiteBalance(): Boolean {
         if (Build.VERSION.SDK_INT < 36) return false
         if (!availableColorCorrectionModes.contains(CameraMetadata.COLOR_CORRECTION_MODE_CCT)) return false
@@ -4224,18 +4291,21 @@ class Camera2Controller(private val context: Context) {
             return
         }
         val range = resolveAwbTemperatureRange()
+        // 对反相 OEM 把滑条色温镜像后再下发，保证"低 K=暖/黄、高 K=冷/蓝"的标准方向
+        val halKelvin = halCctKelvin(state.awbTemperature)
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
         builder.set(CaptureRequest.CONTROL_AWB_LOCK, false)
         builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CameraMetadata.COLOR_CORRECTION_MODE_CCT)
         builder.set(
             CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE,
-            coerceCctAwbTemperature(state.awbTemperature.coerceIn(range.lower, range.upper))
+            coerceCctAwbTemperature(halKelvin.coerceIn(range.lower, range.upper))
         )
         builder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, state.awbTint)
         PLog.d(
             TAG,
-            "WB CCT apply: temp=${state.awbTemperature}K tint=${state.awbTint} " +
-                "path=CCT anchorTint=${anchor.colorTint}"
+            "WB CCT apply: uiTemp=${state.awbTemperature}K halTemp=${halKelvin}K " +
+                "inverted=$invertHalColorTemperature tint=${state.awbTint} " +
+                "path=CCT anchorTint=${anchor.colorTint} range=[${range.lower},${range.upper}]"
         )
     }
 
@@ -4473,7 +4543,9 @@ class Camera2Controller(private val context: Context) {
             val zoomRatioRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             val minZoom = zoomRatioRange?.lower ?: 1f
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
-            val userZoomRatio = state.zoomRatio.coerceIn(minZoom, maxSupportedZoom)
+            // 原生最大 2 倍：超 HAL 上限部分走 SCALER_CROP_REGION 数字变焦
+            val hardMaxZoom = maxSupportedZoom * 2f
+            val userZoomRatio = state.zoomRatio.coerceIn(minZoom, hardMaxZoom)
             val zoomRatio = userZoomRatio
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
@@ -4482,7 +4554,8 @@ class Camera2Controller(private val context: Context) {
                 zoomRatio = zoomRatio,
                 activeRect = activeRect,
                 zoomRatioRange = zoomRatioRange,
-                resetCropAtUnitZoom = false
+                resetCropAtUnitZoom = false,
+                forPreview = !isCapture
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply zoom settings", e)
@@ -4504,20 +4577,27 @@ class Camera2Controller(private val context: Context) {
         zoomRatio: Float,
         activeRect: Rect?,
         zoomRatioRange: android.util.Range<Float>?,
-        resetCropAtUnitZoom: Boolean
+        resetCropAtUnitZoom: Boolean,
+        forPreview: Boolean = false
     ) {
-        if (shouldUseControlZoomRatio(zoomRatioRange)) {
-            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio)
+        // 预览框在 >1x 时钳到 1x（显示广角静止画面），取景框负责表达实际缩放；
+        // 拍照/成片路径用真实 zoomRatio（可超过 HAL CONTROL_ZOOM_RATIO 上限，
+        // 此时回退 SCALER_CROP_REGION 数字变焦，最高到原生 2 倍）。
+        val maxSupportedZoom = zoomRatioRange?.upper ?: Float.MAX_VALUE
+        val effectiveZoom = if (forPreview) minOf(zoomRatio, 1f) else zoomRatio
+
+        if (shouldUseControlZoomRatio(zoomRatioRange) && effectiveZoom <= maxSupportedZoom) {
+            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, effectiveZoom)
             return
         }
 
         activeRect ?: return
-        if (zoomRatio <= 1f && !resetCropAtUnitZoom) return
+        if (effectiveZoom <= 1f && !resetCropAtUnitZoom) return
 
         zoomRatioRange?.let {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
-        builder.set(CaptureRequest.SCALER_CROP_REGION, buildCenteredCropRegion(activeRect, zoomRatio))
+        builder.set(CaptureRequest.SCALER_CROP_REGION, buildCenteredCropRegion(activeRect, effectiveZoom))
     }
 
     private fun shouldUseControlZoomRatio(zoomRatioRange: android.util.Range<Float>?): Boolean {
@@ -5721,12 +5801,15 @@ class Camera2Controller(private val context: Context) {
             val zoomRatioRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             val minZoom = zoomRatioRange?.lower ?: 1f
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
-            val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
+            // 原生最大 2 倍：超过 HAL CONTROL_ZOOM_RATIO 上限的部分由
+            // SCALER_CROP_REGION 数字变焦兜底（applyZoomRequestSettings）。
+            val hardMaxZoom = maxSupportedZoom * 2f
+            val clampedRatio = requestedRatio.coerceIn(minZoom, hardMaxZoom)
             com.photographercamera.core.debug.DebugLog.log(
                 "ZOOM",
                 "ctrl requested=${"%.3f".format(requestedRatio)} open=$openCameraId " +
                     "physOut=$activeOutputPhysicalCameraId range=[${"%.2f".format(minZoom)},${"%.2f".format(maxSupportedZoom)}] " +
-                    "clamped=${"%.3f".format(clampedRatio)}",
+                    "hardMax=${"%.2f".format(hardMaxZoom)} clamped=${"%.3f".format(clampedRatio)}",
             )
 
             _state.value = _state.value.copy(zoomRatio = clampedRatio)
@@ -5743,7 +5826,8 @@ class Camera2Controller(private val context: Context) {
                     zoomRatio = clampedRatio,
                     activeRect = activeRect,
                     zoomRatioRange = zoomRatioRange,
-                    resetCropAtUnitZoom = true
+                    resetCropAtUnitZoom = true,
+                    forPreview = true
                 )
             }
             if (cameraDevice != null && captureSession != null) {
