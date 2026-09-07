@@ -63,8 +63,10 @@ def normalize(text):
 def main():
     dirs = sys.argv[1].split(",") if len(sys.argv) > 1 else DEFAULT_DIRS
     up = json.load(open("_up_tree.json", encoding="utf-8"))
-    targets = [(p[len(UP_PREFIX):], s) for p, s in up
-               if p.startswith(UP_PREFIX) and p[len(UP_PREFIX):].split("/")[0] in dirs]
+    up_tree = up["tree"] if isinstance(up, dict) and "tree" in up else up
+    targets = [(e["path"][len(UP_PREFIX):], e.get("size", 0)) for e in up_tree
+               if e.get("path", "").startswith(UP_PREFIX)
+               and e["path"][len(UP_PREFIX):].split("/")[0] in dirs]
     print("comparing %d files in %s" % (len(targets), ",".join(dirs)))
 
     results = []
