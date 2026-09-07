@@ -455,6 +455,14 @@ class Camera2Controller(private val context: Context) {
     var onImageCaptured: ((SafeImage, CaptureInfo, CameraCharacteristics?, CaptureResult?, CapturedFrameMetadata?) -> Unit)? = null
     var onHdrBracketCaptureFailed: (() -> Unit)? = null
 
+    /**
+     * 多帧（JPGmax / RAWmax）burst 序列终止回调：onCaptureSequenceCompleted 必达锚点。
+     * requested=本次 burst 请求帧数；captured=HAL onCaptureCompleted 的帧数；
+     * failed=HAL onCaptureFailed 的帧数。部分机型 HAL 会拒绝 burst 中的部分/全部帧，
+     * 上层据此把已收到的帧收敛出片或快速失败，避免收帧计数永远凑不齐导致拍摄卡死。
+     */
+    var onMultiFrameSequenceFinished: ((requested: Int, captured: Int, failed: Int) -> Unit)? = null
+
     private fun trackImage(image: Image?): SafeImage? {
         if (image != null) {
             openImagesCount.getAndIncrement()
@@ -7308,6 +7316,22 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * 0.9.6：供上层在多帧收敛失败（HAL 全帧拒绝等）时强制复位拍摄状态，
+     * 避免等待 30s 看门狗且 pending 帧泄漏。
+     */
+    fun forceResetCaptureState(reason: String) {
+        PLog.w(TAG, "Capture state force reset: $reason")
+        com.photographercamera.core.debug.DebugLog.log(
+            "SHOT",
+            "force reset capture state: $reason",
+        )
+        _state.value = _state.value.copy(isCapturing = false)
+        burstGyroRecorder.stop()
+        clearMultiFrameFocusState("force reset: $reason")
+        resetPreviewAfterCapture()
+    }
+
+    /**
      * 拍照
      */
     fun capture() {
@@ -8229,6 +8253,7 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 var completedCaptureCount = 0
+                var failedCaptureCount = 0
                 session.captureBurst(requests, object : CameraCaptureSession.CaptureCallback() {
                     override fun onCaptureStarted(
                         session: CameraCaptureSession,
@@ -8287,6 +8312,27 @@ class Camera2Controller(private val context: Context) {
                         if (completedCaptureCount == 0) {
                             _state.value = _state.value.copy(isCapturing = false)
                         }
+                        // 0.9.6：序列终止必达锚点。HAL 拒绝部分/全部帧时（onCaptureFailed），
+                        // 上层收帧计数永远凑不齐 activeMultiFrameCount → isCapturing 卡死 →
+                        // 后续快门被 guard 吞掉（RAW/JPGmax 两种模式"都拍不出照片"的机制）。
+                        // 把 requested/captured/failed 上报给 VM 做收敛出片或快速失败。
+                        if (currentState.requiresMultiFrameCaptureSequence) {
+                            PLog.i(
+                                TAG,
+                                "Multi-frame sequence end: requested=${requests.size} " +
+                                    "captured=$completedCaptureCount failed=$failedCaptureCount",
+                            )
+                            com.photographercamera.core.debug.DebugLog.log(
+                                "SHOT",
+                                "multi-frame sequence end requested=${requests.size} " +
+                                    "captured=$completedCaptureCount failed=$failedCaptureCount",
+                            )
+                            onMultiFrameSequenceFinished?.invoke(
+                                requests.size,
+                                completedCaptureCount,
+                                failedCaptureCount,
+                            )
+                        }
                         resetPreviewAfterCapture()
                     }
 
@@ -8302,7 +8348,15 @@ class Camera2Controller(private val context: Context) {
                         request: CaptureRequest,
                         failure: CaptureFailure
                     ) {
-                        PLog.e(TAG, "Burst Capture failed: ${failure.reason}")
+                        failedCaptureCount++
+                        // 0.9.6：HAL 拒绝单帧不再静默——失败原因与累计值进 SHOT 远程通道。
+                        // 注意：此回调不做状态复位（上游语义），收敛由
+                        // onCaptureSequenceCompleted → onMultiFrameSequenceFinished 处理。
+                        PLog.e(TAG, "Burst Capture failed: reason=${failure.reason} failed=$failedCaptureCount/${requests.size}")
+                        com.photographercamera.core.debug.DebugLog.log(
+                            "SHOT",
+                            "burst frame FAILED reason=${failure.reason} failed=$failedCaptureCount/${requests.size}",
+                        )
                     }
                 }, cameraHandler)
 

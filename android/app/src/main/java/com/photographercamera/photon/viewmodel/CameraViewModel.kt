@@ -1250,9 +1250,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** 按当前设备摄像头实际能力算出的原生最大变焦（未叠加数字变焦）。 */
     val nativeMaxZoom: Float
         get() = state.value.availableCameras.filter { it.lensType != LensType.FRONT }.maxOfOrNull { it.maxZoom * it.displayIntrinsicZoomRatio } ?: 20f
-    /** 最大缩放 = 原生最大摄像头能力 × 2；超出 HAL 上限部分由 SCALER_CROP_REGION 数字变焦兜底。 */
+    /** 最大缩放 = 最长焦镜头（后置非微距中 displayIntrinsicZoomRatio 最大者）的两倍，如 0.6x/1x/3x → 0.6~6x。 */
     val globalMaxZoom: Float
-        get() = nativeMaxZoom * 2f
+        get() {
+            val telephotoDisplayZoom = state.value.availableCameras
+                .filter { it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO }
+                .maxOfOrNull { it.displayIntrinsicZoomRatio.takeIf { ratio -> ratio > 0f } ?: 0f }
+                ?: 0f
+            // 用户指令：最大倍数=长焦镜头的两倍（3x 长焦 → 6x）。
+            // 无独立长焦镜头（tele <= 1f）的机型回退 HAL 数字变焦上限，保证连续变焦可用。
+            return if (telephotoDisplayZoom > 1f) telephotoDisplayZoom * 2f else nativeMaxZoom
+        }
 
     // 付费弹窗状态
     var showPaymentDialog by mutableStateOf(false)
@@ -1695,6 +1703,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var hasAppliedDefaultFocalLength = false
 
     private val pendingRawStackFrames = mutableListOf<PendingRawStackFrame>()
+    // 0.9.6：多帧 burst 首帧 characteristics 缓存（部分帧被 HAL 拒绝时收敛出片用）
+    private var pendingMultiFrameCharacteristics: CameraCharacteristics? = null
+    private var multiFrameConvergeJob: Job? = null
 
     private val hdrBracketImages = mutableListOf<SafeImage>()
     private var hdrBracketCaptureInfo: CaptureInfo? = null
@@ -1820,6 +1831,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             } else if (state.value.isMultiFrameEnabled) {
                 val count = state.value.activeMultiFrameCount
                 PLog.d(TAG, "Burst frame received: ${pendingRawStackFrames.size + 1}/$count")
+                // 0.9.6：缓存第一帧的 characteristics——burst 部分帧被 HAL 拒绝时的
+                // 收敛出片路径（handleMultiFrameSequenceFinished）需要它传给 processStacking。
+                if (pendingRawStackFrames.isEmpty()) {
+                    pendingMultiFrameCharacteristics = characteristics
+                }
                 pendingRawStackFrames.add(
                     PendingRawStackFrame(
                         frame = rawStackFrame(image, captureResult, frameMetadata),
@@ -1917,6 +1933,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        // 0.9.6：多帧 burst 序列终止收敛——HAL 拒绝部分/全部帧时避免收帧计数
+        // 永远凑不齐导致 isCapturing 卡死（RAW/JPGmax 两模式都拍不出照片的机制）。
+        cameraController.onMultiFrameSequenceFinished = { requested, captured, failed ->
+            handleMultiFrameSequenceFinished(requested, captured, failed)
+        }
         cameraController.onVideoSaved = { uri ->
             if (uri != null) {
                 viewModelScope.launch {
@@ -1938,6 +1959,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             resetExposureCompensationForCameraRestart()
             pendingRawStackFrames.forEach { it.frame.image.close() }
             pendingRawStackFrames.clear()
+            pendingMultiFrameCharacteristics = null
             burstImages.forEach {
                 it.close()
             }
@@ -3010,6 +3032,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 generateThumbnail()
                 // 倒计时结束，拍照
                 cameraController.setCountdownValue(0)
+                // 与立即拍摄分支一致：清理上次拍摄可能遗留的未处理帧，防止跨拍摄状态污染
+                pendingRawStackFrames.forEach { it.frame.image.close() }
+                pendingRawStackFrames.clear()
+                pendingMultiFrameCharacteristics = null
                 if (useLivePhoto.value) {
                     cameraController.setCapturingLivePhoto(true)
                     viewModelScope.launch {
@@ -3024,6 +3050,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             generateThumbnail()
             pendingRawStackFrames.forEach { it.frame.image.close() }
             pendingRawStackFrames.clear()
+            pendingMultiFrameCharacteristics = null
 
             if (useLivePhoto.value) {
                 cameraController.setCapturingLivePhoto(true)
@@ -5536,6 +5563,64 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    /**
+     * 0.9.6：多帧（JPGmax / RAWmax）burst 序列终止收敛。
+     * Controller 在 onCaptureSequenceCompleted（必达锚点）上报 requested/captured/failed。
+     * 正常路径（帧数收齐 → processStacking）不受影响；这里只处理 HAL 拒绝帧导致的
+     * 缺帧场景：延迟 2s 等最后在途图像交付后，按已收帧数收敛——
+     * 有部分帧 → 跳过曝光规划直接出片（画质略降但保证成片）；
+     * 无任何帧 → 快速失败复位拍摄状态（不等 30s 看门狗）。
+     */
+    private fun handleMultiFrameSequenceFinished(requested: Int, captured: Int, failed: Int) {
+        if (requested <= 0) return
+        multiFrameConvergeJob?.cancel()
+        multiFrameConvergeJob = viewModelScope.launch {
+            // 序列完成回调先于最后一帧 ImageReader 交付（HAL 填 buffer 为异步），
+            // 延迟给在途图像留时间；期间若正常路径收齐帧，本 job 已被取消或直接退出。
+            delay(2_000L)
+            val pendingCount = pendingRawStackFrames.size
+            if (pendingCount >= requested) return@launch
+            if (pendingCount == 0) {
+                if (captured > 0) {
+                    // 有 captured 计数但一帧都没进回调：图像交付异常，仍需复位防卡死
+                    PLog.e(
+                        TAG,
+                        "Multi-frame sequence ended without deliverable frames: " +
+                            "requested=$requested captured=$captured failed=$failed",
+                    )
+                }
+                cameraController.forceResetCaptureState(
+                    "multi-frame sequence no frames (requested=$requested captured=$captured failed=$failed)",
+                )
+                return@launch
+            }
+            PLog.w(
+                TAG,
+                "Multi-frame sequence incomplete, converging with partial frames: " +
+                    "requested=$requested captured=$captured failed=$failed pending=$pendingCount",
+            )
+            val buffered = pendingRawStackFrames.toList()
+            pendingRawStackFrames.clear()
+            val reference = buffered.firstOrNull()
+            if (reference == null) {
+                // 类型上不可达（pendingCount > 0 保证 buffered 非空），防御兜底仍需关图防泄漏
+                buffered.forEach { runCatching { it.frame.image.close() } }
+                cameraController.forceResetCaptureState("multi-frame converge: no reference frame")
+                return@launch
+            }
+            val characteristics = pendingMultiFrameCharacteristics
+            pendingMultiFrameCharacteristics = null
+            processStacking(
+                frames = buffered.map { it.frame },
+                captureInfo = reference?.captureInfo ?: return@launch,
+                characteristics = characteristics,
+                captureResult = reference?.captureResult,
+                rawMaxHdrFusionEnabled = state.value.isHdrPlusBracketExposureEnabled,
+                capturePortraitMask = consumeCapturePortraitMask(),
+            )
+        }
+    }
+
     private suspend fun processStacking(
         frames: List<RawStackFrame>,
         captureInfo: CaptureInfo,
@@ -5752,39 +5837,46 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             viewModelScope.launch(Dispatchers.IO) {
-                // Live 视频并行落地：同上，成片与缩略图优先，不等待视频 deferred。
-                val videoSaveJob = async {
-                    GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                try {
+                    // Live 视频并行落地：同上，成片与缩略图优先，不等待视频 deferred。
+                    val videoSaveJob = async {
+                        GalleryManager.saveVideo(context, photoId, livePhotoVideoDeferred)
+                    }
+
+                    GalleryManager.saveStackedPhoto(
+                        context,
+                        photoId,
+                        images,
+                        rotation,
+                        aspectRatio,
+                        characteristics,
+                        captureResult,
+                        shouldAutoSave,
+                        contentRepository.photoProcessor,
+                        sharpeningValue,
+                        noiseReductionValue,
+                        chromaNoiseReductionValue,
+                        photoQualityValue,
+                        useSuperResolution = useSuperRes,
+                        superResolutionScale = superResScale,
+                        exposureBias = captureExposureBias,
+                        captureExposureCompensationEv = captureExposureCompensationEv,
+                        exportDngWithRawExport = exportDngWithRawExport.value,
+                        capturePreviewThumbnail = previewThumbnail,
+                        capturePortraitMask = capturePortraitMask,
+                        rawStackFrames = frames,
+                        rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
+                        rawMaxSpatialOutputMode = rawSpatialOutputMode,
+                        rawMaxMergeMethod = rawMaxMergeMethod,
+                    )
+
+                    videoSaveJob.await()
+                } catch (e: Exception) {
+                    // 0.9.6 加固：保存异常不得逃逸 IO 协程（击穿全局 handler = 闪退），
+                    // 且必须关图防泄漏——泄漏会卡死 onImageRelease 的复位链，让 isCapturing 永久 true
+                    PLog.e(TAG, "Failed to save stacked photo", e)
+                    images.forEach { runCatching { it.close() } }
                 }
-
-                GalleryManager.saveStackedPhoto(
-                    context,
-                    photoId,
-                    images,
-                    rotation,
-                    aspectRatio,
-                    characteristics,
-                    captureResult,
-                    shouldAutoSave,
-                    contentRepository.photoProcessor,
-                    sharpeningValue,
-                    noiseReductionValue,
-                    chromaNoiseReductionValue,
-                    photoQualityValue,
-                    useSuperResolution = useSuperRes,
-                    superResolutionScale = superResScale,
-                    exposureBias = captureExposureBias,
-                    captureExposureCompensationEv = captureExposureCompensationEv,
-                    exportDngWithRawExport = exportDngWithRawExport.value,
-                    capturePreviewThumbnail = previewThumbnail,
-                    capturePortraitMask = capturePortraitMask,
-                    rawStackFrames = frames,
-                    rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
-                    rawMaxSpatialOutputMode = rawSpatialOutputMode,
-                    rawMaxMergeMethod = rawMaxMergeMethod,
-                )
-
-                videoSaveJob.await()
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
             _imageSavedEvent.emit(Unit)
@@ -6337,6 +6429,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 清理未处理的连拍图片
         pendingRawStackFrames.forEach { it.frame.image.close() }
         pendingRawStackFrames.clear()
+        pendingMultiFrameCharacteristics = null
         burstImages.forEach {
             it.close()
         }

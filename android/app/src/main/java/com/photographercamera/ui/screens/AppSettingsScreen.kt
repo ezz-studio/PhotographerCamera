@@ -48,9 +48,11 @@ import com.photographercamera.core.debug.DebugLog
 import com.photographercamera.core.profile.ProfileLoader
 import com.photographercamera.photon.camera.CameraInfo
 import com.photographercamera.photon.camera.LensType
+import com.photographercamera.photon.camera.MultiFrameConfig
 import com.photographercamera.photon.data.VolumeKeyAction
 import com.photographercamera.photon.viewmodel.CameraViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 // 与 CameraScreen 一致的暗色观感
 private val SettingsBg = Color(0xFF121212)
@@ -191,7 +193,7 @@ fun AppSettingsScreen(
                 // ---- 顶级分组入口 ------------------------------------------------
                 SectionLabel("拍摄")
                 SettingsCard {
-                    NavRow("拍摄", "快门声音 · 震动 · 音量键 · 保存地址位置") { page = SettingsPage.CAPTURE }
+                    NavRow("拍摄", "快门声音 · 震动 · 音量键 · 多帧帧数 · 保存地址位置") { page = SettingsPage.CAPTURE }
                 }
                 SectionLabel("对焦与镜头")
                 SettingsCard {
@@ -260,6 +262,75 @@ fun AppSettingsScreen(
                         sp.edit().putBoolean("save_location", false).apply()
                         photonVm?.setSaveLocation(false)
                     }
+                }
+                // 0.9.6：多帧帧数（上游 SettingsScreen 同款滑杆，VM StateFlow 实时订阅 + DataStore 持久化）
+                val jpgFrameFlow = photonVm?.jpgMultiFrameDenoiseFrameCount?.collectAsState()
+                var jpgFrameDrag by remember { mutableStateOf<Int?>(null) }
+                val jpgFrameCount = jpgFrameDrag
+                    ?: jpgFrameFlow?.value
+                    ?: MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT
+                Column(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("JPG max 帧数", color = TextPrimary, fontSize = 14.sp)
+                            Text(
+                                "多帧降噪合成张数（越大噪点越低、拍摄越慢）",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        Text(
+                            "$jpgFrameCount",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        )
+                    }
+                    Slider(
+                        value = jpgFrameCount.toFloat(),
+                        onValueChange = { jpgFrameDrag = it.roundToInt() },
+                        onValueChangeFinished = {
+                            jpgFrameDrag?.let { v -> photonVm?.setJpgMultiFrameDenoiseFrameCount(v) }
+                            jpgFrameDrag = null
+                        },
+                        valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
+                            MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
+                        steps = MultiFrameConfig.MAX_FRAME_COUNT - MultiFrameConfig.MIN_DENOISE_FRAME_COUNT - 1,
+                    )
+                }
+                val hdrFrameFlow = photonVm?.hdrPlusFrameCount?.collectAsState()
+                var hdrFrameDrag by remember { mutableStateOf<Int?>(null) }
+                val hdrFrameCount = hdrFrameDrag
+                    ?: hdrFrameFlow?.value
+                    ?: MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT
+                Column(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("HDR+ 帧数", color = TextPrimary, fontSize = 14.sp)
+                            Text(
+                                "RAW max / HDR+ 合成张数（越大动态范围越高）",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        Text(
+                            "$hdrFrameCount",
+                            color = Accent,
+                            fontSize = 14.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        )
+                    }
+                    Slider(
+                        value = hdrFrameCount.toFloat(),
+                        onValueChange = { hdrFrameDrag = it.roundToInt() },
+                        onValueChangeFinished = {
+                            hdrFrameDrag?.let { v -> photonVm?.setHdrPlusFrameCount(v) }
+                            hdrFrameDrag = null
+                        },
+                        valueRange = MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT.toFloat()..
+                            MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
+                        steps = MultiFrameConfig.MAX_FRAME_COUNT - MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT - 1,
+                    )
                 }
             }
 
