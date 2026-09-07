@@ -98,6 +98,10 @@ class Camera2Controller(private val context: Context) {
         private const val BURST_CAPTURE_BATCH_SIZE = 8
         private const val HDR_BRACKET_BASE_CAPTURE_COUNT = 3
         private const val HDR_BRACKET_SIDE_FRAME_COUNT = 2
+        // 0.9.6：多帧 reader 余量。零余量（maxImages == 帧数）下 HAL 拒帧或交付节奏
+        // 稍有抖动即触发 canAcquireImage 溢出丢帧，是断帧死锁的放大器；同时覆盖
+        // JPGmax(5)↔RAWmax(3) 切换时 reader 不重建的容量错配。
+        private const val READER_MULTI_FRAME_MARGIN_IMAGES = 2
 
         // 拍照状态机常量
         private const val STATE_PREVIEW = 0 // Showing camera preview.
@@ -689,7 +693,7 @@ class Camera2Controller(private val context: Context) {
                 multiFrameCount + HDR_BRACKET_SIDE_FRAME_COUNT
 
             currentState.isMultiFrameEnabled ->
-                multiFrameCount
+                multiFrameCount + READER_MULTI_FRAME_MARGIN_IMAGES
 
             else -> BURST_CAPTURE_BATCH_SIZE
         }

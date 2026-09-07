@@ -1155,18 +1155,33 @@ class CameraDiscovery(private val context: Context) {
     }
 
     /**
-     * 获取设备默认35mm等效焦距（主摄）
+     * 获取设备默认35mm等效焦距（主摄基准）。
+     *
+     * 0.9.6 修复：不能用"第一个后置镜头"——摄像头枚举顺序无 API 保证，若首个为
+     * 超广角/微距，全部 intrinsicZoomRatio 将整体偏移（如真 6x 被当成 10.4x）。
+     * 改为取该面全部镜头 35mm 等效的**中位数**（主摄几乎总是中位数成员）：
+     * 对正常枚举机型结果与旧逻辑一致，对异常枚举顺序机型从错变对。
      */
     private fun getDefault35mmEquivalent(lensFacing: Int): Float {
         try {
-            for (cameraId in getRawCameraIdList()) {
-                val characteristics = getCameraCharacteristics(cameraId)
-                val facing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: continue
+            val equivalents = getRawCameraIdList()
+                .mapNotNull { cameraId ->
+                    val characteristics = getCameraCharacteristics(cameraId)
+                    val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                    if (facing == lensFacing) get35mmEquivalentFocalLength(characteristics) else null
+                }
+                .filter { it > 0f }
+            if (equivalents.isEmpty()) return 0f
 
-                if (facing != lensFacing) continue
-
-                return get35mmEquivalentFocalLength(characteristics)
+            val sorted = equivalents.sorted()
+            val median = if (sorted.size % 2 == 1) {
+                sorted[sorted.size / 2]
+            } else {
+                (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2f
             }
+            // 中位数可能落在两镜头之间，须对应到真实镜头（平手时取较低者=下中位，
+            // 与业界镜头群围绕主摄对称布局一致）
+            return sorted.minByOrNull { kotlin.math.abs(it - median) } ?: 0f
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to get default focal length", e)
         }
