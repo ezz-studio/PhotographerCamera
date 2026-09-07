@@ -7,6 +7,13 @@
 -keep class com.photographercamera.core.** { *; }
 -keep class com.photographercamera.app.** { *; }
 
+# Engine chain (com.photographercamera.photon.**) and UI (ui.**) must survive R8:
+# 1) the engine round-trips recipes/presets through Gson (reflective, field-name
+#    based) — obfuscated field names would silently corrupt JSON payloads and
+#    break the core.photon.color <-> photon.model JSON bridge;
+# 2) native code (libmy-native-lib) resolves JVM callbacks by name.
+-keep class com.photographercamera.** { *; }
+
 # kotlinx.serialization
 -keepclassmembers class kotlin.Metadata { *; }
 -keep,includedescriptorclasses class com.photographercamera.core.profile.**$$serializer { *; }

@@ -418,6 +418,8 @@ fun CameraScreen(navController: NavController) {
                         filmCurveShadowFloor = mapping.residual.filmCurveShadowFloor,
                         filmCurveHighlightCeiling = mapping.residual.filmCurveHighlightCeiling,
                         colorMatrix3x3 = mapping.residual.colorMatrix3x3,
+                        // 0.9.2：film_curve 消费端门控标记（默认端点非恒等，须显式区分）
+                        profileActive = true,
                     )
                 pvm.setLut(lutId)
             } catch (t: Throwable) {

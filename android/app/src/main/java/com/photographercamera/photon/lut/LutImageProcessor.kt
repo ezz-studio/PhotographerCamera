@@ -943,7 +943,13 @@ class LutImageProcessor(context: Context? = null) {
         val lowRes = effectiveRecipeParams?.lowRes ?: 0f
         val intensity = effectiveRecipeParams?.lutIntensity ?: 1f
         val lchAdjustments = ColorRecipeGl.lchAdjustments(effectiveRecipeParams)
-        val primaryCalibrationMatrix = CameraRawCalibrationMatrix.build(effectiveRecipeParams)
+        // 0.9.2：profile.color_matrix 接线——与传感器校准矩阵复合（校准先行、
+        // profile 矩阵后乘）。shader 端 applyPrimaryCalibration 的
+        // uPrimaryCalibrationMatrix * v 列向量语义等价桌面端 rgb @ M.T；
+        // profile 未注入时为单位阵，复合结果与原校准逐字节一致。
+        val primaryCalibrationMatrix =
+            com.photographercamera.core.photon.color.FilmParamsStore
+                .composeWithProfileColorMatrix(CameraRawCalibrationMatrix.build(effectiveRecipeParams))
         val program = shaderProgram
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
         GLES30.glViewport(0, 0, width, height)
@@ -1044,13 +1050,24 @@ class LutImageProcessor(context: Context? = null) {
         }
 
         // 设置曲线纹理（Unit 3）
+        // 0.9.2：profile.film_curve 接线——把 assets/shaders/film_curve.frag 的
+        // pc_film_curve（= 桌面端 apply_film_curve，链序 shadow → film curve → tone curve）
+        // 作为曲线 LUT 复合链的输入侧：master(channel(film(x)))。仅 profile 注入时生效
+        //（FilmParamsStore 默认端点 8/248 非恒等，须用 profileActive 门控），
+        // 未注入时 filmFloor/Ceiling 为 null，烘焙结果与原实现逐字节一致。
+        val filmParams = com.photographercamera.core.photon.color.FilmParamsStore.current
+        val filmFloor = if (filmParams.profileActive) filmParams.filmCurveShadowFloor else null
+        val filmCeiling = if (filmParams.profileActive) filmParams.filmCurveHighlightCeiling else null
+        val filmCurveActive = filmFloor != null && filmCeiling != null &&
+            CurveUtils.buildFilmCurveLut(filmFloor, filmCeiling) != null
         val masterPts = effectiveRecipeParams?.masterCurvePoints
         val redPts = effectiveRecipeParams?.redCurvePoints
         val greenPts = effectiveRecipeParams?.greenCurvePoints
         val bluePts = effectiveRecipeParams?.blueCurvePoints
-        val curveActive = !CurveUtils.isIdentity(masterPts, redPts, greenPts, bluePts)
+        val curveActive = !CurveUtils.isIdentity(masterPts, redPts, greenPts, bluePts) || filmCurveActive
         if (curveActive) {
-            val curveBuffer = CurveUtils.buildCurveTextureBuffer(masterPts, redPts, greenPts, bluePts)
+            val curveBuffer =
+                CurveUtils.buildCurveTextureBuffer(masterPts, redPts, greenPts, bluePts, filmFloor, filmCeiling)
             curveTextureId = ColorRecipeGl.ensureCurveTextureUploaded(curveTextureId, curveBuffer)
         }
         GLES30.glActiveTexture(GLES30.GL_TEXTURE3)

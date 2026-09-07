@@ -73,18 +73,30 @@ object CurveUtils {
 
     /**
      * 构建 256×1 RGBA8 ByteBuffer 供 GPU 上传
-     * 每通道 = masterCurve(channelCurve(x))
+     * 每通道 = masterCurve(channelCurve(filmCurve(x)))
+     *
+     * 0.9.2：filmCurveShadowFloor/HighlightCeiling 为 profile.film_curve 端点
+     * （0-255 显示电平）。桌面端权威链序中 film curve 位于 shadow 之后、tone
+     * curve 之前，故作为复合链的输入侧最先应用。端点为 null 或中性时行为与
+     * 原实现完全一致（逐字节相同）。
      */
     fun buildCurveTextureBuffer(
         masterPoints: FloatArray?,
         redPoints: FloatArray?,
         greenPoints: FloatArray?,
-        bluePoints: FloatArray?
+        bluePoints: FloatArray?,
+        filmCurveShadowFloor: Float? = null,
+        filmCurveHighlightCeiling: Float? = null,
     ): ByteBuffer {
         val masterLut = evaluateCurve(masterPoints)
-        val redLut   = composeLuts(evaluateCurve(redPoints),   masterLut)
-        val greenLut = composeLuts(evaluateCurve(greenPoints), masterLut)
-        val blueLut  = composeLuts(evaluateCurve(bluePoints),  masterLut)
+        val filmLut = if (filmCurveShadowFloor != null && filmCurveHighlightCeiling != null) {
+            buildFilmCurveLut(filmCurveShadowFloor, filmCurveHighlightCeiling)
+        } else {
+            null
+        }
+        val redLut   = applyFilmCurveLut(filmLut, composeLuts(evaluateCurve(redPoints),   masterLut))
+        val greenLut = applyFilmCurveLut(filmLut, composeLuts(evaluateCurve(greenPoints), masterLut))
+        val blueLut  = applyFilmCurveLut(filmLut, composeLuts(evaluateCurve(bluePoints),  masterLut))
 
         val buffer = ByteBuffer.allocateDirect(LUT_SIZE * 4)
         for (i in 0 until LUT_SIZE) {
@@ -96,6 +108,42 @@ object CurveUtils {
         buffer.rewind()
         return buffer
     }
+
+    /**
+     * pc_film_curve（assets/shaders/film_curve.frag 与桌面端
+     * profile_renderer.apply_film_curve 的 CPU 复刻）。
+     *
+     * floor/ceiling 为 0-255 显示电平。lo = floor/255 钳制到 [0, 0.4]，
+     * hi = ceiling/255 钳制到 [0.6, 1]；双膝 soft-knee：阴影端 flat@lo、
+     * slope 1@kt（kt = lo+0.13 钳制到 [0.04, 0.45]）；高光端 slope 1@kh
+     * （kh = hi-0.17 钳制到 [0.55, 0.97]）、flat@hi。
+     * 端点中性（floor<=0 且 ceiling>=255）时返回 null（filmEnabled=false）。
+     */
+    fun buildFilmCurveLut(shadowFloor: Float, highlightCeiling: Float): FloatArray? {
+        if (shadowFloor <= 0f && highlightCeiling >= 255f) return null
+        val lo = (shadowFloor / 255f).coerceIn(0f, 0.4f)
+        val hi = (highlightCeiling / 255f).coerceIn(0.6f, 1f)
+        val kt = (lo + 0.13f).coerceIn(0.04f, 0.45f)
+        val kh = (hi - 0.17f).coerceIn(0.55f, 0.97f)
+        return FloatArray(LUT_SIZE) { i ->
+            val x = i / (LUT_SIZE - 1f)
+            when {
+                x < kt -> {
+                    val t = x / kt.coerceAtLeast(1e-4f)
+                    (lo + (kt - lo) * t * t * (2f - t)).coerceIn(0f, 1f)
+                }
+                x > kh -> {
+                    val t = (x - kh) / (1f - kh).coerceAtLeast(1e-4f)
+                    (kh + (hi - kh) * t * (1f + t - t * t)).coerceIn(0f, 1f)
+                }
+                else -> x
+            }
+        }
+    }
+
+    /** film 曲线作为复合链输入侧：output = tail[film[i]]；film 为 null 时原样返回。 */
+    private fun applyFilmCurveLut(filmLut: FloatArray?, tail: FloatArray): FloatArray =
+        if (filmLut == null) tail else composeLuts(filmLut, tail)
 
     // ────────────────────────── 内部实现 ──────────────────────────
 

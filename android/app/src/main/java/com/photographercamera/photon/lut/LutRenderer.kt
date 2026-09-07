@@ -952,7 +952,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             GLES30.glUniform1f(locations.uGradingBalanceLocation, params.gradingBalance)
             GLES30.glUniform1f(locations.uGradingBlendingLocation, params.gradingBlending)
             val lch = ColorRecipeGl.lchAdjustments(params)
-            val primaryCalibrationMatrix = CameraRawCalibrationMatrix.build(params)
+            // 0.9.2：profile.color_matrix 复合进校准矩阵（与成片端 LutImageProcessor
+            // 同源，见 FilmParamsStore.composeWithProfileColorMatrix）
+            val primaryCalibrationMatrix =
+                com.photographercamera.core.photon.color.FilmParamsStore
+                    .composeWithProfileColorMatrix(CameraRawCalibrationMatrix.build(params))
             ColorRecipeGl.bindLchAdjustments(
                 locations.uLchHueAdjustmentsLocation,
                 locations.uLchChromaAdjustmentsLocation,
@@ -3756,6 +3760,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val lch = ColorRecipeGl.lchAdjustments(params)
         setLchAdjustments(lch.hue, lch.chroma, lch.lightness)
         // 更新曲线纹理
+        // 0.9.2：profile.film_curve 接线（与成片端 LutImageProcessor 同源）——
+        // film 曲线作为通道曲线复合的输入侧最先应用，仅 profile 注入时生效。
+        val filmParams = com.photographercamera.core.photon.color.FilmParamsStore.current
+        val filmFloor = if (filmParams.profileActive) filmParams.filmCurveShadowFloor else null
+        val filmCeiling = if (filmParams.profileActive) filmParams.filmCurveHighlightCeiling else null
+        val filmCurveActive = filmFloor != null && filmCeiling != null &&
+            CurveUtils.buildFilmCurveLut(filmFloor, filmCeiling) != null
         val masterPts = params.masterCurvePoints
         val redPts = params.redCurvePoints
         val greenPts = params.greenCurvePoints
@@ -3764,9 +3775,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         redCurvePoints = redPts
         greenCurvePoints = greenPts
         blueCurvePoints = bluePts
-        curveEnabled = !CurveUtils.isIdentity(masterPts, redPts, greenPts, bluePts)
+        curveEnabled = !CurveUtils.isIdentity(masterPts, redPts, greenPts, bluePts) || filmCurveActive
         if (curveEnabled) {
-            pendingCurveBuffer = CurveUtils.buildCurveTextureBuffer(masterPts, redPts, greenPts, bluePts)
+            pendingCurveBuffer =
+                CurveUtils.buildCurveTextureBuffer(masterPts, redPts, greenPts, bluePts, filmFloor, filmCeiling)
         } else {
             pendingCurveBuffer = null
         }

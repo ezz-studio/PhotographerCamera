@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Single source of truth for the app version: defaultConfig.versionName AND the
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
-val APP_VERSION_NAME = "0.9.1"
-val APP_VERSION_CODE = 31
+val APP_VERSION_NAME = "0.9.2"
+val APP_VERSION_CODE = 32
 
 plugins {
     id("com.android.application")
@@ -51,6 +51,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 0.9.1: publish via the debug key (same signing identity as the
+            // installed debug builds) so minified release APKs can sideload and
+            // update in place. Swap to a dedicated release keystore before any
+            // public store distribution.
+            signingConfig = signingConfigs.getByName("debug")
             // The 15-layer GLSL chain + baked LUTs must survive R8.
             // AGP 8.x types debugSymbolLevel as a String ("SYMBOL_TABLE" | "FULL" |
             // null); the enum form only exists in newer AGP majors.
