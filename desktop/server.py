@@ -178,11 +178,12 @@ class _LogSink:
         pass
 
 
-def _run_generate(job: dict, images_root: str, name: str, out_dir: str) -> None:
+def _run_generate(job: dict, images_root: str, name: str, out_dir: str,
+                  validation_root: str | None = None) -> None:
     try:
         os.makedirs(out_dir, exist_ok=True)
         with contextlib.redirect_stdout(_LogSink(job)):
-            profile = B.build(images_root, name, out_dir)
+            profile = B.build(images_root, name, out_dir, validation_root=validation_root)
         job["log"] += f"\n[{time.strftime('%H:%M:%S')}] build() returned\n"
         reports = {}
         for fn in ("validation_report.json", "optimization_report.json",
@@ -383,6 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not src or not os.path.isdir(src):
                     return self._json({"error": f"invalid source dir: {src}"}, 400)
                 name = str(body.get("name") or "Photographer (studio)")
+                validation_dir = body.get("validation_dir") or None
                 out_rel = str(body.get("outdir") or f"profiles/studio_{time.strftime('%Y%m%d_%H%M%S')}")
                 out_dir = out_rel if os.path.isabs(out_rel) else os.path.join(WORK, out_rel)
                 jid = uuid.uuid4().hex[:12]
@@ -390,7 +392,8 @@ class Handler(BaseHTTPRequestHandler):
                        "result": None, "kind": "generate", "started": time.time()}
                 with _LOCK:
                     STATE["jobs"][jid] = job
-                threading.Thread(target=_run_generate, args=(job, src, name, out_dir),
+                threading.Thread(target=_run_generate,
+                                 args=(job, src, name, out_dir, validation_dir),
                                  daemon=True).start()
                 return self._json({"job": jid})
 

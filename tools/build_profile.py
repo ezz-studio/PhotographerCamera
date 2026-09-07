@@ -53,7 +53,8 @@ def load_images(root, limit=None, size=256):
     return imgs, n_total
 
 
-def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: str = "dataset/analysis"):
+def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: str = "dataset/analysis",
+          validation_root: str | None = None) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(analysis_dir, exist_ok=True)
 
@@ -71,10 +72,23 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
     imgs, n_total = load_images(images_root)
     split = profile_validator.split_dataset(len(imgs), seed=42)
     train_val = [imgs[i] for i in (split["train"] + split["validation"])]
-    test = [imgs[i] for i in split["test"]]
-    print(f"  数据切分: 训练 {len(split['train'])} 张 + 验证 {len(split['validation'])} 张"
-          f"（两者共同参与优化，共 {len(train_val)} 张）")
-    print(f"  对照集（留出测试，不参与任何拟合）: {len(test)} 张")
+    if validation_root and os.path.isdir(validation_root):
+        _vpaths = discover_images(validation_root)
+        if _vpaths:
+            print(f"  验证集：使用独立「未调色普通照片」目录 -> {validation_root}（{len(_vpaths)} 张）")
+            test = [np.asarray(Image.open(p).convert("RGB"), dtype=np.float32) / 255.0
+                    for p in _vpaths]
+            val_mode = "ungraded-photos"
+        else:
+            print("  普通照片目录为空，回退到旧逻辑（从参考片随机留出）")
+            test = [imgs[i] for i in split["test"]]
+            val_mode = "legacy-split"
+    else:
+        print("  验证集：未提供普通照片目录，沿用旧逻辑（从参考片随机留出；"
+              "已调色图作验证对象会把风格二次叠加，偏差被放大）")
+        test = [imgs[i] for i in split["test"]]
+        val_mode = "legacy-split"
+    print(f"  对照集（留出，不参与拟合）: {len(test)} 张（模式={val_mode}）")
     prof_final, opt_report = profile_optimizer.optimize(prof_v1, train_val)
     with open(os.path.join(out_dir, "optimization_report.json"), "w", encoding="utf-8") as f:
         json.dump(opt_report, f, indent=2, ensure_ascii=False)
@@ -82,7 +96,18 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
     print("[4/5] Validate on held-out test set (Phase 18) ...")
     # NOTE: validate() stamps profile["validation_status"] in place, so the
     # profile MUST be written to disk AFTER this call, never before.
-    val_report = profile_validator.validate(prof_final, test)
+    # Style centroid from the GRADED reference set (train_val) — the TARGET the
+    # profile should reproduce on neutral content. Comparing render(neutral) to a
+    # FIXED centroid (instead of to each test image's own already-graded features)
+    # removes the double-grading artifact that previously inflated the loss: applying
+    # the look onto an already-graded photo and comparing it back to that same graded
+    # photo is meaningless. Now validation measures "does render(neutral) land near
+    # the photographer's graded style?" — the real generalization check.
+    from loss_function import extract_features
+    style_target = profile_validator.average_features(
+        [extract_features(im) for im in train_val])
+    val_report = profile_validator.validate(prof_final, test, target_features=style_target)
+    val_report["validation_mode"] = val_mode
     # Surface the dataset accounting in the report so the Studio UI (and any
     # downstream audit) can see exactly how many photos did what.
     val_report["dataset"] = {
@@ -117,8 +142,12 @@ def main(argv=None) -> int:
     p.add_argument("--name", default="Photographer (auto)")
     p.add_argument("--out", default="profiles")
     p.add_argument("--analysis", default="dataset/analysis")
+    p.add_argument("--validation", default=None,
+                   help="directory of ordinary UN-GRADED photos for held-out validation "
+                        "(avoids double-grading the already-graded reference set)")
     args = p.parse_args(argv)
-    build(args.images_root, args.name, args.out, args.analysis)
+    build(args.images_root, args.name, args.out, args.analysis,
+          validation_root=args.validation)
     return 0
 
 

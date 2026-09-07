@@ -45,21 +45,59 @@ def _aggregate(records: List[dict]) -> Dict:
     return out
 
 
+def average_features(records: List[dict]) -> Dict:
+    """Mean-pool a list of extract_features() dicts into a single style centroid.
+
+    Scalars are averaged directly; the 'hist' field is a fixed-length array and is
+    averaged element-wise. Used to build the held-out validation TARGET from the
+    photographer's GRADED reference set, so validation measures whether the profile
+    correctly imposes the style on *un-graded* photos instead of double-grading an
+    already-graded image (which spuriously inflates the loss).
+    """
+    if not records:
+        raise ValueError("cannot average an empty feature list")
+    keys = [k for k in records[0].keys() if k != "hist"]
+    out = {k: float(np.mean([r[k] for r in records])) for k in keys}
+    hists = [np.asarray(r["hist"], dtype=np.float64) for r in records]
+    out["hist"] = np.mean(hists, axis=0)
+    return out
+
+
 # AGENTS.md gate: a profile may only ship to the Android renderer when its
 # held-out test loss is below this threshold (mirrors the test-suite assertion).
 VALIDATED_LOSS_THRESHOLD = 1.0
 
 
 def validate(profile: dict, test_imgs: List[np.ndarray], weights: dict | None = None,
-             loss_threshold: float = VALIDATED_LOSS_THRESHOLD, verbose: bool = True) -> Dict:
+             loss_threshold: float = VALIDATED_LOSS_THRESHOLD, verbose: bool = True,
+             target_features: dict | None = None) -> Dict:
+    """Validate *profile* on a held-out *test_imgs* set.
+
+    target_features: when provided (recommended), every test image is rendered and
+    compared against this FIXED style centroid — the proper "does the profile impose
+    the right look on neutral content" check. The test set should then be ordinary,
+    UN-GRADED photos, so render() is not applied on top of an already-graded image
+    (which would double-grade and inflate the loss). When None (legacy mode), the
+    target is each image's own features (original-vs-simulated), retained for
+    backwards compatibility with the CLI / regression tests.
+    """
+    if not test_imgs:
+        profile["validation_status"] = "pending"
+        return {
+            "schema": "validation_report/v1",
+            "validation_target": "style-centroid" if target_features is not None else "legacy-self",
+            "n_test": 0, "overall_test_loss": None, "loss_threshold": loss_threshold,
+            "validation_status": "pending", "components": {}, "per_image": [],
+        }
     per_image = []
     n = len(test_imgs)
+    mode = "style-centroid" if target_features is not None else "legacy-self"
     if verbose and n:
-        print(f"  留出验证: 共 {n} 张对照照片（不参与拟合，纯对照）", flush=True)
+        print(f"  留出验证: 共 {n} 张对照照片（目标模式={mode}）", flush=True)
     # milestone progress every ~20% for meaningful-size sets; single line for tiny sets
     step = max(1, n // 5) if n >= 10 else n
     for i, img in enumerate(test_imgs, 1):
-        tgt = extract_features(img)
+        tgt = target_features if target_features is not None else extract_features(img)
         sim = extract_features(render(img, profile))
         _l, brk = loss(tgt, sim, weights)
         per_image.append(brk)
@@ -72,6 +110,7 @@ def validate(profile: dict, test_imgs: List[np.ndarray], weights: dict | None = 
     )
     return {
         "schema": "validation_report/v1",
+        "validation_target": mode,
         "n_test": len(test_imgs),
         "overall_test_loss": overall,
         "loss_threshold": loss_threshold,

@@ -341,10 +341,9 @@ fun CameraScreen(navController: NavController) {
 
     // Live QuickControl adjustments (WB / Grain) applied on top of the chosen preset.
     var sheetTarget by remember { mutableStateOf<String?>(null) }
-    // 0.8.2 EV：AE-L 门控——开启后滑条写入 recipe.exposure（叠加在 profile 基准上）；
-    // 关闭时 recipe 回到 profile 基准曝光（设备/配方自动接管），滑条灰置。
+    // 0.9.3 EV：滑条始终可用，直接叠加在 profile 基准曝光上
+    //（原 0.8.2 AE-L 门控已按用户指令整体移除）。
     var adjEv by remember { mutableFloatStateOf(0f) }
-    var aeLockOn by remember { mutableStateOf(sp.getBoolean("ae_l_on", false)) }
     // 0.8.2 WB 绝对值滑条：色温真实开尔文、色调 ±20（引擎 CCT/tint 语义）；
     // AWB 关闭瞬间以引擎冻结的实测值为起点（LaunchedEffect 同步）。
     var adjWbTemp by remember { mutableFloatStateOf(5000f) }
@@ -381,9 +380,9 @@ fun CameraScreen(navController: NavController) {
             return
         }
         val mapping = ProfileToRecipeMapper.map(profile)
-        // 0.8.2 快捷面板叠加：EV（AE-L 门控的 recipe 曝光偏移）与 Grain 乘数
+        // 快捷面板叠加：EV（recipe 曝光偏移，始终生效）与 Grain 乘数
         val adjustedRecipe = mapping.recipe.copy(
-            exposure = mapping.recipe.exposure + if (aeLockOn) adjEv else 0f,
+            exposure = mapping.recipe.exposure + adjEv,
             filmGrain = mapping.recipe.filmGrain * adjGrain,
         )
         val lutId = "profile:$selected"
@@ -544,6 +543,15 @@ fun CameraScreen(navController: NavController) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 lastCapture = CaptureSaver.list(context).firstOrNull()
+                // 0.9.2 修复（黑屏 Bug）：后台/锁屏期间 GL surface 销毁会触发
+                // closeCamera，或系统强制断开相机（onDisconnected）。回前台后
+                // 重开链 LaunchedEffect(isCameraInitialized, isCameraPrepared,
+                // previewSurfaceTexture) 三个 key 均未变化 → 不会重跑 → 预览黑屏，
+                // 只能切换摄像头恢复。ON_RESUME 显式补开；VM.openCamera 对
+                // "同 SurfaceTexture 且预览活跃/正在打开"自带幂等跳过，可安全重复调用。
+                if (isCameraInitialized && isCameraPrepared) {
+                    previewSurfaceTexture?.let { pvm.openCamera(it) }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -990,41 +998,16 @@ fun CameraScreen(navController: NavController) {
                         "EV" -> {
                             Text("曝光补偿 EV", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(6.dp))
-                            // AE-L 门控：开启后 EV 写 recipe.exposure 才生效，关闭=profile 基准
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(
-                                    "AE-L 锁定曝光基准",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Switch(
-                                    checked = aeLockOn,
-                                    onCheckedChange = {
-                                        aeLockOn = it
-                                        // 0.8.3 修复：关闭 AE-L 时清零手动 EV 并重新注入配方，
-                                        // recipe.exposure 回到 profile 基准（设备/配方自动接管），
-                                        // 不再停留在上次手动调整的值。
-                                        if (!it) adjEv = 0f
-                                        sp.edit().putBoolean("ae_l_on", it).apply()
-                                        applyAdjustments()
-                                    },
-                                )
-                            }
                             AdjustSlider(
                                 value = adjEv,
                                 center = 0f,
                                 range = -2f..2f,
-                                enabled = aeLockOn,
                                 onValueChange = { adjEv = it; applyAdjustments() },
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 "${"%.2f".format(adjEv)} EV",
-                                color = if (aeLockOn) TextSecondary else TextSecondary.copy(alpha = 0.4f),
+                                color = TextSecondary,
                                 fontSize = 13.sp,
                             )
                         }

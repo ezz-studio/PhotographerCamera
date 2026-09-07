@@ -5711,7 +5711,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 deferred
             } else null
 
-            characteristics ?: return
+            // 0.9.2 修复：characteristics 为 null 时不能静默 return——frames 里的
+            // 图像必须全部关闭，否则 openImagesCount 泄漏，onImageRelease 的复位
+            // 条件永不满足 → isCapturing 永久 true，之后所有拍摄被 guard 吞掉
+            // （"RAW 开/关都拍不出照片"的根因之一）。
+            if (characteristics == null) {
+                PLog.e(TAG, "processStacking aborted: characteristics unavailable")
+                frames.forEach { it.image.close() }
+                return
+            }
             val photoId = GalleryManager.preparePhoto(
                 context,
                 metadata,
@@ -5724,7 +5732,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 } ?: false
             )
             if (photoId == null) {
+                // 0.9.2 修复：preparePhoto 失败同样不能泄漏 frames 里的图像，
+                // 否则 isCapturing 永久卡死（同 characteristics null 路径）。
                 PLog.e(TAG, "Failed to save burst image")
+                frames.forEach { it.image.close() }
                 return
             }
 

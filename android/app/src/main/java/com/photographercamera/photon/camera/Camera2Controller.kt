@@ -232,6 +232,34 @@ class Camera2Controller(private val context: Context) {
     // --- 拍照状态机相关 ---
     private var internalCaptureState = STATE_PREVIEW
 
+    // 0.9.2 拍摄挂死看门狗：isCapturing 若因图像泄漏/处理链中断而永久为 true，
+    // 所有后续拍摄会被 guard 吞掉（真机"RAW 开/关都拍不出照片"的兜底防线）。
+    // capture() 进入时启动 30s 定时器；按 generation 防误杀新一次拍摄，
+    // 触发时若 isCapturing 已复位则自动空转。
+    private var captureStuckGeneration = 0L
+    private var captureStuckTimeoutRunnable: Runnable? = null
+
+    private fun startCaptureStuckWatchdog() {
+        captureStuckTimeoutRunnable?.let { cameraHandler?.removeCallbacks(it) }
+        val generation = ++captureStuckGeneration
+        val timeout = Runnable {
+            captureStuckTimeoutRunnable = null
+            if (captureStuckGeneration != generation) return@Runnable
+            if (!_state.value.isCapturing) return@Runnable
+            PLog.e(TAG, "Capture watchdog fired: isCapturing stuck for 30s, force resetting capture state")
+            com.photographercamera.core.debug.DebugLog.log(
+                "SHOT",
+                "watchdog: isCapturing stuck 30s -> force reset"
+            )
+            _state.value = _state.value.copy(isCapturing = false)
+            burstGyroRecorder.stop()
+            clearMultiFrameFocusState("capture watchdog timeout")
+            resetPreviewAfterCapture()
+        }
+        captureStuckTimeoutRunnable = timeout
+        cameraHandler?.postDelayed(timeout, 30_000L)
+    }
+
     // 缓存拍照所需的设备和 Reader，供状态机回调使用
     private var pendingCaptureDevice: CameraDevice? = null
     private var pendingCaptureReader: ImageReader? = null
@@ -2403,6 +2431,21 @@ class Camera2Controller(private val context: Context) {
                     setOnImageAvailableListener({ reader ->
                         try {
                             if (!canAcquireImage("Too many open images")) {
+                                // 0.9.2 修复：队列溢出时该帧已无法获取，本次拍摄链必然
+                                // 无法完成。旧逻辑静默 return，isCapturing 永久为 true，
+                                // 之后所有拍摄被 "stuck?" guard 吞掉（RAW 开/关都拍不出
+                                // 照片的根因之一）。改为快速失败并复位拍摄状态。
+                                PLog.e(TAG, "Capture aborted: image queue overflow ($openImagesCount/$imageReaderMaxImages)")
+                                com.photographercamera.core.debug.DebugLog.log(
+                                    "SHOT",
+                                    "onImageAvailable aborted: queue overflow open=$openImagesCount max=$imageReaderMaxImages"
+                                )
+                                _state.value = _state.value.copy(
+                                    isCapturing = false,
+                                    hdrBracketCapturing = false,
+                                    hdrBracketFrameCount = 0
+                                )
+                                resetPreviewAfterCapture()
                                 return@setOnImageAvailableListener
                             }
                             val rawImage = when {
@@ -4213,10 +4256,17 @@ class Camera2Controller(private val context: Context) {
             isCapture = isCapture
         )
         val resolvedGains = resolveManualMatrixGains(state.awbTemperature, resolvedAnchor, gains)
+        // 0.9.2 修复（色调按钮无效 Bug）：MATRIX 路径（API < 36 设备的唯一路径）
+        // 此前完全没消费 state.awbTint——tint 只在 CCT 路径经 COLOR_TINT 下发，
+        // 0.9.0 删除 applyAwbTintToGains 后 MATRIX 路径的 tint 链路就断了。
+        // 按接口注释承诺的语义把 tint 折算进 G 通道增益（正=品红→压 G，
+        // 负=偏绿→抬 G，±20 → ±20%），transform 从折算后的 gains 重建保持
+        // 一致（重建失败回退冻结 transform，此时增益本身仍带 tint 效果）。
+        val tintedGains = applyAwbTintToGains(resolvedGains, state.awbTint)
         // 0.9.1 恢复上游语义（此前 0.8.3 改写为"纯 gains 直控 + tint 折算"：
         // COLOR_CORRECTION_MODE 非 TRANSFORM_MATRIX 时 HAL 忽略 gains → WB 按钮
         // 在 MATRIX 路径设备上静默无效）。上游：构建 transform，失败回退 AUTO。
-        val transform = buildColorMatrixWhiteBalanceTransform(resolvedGains)
+        val transform = buildColorMatrixWhiteBalanceTransform(tintedGains)
             ?: resolvedAnchor.transform
             ?: return applyAutoWhiteBalanceSettings(
                 builder = builder,
@@ -4226,8 +4276,27 @@ class Camera2Controller(private val context: Context) {
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_OFF)
         builder.set(CaptureRequest.CONTROL_AWB_LOCK, false)
         builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, resolvedGains)
+        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, tintedGains)
         builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+    }
+
+    /**
+     * 将手动色调（tint，±20）折算进 RGGB 增益的绿色通道。
+     * 正 tint 偏品红 → 压低 G；负 tint 偏绿 → 抬高 G。R/B 通道不受影响。
+     * 幅度线性映射：tint=±20 → G 增益 ±20%。
+     */
+    private fun applyAwbTintToGains(
+        gains: RggbChannelVector,
+        tint: Int,
+    ): RggbChannelVector {
+        if (tint == 0) return gains
+        val greenFactor = 1f - tint.coerceIn(-20, 20) / 100f
+        return RggbChannelVector(
+            gains.red,
+            gains.greenEven * greenFactor,
+            gains.greenOdd * greenFactor,
+            gains.blue
+        )
     }
 
     private fun buildColorMatrixWhiteBalanceTransform(gains: RggbChannelVector): ColorSpaceTransform? {
@@ -5368,9 +5437,31 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        if (maxAeRegions <= 0) return
-        val characteristics = getActiveOpenCameraCharacteristics() ?: return
-        val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        // 0.9.2 诊断（测光模式无效果）：以下静默 return 是链路可能断点，
+        // 全部进 DebugLog METER 通道，真机日志可直接定位根因。
+        if (maxAeRegions <= 0) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "METER",
+                "applyMeteringRegions skipped: maxAeRegions=0 (device reports no AE regions)"
+            )
+            return
+        }
+        val characteristics = getActiveOpenCameraCharacteristics()
+        if (characteristics == null) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "METER",
+                "applyMeteringRegions skipped: active camera characteristics unavailable"
+            )
+            return
+        }
+        val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        if (activeRect == null) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "METER",
+                "applyMeteringRegions skipped: active array size unavailable"
+            )
+            return
+        }
 
         if (mode == MeteringMode.AVERAGE) {
             val fullRegion = MeteringRectangle(activeRect, MeteringRectangle.METERING_WEIGHT_MAX)
@@ -5431,6 +5522,10 @@ class Camera2Controller(private val context: Context) {
                     MeteringRectangle.METERING_WEIGHT_MAX
                 ))
             )
+            com.photographercamera.core.debug.DebugLog.log(
+                "METER",
+                "region applied mode=$mode rect=$rect"
+            )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply metering regions", e)
         }
@@ -5472,7 +5567,10 @@ class Camera2Controller(private val context: Context) {
         anchor: ManualWhiteBalanceAnchor,
         frozenGains: RggbChannelVector
     ): RggbChannelVector {
-        if (abs(targetKelvin - anchor.baseTemperature) <= 25) {
+        // 0.9.2 修复（色温不跟手）：滑条起点=锚点温度（LaunchedEffect 同步），
+        // 旧 25K 死区意味着开头 ±25K 的拖动完全无变化，体感"不跟手"。
+        // 收窄到 5K：仍能过滤锚点附近的数值抖动，但拖动立即有响应。
+        if (abs(targetKelvin - anchor.baseTemperature) <= 5) {
             return frozenGains
         }
 
@@ -7181,6 +7279,7 @@ class Camera2Controller(private val context: Context) {
         }
 
         _state.value = _state.value.copy(isCapturing = true)
+        startCaptureStuckWatchdog()
 
         try {
             // 只有在【自动曝光 + 单次闪光】时才使用预闪流程

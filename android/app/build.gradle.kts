@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Single source of truth for the app version: defaultConfig.versionName AND the
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
-val APP_VERSION_NAME = "0.9.2"
-val APP_VERSION_CODE = 32
+val APP_VERSION_NAME = "0.9.3"
+val APP_VERSION_CODE = 33
 
 plugins {
     id("com.android.application")

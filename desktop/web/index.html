@@ -39,6 +39,15 @@
       <div class="hint">路径需本机可访问；也可用下方按钮上传（浏览器限制，无法自动获取绝对路径）。</div>
     </div>
 
+    <div class="field">
+      <label>普通照片目录（验证集 · 未调色）</label>
+      <div class="row">
+        <input id="valDirInput" type="text" placeholder="例如 C:\Users\EDY\Pictures\raw_set" spellcheck="false">
+        <button id="btnLoadValDir" class="primary">载入</button>
+      </div>
+      <div class="hint">用于「留出集验证」的<strong>未调色</strong>普通照片：应用风格后应与参考片风格一致。留空则沿用旧逻辑（从参考片随机留出，偏差会被二次叠加放大）。</div>
+    </div>
+
     <div id="dropzone" class="dropzone">
       <strong>拖拽照片到这里</strong>
       <span>或</span>

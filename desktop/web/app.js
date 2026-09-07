@@ -370,6 +370,8 @@ function renderReport() {
     `<span class="v">${ds.optimize_images ?? "-"}</span></div>` +
     `<div class="rep-row"><span class="k">对照集（留出，不参与拟合）</span>` +
     `<span class="v">${v.n_test ?? ds.test ?? "-"}</span></div>` +
+    `<div class="rep-row"><span class="k">验证模式</span>` +
+    `<span class="v">${v.validation_mode === "ungraded-photos" ? "未调色普通照片（正确）" : "参考片留出（旧·偏差偏大）"}</span></div>` +
     `<div class="rep-row"><span class="k">总体损失</span><span class="v">` +
     `${typeof loss === "number" ? loss.toFixed(5) : "-"}</span></div>` +
     `<div class="rep-row"><span class="k">阈值</span><span class="v">${v.loss_threshold ?? 1.0}</span></div>`;
@@ -406,7 +408,12 @@ async function generate() {
   try {
     const r = await api("/api/generate", {
       method: "POST",
-      body: JSON.stringify({ images: picked, name, outdir: `profiles/studio_${Date.now()}` }),
+      body: JSON.stringify({
+        images: picked,
+        name,
+        outdir: `profiles/studio_${Date.now()}`,
+        validation_dir: $("#valDirInput").value.trim(),
+      }),
     });
     state.jobId = r.job;
     try { localStorage.setItem(JOB_KEY, JSON.stringify({ id: r.job, t: Date.now() })); } catch {}
@@ -617,6 +624,17 @@ async function init() {
   };
   $("#dirInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") $("#btnLoadDir").click();
+  });
+
+  $("#btnLoadValDir").onclick = () => {
+    const p = $("#valDirInput").value.trim();
+    if (!p) { setStatus("请先填写普通照片目录路径", "err"); return; }
+    api(`/api/browse?path=${encodeURIComponent(p)}`)
+      .then((r) => setStatus(r.count ? `普通照片目录已确认：${r.count} 张` : "该目录下没有图片", r.count ? "ok" : "err"))
+      .catch((e) => setStatus(e.message, "err"));
+  };
+  $("#valDirInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#btnLoadValDir").click();
   });
 
   $("#btnPick").onclick = () => $("#fileInput").click();

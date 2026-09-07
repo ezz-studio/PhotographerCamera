@@ -25,17 +25,18 @@ endpoint = creds["endpoint"].rstrip("/")
 ak, sk, bucket = creds["access_key"], creds["secret_key"], creds["bucket"]
 host = urllib.parse.urlparse(endpoint).netloc
 
-APK_PATH = os.path.join(REPO, "android", "app", "build2", "outputs", "apk", "debug", "PhotographerCamera-0.9.2.apk")
+APK_PATH = os.path.join(REPO, "android", "app", "build2", "outputs", "apk", "debug", "PhotographerCamera-0.9.3.apk")
 apk_size = os.path.getsize(APK_PATH)
 
 version_payload = {
-    "versionName": "0.9.2",
-    "versionCode": 32,
-    "url": "https://app.tybtool.top/PhotographerCamera-0.9.2.apk",
+    "versionName": "0.9.3",
+    "versionCode": 33,
+    "url": "https://app.tybtool.top/PhotographerCamera-0.9.3.apk",
     "size": apk_size,
     "ts": int(time.time() * 1000),
-    "notes": ("0.9.2: wire profile film_curve and color_matrix into preview and "
-              "capture render chains; R8 minified release variant validated at 41.9 MiB"),
+    "notes": ("0.9.3: fix 4 real-device bugs (RAW capture save, WB tint on Android 16 CCT "
+              "path, AE-L removed, metering diagnostic) + desktop trainer validation now "
+              "uses un-graded photos vs a graded style centroid (no double-grading)"),
 }
 json_out = os.path.join(REPO, "android", "_r2_version.json")
 with open(json_out, "w", encoding="utf-8") as f:
@@ -82,7 +83,7 @@ def presign_put(key: str, expires: int = 3600) -> str:
 
 
 urls = [
-    presign_put("PhotographerCamera-0.9.2.apk"),
+    presign_put("PhotographerCamera-0.9.3.apk"),
     presign_put("version.json"),
 ]
 out = os.path.join(REPO, "_r2urls.txt")
