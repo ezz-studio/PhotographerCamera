@@ -232,8 +232,10 @@ target_link_libraries(
     Threads::Threads
     log
 )
-add_library(my-native-lib SHARED 
+add_library(my-native-lib SHARED
     native-lib.cpp
+    gles_gpu_timer_query_jni.cpp
+    gles_hardware_buffer_jni.cpp
     photon_jni_bridge.cpp
     dng_hdrnet_pgtm_jni.cpp
     raw_signal_stats_jni.cpp

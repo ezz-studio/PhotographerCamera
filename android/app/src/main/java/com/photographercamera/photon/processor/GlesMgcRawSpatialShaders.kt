@@ -416,18 +416,25 @@ internal object GlesMgcRawSpatialShaders {
         }
     """.trimIndent()
 
-    val rejection = """
+    val rejection = rejectionWithFlowSource("""
+        uniform sampler2D uFlow;
+        uniform vec4 uFlowScaleOffset;
+        vec4 rejectionFlow(vec2 uv) {
+            return texture(uFlow, uv * uFlowScaleOffset.xy + uFlowScaleOffset.zw);
+        }
+    """.trimIndent())
+
+    /** Share rejection equations while allowing the caller to supply dense or tiled flow. */
+    fun rejectionWithFlowSource(flowSource: String) = """
         #version 300 es
         precision highp float;
         precision highp int;
         uniform sampler2D uBaseGuide;
         uniform sampler2D uAltGuide;
-        uniform sampler2D uFlow;
         uniform sampler2D uUnblocker;
         uniform sampler2D uNoiseEstimates;
         uniform ivec2 uGuideSize;
         uniform ivec2 uRejectionSize;
-        uniform vec4 uFlowScaleOffset;
         uniform vec2 uUnblockerScale;
         uniform vec4 uNoiseTextureScaleBias;
         uniform vec2 uColorDifferenceMultiplier;
@@ -437,6 +444,8 @@ internal object GlesMgcRawSpatialShaders {
         uniform float uExtraMotionRobustnessMotionThreshold;
         layout(location = 0) out float oReverseWeight;
         layout(location = 1) out float oPixelDifference;
+
+        $flowSource
 
         vec2 mirrorUv(vec2 uv) {
             uv = mod(uv, 2.0);
@@ -463,8 +472,7 @@ internal object GlesMgcRawSpatialShaders {
             // V25 requires GenerateRejectionTexture and GuideImage to share the RAW/2
             // Bayer-quad domain.
             vec2 uv = gl_FragCoord.xy / vec2(uRejectionSize);
-            vec2 flowUv = uv * uFlowScaleOffset.xy + uFlowScaleOffset.zw;
-            vec4 flow = texture(uFlow, flowUv);
+            vec4 flow = rejectionFlow(uv);
             vec2 warpedUv = mirrorUv(uv + flow.xy);
             float unblocker = texture(uUnblocker, uv * uUnblockerScale).r;
             if (flow.z < uUnblockerReductionThreshold) unblocker = 0.0;
@@ -532,7 +540,7 @@ internal object GlesMgcRawSpatialShaders {
             oReverseWeight = 1.0 - weight;
             oPixelDifference = pixelDifference;
         }
-    """.trimIndent()
+    """.trimIndent().trimStart()
 
     /** Applies AdjustRejectionWeights' signal-invariant scale to RAW/4 acceptance. */
     val rejectionAcceptance = """
@@ -838,13 +846,29 @@ internal object GlesMgcRawSpatialShaders {
         }
     """.trimIndent()
 
-    val dilateRejection = """
+    val dilateRejection = buildDilateRejection(includePixelDifference = false)
+
+    // MRT combines the two RAW downsample draws without changing their sampling or R8 stores.
+    val rejectionDownsample = buildDilateRejection(includePixelDifference = true)
+
+    private fun buildDilateRejection(includePixelDifference: Boolean) = """
         #version 300 es
         precision highp float;
         precision highp int;
         uniform sampler2D uRejection;
         uniform ivec2 uInputSize;
-        out float oWeight;
+        layout(location = 0) out float oWeight;
+        ${if (includePixelDifference) """
+        uniform sampler2D uPixelDifference;
+        layout(location = 1) out float oPixelDifference;
+        float valueAt(ivec2 p) {
+            return texelFetch(
+                uPixelDifference,
+                clamp(p, ivec2(0), uInputSize - ivec2(1)),
+                0
+            ).r;
+        }
+        """ else ""}
         float rejectionAt(vec2 p) {
             return texture(uRejection, p / vec2(uInputSize)).r;
         }
@@ -866,6 +890,15 @@ internal object GlesMgcRawSpatialShaders {
                       rejectionAt(texCoord + vec2( 2.0,  2.0));
             rejection = (rejection - 0.2) * 0.5;
             oWeight = 1.0 - rejection;
+            ${if (includePixelDifference) """
+            ivec2 source = ivec2(gl_FragCoord.xy) * 2;
+            oPixelDifference = 0.25 * (
+                valueAt(source) +
+                valueAt(source + ivec2(1, 0)) +
+                valueAt(source + ivec2(0, 1)) +
+                valueAt(source + ivec2(1, 1))
+            );
+            """ else ""}
         }
     """.trimIndent()
 
@@ -903,197 +936,6 @@ internal object GlesMgcRawSpatialShaders {
             // 3x3 rejection neighbourhood selects the linear kernel, independently of
             // the rejection-value amplitude.
             oLinearKernelMask = localMaximum != localMinimum ? 1.0 : 0.0;
-        }
-    """.trimIndent()
-
-    /**
-     * First FindBlockTiles pass. Each output texel represents one 16x16 RAW tile
-     * (8x8 Bayer quads); RGBA stores the phase-preserving alignment residual on
-     * the left, right, top, and bottom tile edges.
-     */
-    val findBlockTilesGatherEdges = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        precision highp usampler2D;
-
-        uniform usampler2D uBaseRaw;
-        uniform usampler2D uAltRaw;
-        uniform sampler2D uFlow;
-        uniform vec4 uFlowScaleOffset;
-        uniform ivec2 uRawSize;
-        uniform ivec2 uBayerSize;
-        uniform ivec2 uTileGridSize;
-        uniform int uCfaPattern;
-        uniform vec4 uBasePhaseGains;
-        uniform vec4 uBasePhaseBlackTerms;
-        uniform vec4 uAltPhaseGains;
-        uniform vec4 uAltPhaseBlackTerms;
-
-        layout(location = 0) out vec4 oEdges;
-
-        const int TILE_SIZE = 8;
-        const float SIGNAL_FLOOR = 0.015625;
-        const float INTERIOR_REJECTION = 0.82;
-
-        float normalizedPhase(
-            usampler2D rawTexture,
-            ivec2 bayer,
-            int phase,
-            vec4 gains,
-            vec4 blackTerms
-        ) {
-            ivec2 raw = bayer * 2 + ivec2(phase & 1, phase >> 1);
-            raw = clamp(raw, ivec2(0), uRawSize - ivec2(1));
-            return clamp(float(texelFetch(rawTexture, raw, 0).r) * gains[phase] + blackTerms[phase], 0.0, 1.0);
-        }
-
-        float greenAt(
-            usampler2D rawTexture,
-            ivec2 bayer,
-            vec4 gains,
-            vec4 blackTerms
-        ) {
-            // RGGB/BGGR have their greens at phases 1/2; GRBG/GBRG at 0/3.
-            int phase0 = (uCfaPattern == 0 || uCfaPattern == 3) ? 1 : 0;
-            int phase1 = (uCfaPattern == 0 || uCfaPattern == 3) ? 2 : 3;
-            return 0.5 * (
-                normalizedPhase(rawTexture, bayer, phase0, gains, blackTerms) +
-                normalizedPhase(rawTexture, bayer, phase1, gains, blackTerms)
-            );
-        }
-
-        float alignedAltGreen(vec2 bayer) {
-            vec2 clamped = clamp(bayer, vec2(0.0), vec2(uBayerSize - ivec2(1)));
-            ivec2 p0 = ivec2(floor(clamped));
-            ivec2 p1 = min(p0 + ivec2(1), uBayerSize - ivec2(1));
-            vec2 f = fract(clamped);
-            float v00 = greenAt(uAltRaw, p0, uAltPhaseGains, uAltPhaseBlackTerms);
-            float v10 = greenAt(uAltRaw, ivec2(p1.x, p0.y), uAltPhaseGains, uAltPhaseBlackTerms);
-            float v01 = greenAt(uAltRaw, ivec2(p0.x, p1.y), uAltPhaseGains, uAltPhaseBlackTerms);
-            float v11 = greenAt(uAltRaw, p1, uAltPhaseGains, uAltPhaseBlackTerms);
-            return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
-        }
-
-        void main() {
-            ivec2 tile = ivec2(gl_FragCoord.xy);
-            if (any(greaterThanEqual(tile, uTileGridSize))) {
-                oEdges = vec4(0.0);
-                return;
-            }
-
-            ivec2 tileOrigin = tile * TILE_SIZE;
-            vec4 edgeSum = vec4(0.0);
-            vec4 edgeCount = vec4(0.0);
-            float tileSum = 0.0;
-            float tileCount = 0.0;
-
-            for (int y = 0; y < TILE_SIZE; ++y) {
-                for (int x = 0; x < TILE_SIZE; ++x) {
-                    ivec2 bayer = tileOrigin + ivec2(x, y);
-                    if (any(greaterThanEqual(bayer, uBayerSize))) {
-                        continue;
-                    }
-
-                    vec2 referenceUv =
-                        (vec2(bayer) + vec2(0.5)) / vec2(uBayerSize);
-                    vec2 flowUv =
-                        referenceUv * uFlowScaleOffset.xy +
-                        uFlowScaleOffset.zw;
-                    vec2 flow = texture(uFlow, flowUv).xy * vec2(uBayerSize);
-                    float baseGreen = greenAt(uBaseRaw, bayer, uBasePhaseGains, uBasePhaseBlackTerms);
-                    float altGreen = alignedAltGreen(vec2(bayer) + flow);
-                    float signal = max(0.5 * (baseGreen + altGreen), SIGNAL_FLOOR);
-                    float residual = abs(baseGreen - altGreen) / sqrt(signal);
-
-                    tileSum += residual;
-                    tileCount += 1.0;
-                    if (x < 2) {
-                        edgeSum.x += residual;
-                        edgeCount.x += 1.0;
-                    }
-                    if (x >= TILE_SIZE - 2) {
-                        edgeSum.y += residual;
-                        edgeCount.y += 1.0;
-                    }
-                    if (y < 2) {
-                        edgeSum.z += residual;
-                        edgeCount.z += 1.0;
-                    }
-                    if (y >= TILE_SIZE - 2) {
-                        edgeSum.w += residual;
-                        edgeCount.w += 1.0;
-                    }
-                }
-            }
-
-            vec4 edgeMean = edgeSum / max(edgeCount, vec4(1.0));
-            float interiorMean = tileSum / max(tileCount, 1.0);
-            oEdges = clamp(edgeMean - vec4(INTERIOR_REJECTION * interiorMean), 0.0, 1.0);
-        }
-    """.trimIndent()
-
-    /** Pair the two observations of every shared tile edge and convert them to a soft mask. */
-    val findBlockTilesFilterIntermediate = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-
-        uniform sampler2D uGatheredEdges;
-        uniform ivec2 uSize;
-
-        layout(location = 0) out float oFiltered;
-
-        vec4 edgesAt(ivec2 p) {
-            return texelFetch(uGatheredEdges, clamp(p, ivec2(0), uSize - ivec2(1)), 0);
-        }
-
-        void main() {
-            ivec2 p = ivec2(gl_FragCoord.xy);
-            if (any(greaterThanEqual(p, uSize))) {
-                oFiltered = 0.0;
-                return;
-            }
-
-            vec4 center = edgesAt(p);
-            float left = p.x > 0 ? min(center.x, edgesAt(p + ivec2(-1, 0)).y) : 0.0;
-            float right = p.x + 1 < uSize.x ? min(center.y, edgesAt(p + ivec2(1, 0)).x) : 0.0;
-            float top = p.y > 0 ? min(center.z, edgesAt(p + ivec2(0, -1)).w) : 0.0;
-            float bottom = p.y + 1 < uSize.y ? min(center.w, edgesAt(p + ivec2(0, 1)).z) : 0.0;
-            float pairedEdge = max(max(left, right), max(top, bottom));
-            oFiltered = smoothstep(0.020, 0.080, pairedEdge);
-        }
-    """.trimIndent()
-
-    /** Final binary tile mask. Isolated responses are removed before CPU component analysis. */
-    val findBlockTilesOutput = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-
-        uniform sampler2D uFiltered;
-        uniform ivec2 uSize;
-
-        layout(location = 0) out float oMask;
-
-        float valueAt(ivec2 p) {
-            if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, uSize))) {
-                return 0.0;
-            }
-            return texelFetch(uFiltered, p, 0).r;
-        }
-
-        void main() {
-            ivec2 p = ivec2(gl_FragCoord.xy);
-            if (any(greaterThanEqual(p, uSize)) || p.x == 0 || p.y == 0 || p.x == uSize.x - 1 || p.y == uSize.y - 1) {
-                oMask = 0.0;
-                return;
-            }
-
-            float center = valueAt(p);
-            float axialSupport = valueAt(p + ivec2(-1, 0)) + valueAt(p + ivec2(1, 0)) +
-                valueAt(p + ivec2(0, -1)) + valueAt(p + ivec2(0, 1));
-            oMask = center >= 0.5 && center + axialSupport >= 1.5 ? 1.0 : 0.0;
         }
     """.trimIndent()
 
@@ -1161,7 +1003,7 @@ internal object GlesMgcRawSpatialShaders {
 
     // Embedded OpenCL sources: GainUp and
     // Mask_AdjustHighlightMaskAndGenerateInpaintingMask. The third output is the aligned
-    // ultrashort clipping mask consumed by Bento's high-overlap fallback predicate.
+    // ultrashort clipping mask retained for Bento's overlap diagnostics.
     val bentoAdjustHighlightMask = """
         #version 300 es
         precision highp float;
@@ -2266,7 +2108,10 @@ internal object GlesMgcRawSpatialShaders {
         }
     """.trimIndent()
 
-    val grayDownsample = """
+    val grayDownsample = buildGrayDownsample(linearOutput = false)
+    val yuvGrayDownsample = buildGrayDownsample(linearOutput = true)
+
+    private fun buildGrayDownsample(linearOutput: Boolean) = """
         #version 300 es
         precision highp float;
         precision highp int;
@@ -2274,6 +2119,7 @@ internal object GlesMgcRawSpatialShaders {
         uniform highp isampler2D uInput;
         uniform ivec2 uInputSize;
         layout(location = 0) out highp int oGray;
+        ${if (linearOutput) "layout(location = 1) out highp vec2 oLinearGray;" else ""}
         float valueAt(ivec2 p) {
             return float(texelFetch(
                 uInput,
@@ -2294,6 +2140,7 @@ internal object GlesMgcRawSpatialShaders {
             // GrayPyramidDownsample converts the complete 3x3 result to S16 once,
             // using floor(value + 0.5) for signed samples.
             oGray = int(clamp(floor(value + 0.5), -32768.0, 32767.0));
+            ${if (linearOutput) "float coarseGray = floor(float(oGray) / 16.0); oLinearGray = vec2(coarseGray, float(oGray) - coarseGray * 16.0);" else ""}
         }
     """.trimIndent()
 
@@ -2302,7 +2149,10 @@ internal object GlesMgcRawSpatialShaders {
      * 2x passes, the original evaluates the complete separable seven-tap triangle
      * and converts to S16 only once.
      */
-    val grayDownsample4 = """
+    val grayDownsample4 = buildGrayDownsample4(linearOutput = false)
+    val yuvGrayDownsample4 = buildGrayDownsample4(linearOutput = true)
+
+    private fun buildGrayDownsample4(linearOutput: Boolean) = """
         #version 300 es
         precision highp float;
         precision highp int;
@@ -2310,6 +2160,7 @@ internal object GlesMgcRawSpatialShaders {
         uniform highp isampler2D uInput;
         uniform ivec2 uInputSize;
         layout(location = 0) out highp int oGray;
+        ${if (linearOutput) "layout(location = 1) out highp vec2 oLinearGray;" else ""}
         float valueAt(ivec2 p) {
             return float(texelFetch(
                 uInput,
@@ -2331,6 +2182,7 @@ internal object GlesMgcRawSpatialShaders {
                 }
             }
             oGray = int(clamp(floor(value + 0.5), -32768.0, 32767.0));
+            ${if (linearOutput) "float coarseGray = floor(float(oGray) / 16.0); oLinearGray = vec2(coarseGray, float(oGray) - coarseGray * 16.0);" else ""}
         }
     """.trimIndent()
 
@@ -2339,7 +2191,10 @@ internal object GlesMgcRawSpatialShaders {
      * stores central differences as saturated S16 and five per-tile Float32 products in this
      * order: xx, yy, xy, base*x and base*y.
      */
-    val alignmentGradientProducts = """
+    val alignmentGradientProducts = buildAlignmentGradientProducts(sparseFineLevels = false)
+    val yuvAlignmentGradientProducts = buildAlignmentGradientProducts(sparseFineLevels = true)
+
+    private fun buildAlignmentGradientProducts(sparseFineLevels: Boolean) = """
         #version 300 es
         precision highp float;
         precision highp int;
@@ -2374,12 +2229,13 @@ internal object GlesMgcRawSpatialShaders {
             // Halide's LK buffers have min=(1,1); the texture stores only that
             // interior extent, so local texel zero is logical tile (1,1).
             ivec2 origin = (tile + ivec2(1)) * uTileStride;
-            float count = float(uTileSize * uTileSize);
+            int sampleStep = ${if (sparseFineLevels) "uTileSize >= 32 ? 2 : 1" else "1"};
+            float count = float((uTileSize / sampleStep) * (uTileSize / sampleStep));
             float meanBase = 0.0;
             if (uNormalize != 0) {
-                for (int y = 0; y < 64; ++y) {
+                for (int y = 0; y < 64; y += sampleStep) {
                     if (y >= uTileSize) break;
-                    for (int x = 0; x < 64; ++x) {
+                    for (int x = 0; x < 64; x += sampleStep) {
                         if (x >= uTileSize) break;
                         meanBase += valueAt(origin + ivec2(x, y));
                     }
@@ -2392,9 +2248,9 @@ internal object GlesMgcRawSpatialShaders {
             float xy = 0.0;
             float baseX = 0.0;
             float baseY = 0.0;
-            for (int y = 0; y < 64; ++y) {
+            for (int y = 0; y < 64; y += sampleStep) {
                 if (y >= uTileSize) break;
-                for (int x = 0; x < 64; ++x) {
+                for (int x = 0; x < 64; x += sampleStep) {
                     if (x >= uTileSize) break;
                     ivec2 p = origin + ivec2(x, y);
                     vec2 gradient = gradientAt(p);
@@ -2424,7 +2280,12 @@ internal object GlesMgcRawSpatialShaders {
      * against the target-level S16 images, avoiding a synthesized motion vector
      * across an alignment discontinuity.
      */
-    val upsampleAlignment = """
+    val upsampleAlignment = buildUpsampleAlignment(globalCandidateTexture = false)
+
+    val upsampleAlignmentWithGpuCandidate = buildUpsampleAlignment(globalCandidateTexture = true)
+    val yuvUpsampleAlignment = buildUpsampleAlignment(globalCandidateTexture = true, sampleStep = 2)
+
+    private fun buildUpsampleAlignment(globalCandidateTexture: Boolean, sampleStep: Int = 1) = """
         #version 300 es
         precision highp float;
         precision highp int;
@@ -2441,7 +2302,7 @@ internal object GlesMgcRawSpatialShaders {
         uniform int uTargetTileSize;
         uniform float uInitialScale;
         uniform int uHasGlobalCandidate;
-        uniform vec2 uGlobalCandidate;
+        ${if (globalCandidateTexture) "uniform highp sampler2D uGlobalCandidateTexture;" else "uniform vec2 uGlobalCandidate;"}
         out vec4 oAlignment;
 
         int valueAt(highp isampler2D image, ivec2 p) {
@@ -2469,9 +2330,9 @@ internal object GlesMgcRawSpatialShaders {
             // candidate, exposing the mistake as a 16-pixel mosaic tile.
             ivec2 displacement = ivec2(roundEven(flow));
             int cost = 0;
-            for (int y = 0; y < 64; ++y) {
+            for (int y = 0; y < 64; y += $sampleStep) {
                 if (y >= uTargetTileSize) break;
-                for (int x = 0; x < 64; ++x) {
+                for (int x = 0; x < 64; x += $sampleStep) {
                     if (x >= uTargetTileSize) break;
                     ivec2 p = origin + ivec2(x, y);
                     cost += abs(
@@ -2480,7 +2341,7 @@ internal object GlesMgcRawSpatialShaders {
                     );
                 }
             }
-            return float(cost) / float(uTargetTileSize * uTargetTileSize);
+            return float(cost) / float((uTargetTileSize / $sampleStep) * (uTargetTileSize / $sampleStep));
         }
         void main() {
             ivec2 targetTile = ivec2(gl_FragCoord.xy);
@@ -2513,13 +2374,18 @@ internal object GlesMgcRawSpatialShaders {
 
             ivec2 origin = targetLogicalTile * uTargetTileStride;
             vec2 bestFlow = candidateFlow(nearest);
+            vec2 nearestFlow = bestFlow;
             float bestCost = candidateCost(origin, bestFlow);
+            float nearestCost = bestCost;
             float candidateIndex = 0.0;
 
             // The generated worker's candidate order is nearest, next Y, next X.
             // Strict less-than comparison makes this ordering observable on equal costs.
+            // SAD depends only on the rounded displacement. Reuse its cost, but keep the
+            // original fractional flow and candidate order even when displacements coincide.
             vec2 flowY = candidateFlow(nextY);
-            float costY = candidateCost(origin, flowY);
+            float costY = all(equal(roundEven(flowY), roundEven(nearestFlow))) ? nearestCost :
+                candidateCost(origin, flowY);
             if (costY < bestCost) {
                 bestFlow = flowY;
                 bestCost = costY;
@@ -2527,7 +2393,9 @@ internal object GlesMgcRawSpatialShaders {
             }
 
             vec2 flowX = candidateFlow(nextX);
-            float costX = candidateCost(origin, flowX);
+            float costX = all(equal(roundEven(flowX), roundEven(nearestFlow))) ? nearestCost :
+                all(equal(roundEven(flowX), roundEven(flowY))) ? costY :
+                candidateCost(origin, flowX);
             if (costX < bestCost) {
                 bestFlow = flowX;
                 bestCost = costX;
@@ -2537,8 +2405,11 @@ internal object GlesMgcRawSpatialShaders {
             // AlignPyramid::AlignAlt's final merge-grid pass supplies the robust global
             // translation as the fourth candidate. Pyramid-level transitions leave it absent.
             if (uHasGlobalCandidate != 0) {
-                vec2 globalFlow = uGlobalCandidate * uInitialScale;
-                float globalCost = candidateCost(origin, globalFlow);
+                vec2 globalFlow = ${if (globalCandidateTexture) "texelFetch(uGlobalCandidateTexture, ivec2(0), 0).xy" else "uGlobalCandidate"} * uInitialScale;
+                float globalCost = all(equal(roundEven(globalFlow), roundEven(nearestFlow))) ? nearestCost :
+                    all(equal(roundEven(globalFlow), roundEven(flowY))) ? costY :
+                    all(equal(roundEven(globalFlow), roundEven(flowX))) ? costX :
+                    candidateCost(origin, globalFlow);
                 if (globalCost < bestCost) {
                     bestFlow = globalFlow;
                     bestCost = globalCost;
@@ -3072,412 +2943,4 @@ internal object GlesMgcRawSpatialShaders {
         }
     """.trimIndent()
 
-
-    // ---- upstream members adopted verbatim (bjzhou/PhotonCamera HEAD) ----
-
-    val yuvGrayDownsample = buildGrayDownsample(linearOutput = true)
-
-    val yuvGrayDownsample4 = buildGrayDownsample4(linearOutput = true)
-
-    val yuvAlignmentGradientProducts = buildAlignmentGradientProducts(sparseFineLevels = true)
-
-    val yuvUpsampleAlignment = buildUpsampleAlignment(globalCandidateTexture = true, sampleStep = 2)
-
-    private fun buildGrayDownsample(linearOutput: Boolean) = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        precision highp isampler2D;
-        uniform highp isampler2D uInput;
-        uniform ivec2 uInputSize;
-        layout(location = 0) out highp int oGray;
-        ${if (linearOutput) "layout(location = 1) out highp vec2 oLinearGray;" else ""}
-        float valueAt(ivec2 p) {
-            return float(texelFetch(
-                uInput,
-                clamp(p, ivec2(0), uInputSize - ivec2(1)),
-                0
-            ).r);
-        }
-        void main() {
-            ivec2 p = ivec2(gl_FragCoord.xy) * 2;
-            float value = 0.0;
-            for (int y = -1; y <= 1; ++y) {
-                float wy = y == 0 ? 0.5 : 0.25;
-                for (int x = -1; x <= 1; ++x) {
-                    float wx = x == 0 ? 0.5 : 0.25;
-                    value += valueAt(p + ivec2(x, y)) * wx * wy;
-                }
-            }
-            // GrayPyramidDownsample converts the complete 3x3 result to S16 once,
-            // using floor(value + 0.5) for signed samples.
-            oGray = int(clamp(floor(value + 0.5), -32768.0, 32767.0));
-            ${if (linearOutput) "float coarseGray = floor(float(oGray) / 16.0); oLinearGray = vec2(coarseGray, float(oGray) - coarseGray * 16.0);" else ""}
-        }
-    """.trimIndent()
-
-    private fun buildGrayDownsample4(linearOutput: Boolean) = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        precision highp isampler2D;
-        uniform highp isampler2D uInput;
-        uniform ivec2 uInputSize;
-        layout(location = 0) out highp int oGray;
-        ${if (linearOutput) "layout(location = 1) out highp vec2 oLinearGray;" else ""}
-        float valueAt(ivec2 p) {
-            return float(texelFetch(
-                uInput,
-                clamp(p, ivec2(0), uInputSize - ivec2(1)),
-                0
-            ).r);
-        }
-        float triangleWeight(int offset) {
-            return float(4 - abs(offset)) * (1.0 / 16.0);
-        }
-        void main() {
-            ivec2 p = ivec2(gl_FragCoord.xy) * 4;
-            float value = 0.0;
-            for (int y = -3; y <= 3; ++y) {
-                float wy = triangleWeight(y);
-                for (int x = -3; x <= 3; ++x) {
-                    value += valueAt(p + ivec2(x, y)) *
-                        triangleWeight(x) * wy;
-                }
-            }
-            oGray = int(clamp(floor(value + 0.5), -32768.0, 32767.0));
-            ${if (linearOutput) "float coarseGray = floor(float(oGray) / 16.0); oLinearGray = vec2(coarseGray, float(oGray) - coarseGray * 16.0);" else ""}
-        }
-    """.trimIndent()
-
-    private fun buildAlignmentGradientProducts(sparseFineLevels: Boolean) = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        precision highp isampler2D;
-        uniform highp isampler2D uReference;
-        uniform ivec2 uImageSize;
-        uniform int uTileStride;
-        uniform int uTileSize;
-        uniform int uNormalize;
-        layout(location = 0) out vec4 oProducts0;
-        layout(location = 1) out float oProducts1;
-
-        float valueAt(ivec2 p) {
-            return float(texelFetch(
-                uReference,
-                clamp(p, ivec2(0), uImageSize - ivec2(1)),
-                0
-            ).r);
-        }
-        vec2 gradientAt(ivec2 p) {
-            return clamp(
-                vec2(
-                    valueAt(p + ivec2(1, 0)) - valueAt(p - ivec2(1, 0)),
-                    valueAt(p + ivec2(0, 1)) - valueAt(p - ivec2(0, 1))
-                ),
-                vec2(-32768.0),
-                vec2(32767.0)
-            );
-        }
-        void main() {
-            ivec2 tile = ivec2(gl_FragCoord.xy);
-            // Halide's LK buffers have min=(1,1); the texture stores only that
-            // interior extent, so local texel zero is logical tile (1,1).
-            ivec2 origin = (tile + ivec2(1)) * uTileStride;
-            int sampleStep = ${if (sparseFineLevels) "uTileSize >= 32 ? 2 : 1" else "1"};
-            float count = float((uTileSize / sampleStep) * (uTileSize / sampleStep));
-            float meanBase = 0.0;
-            if (uNormalize != 0) {
-                for (int y = 0; y < 64; y += sampleStep) {
-                    if (y >= uTileSize) break;
-                    for (int x = 0; x < 64; x += sampleStep) {
-                        if (x >= uTileSize) break;
-                        meanBase += valueAt(origin + ivec2(x, y));
-                    }
-                }
-                meanBase /= count;
-            }
-
-            float xx = 0.0;
-            float yy = 0.0;
-            float xy = 0.0;
-            float baseX = 0.0;
-            float baseY = 0.0;
-            for (int y = 0; y < 64; y += sampleStep) {
-                if (y >= uTileSize) break;
-                for (int x = 0; x < 64; x += sampleStep) {
-                    if (x >= uTileSize) break;
-                    ivec2 p = origin + ivec2(x, y);
-                    vec2 gradient = gradientAt(p);
-                    float base = valueAt(p) - meanBase;
-                    xx += gradient.x * gradient.x;
-                    yy += gradient.y * gradient.y;
-                    xy += gradient.x * gradient.y;
-                    baseX += base * gradient.x;
-                    baseY += base * gradient.y;
-                }
-            }
-            float inverseCount = 1.0 / count;
-            oProducts0 = vec4(
-                0.25 * xx * inverseCount,
-                0.25 * yy * inverseCount,
-                0.25 * xy * inverseCount,
-                0.5 * baseX * inverseCount
-            );
-            oProducts1 = 0.5 * baseY * inverseCount;
-        }
-    """.trimIndent()
-
-    private fun buildUpsampleAlignment(globalCandidateTexture: Boolean, sampleStep: Int = 1) = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        precision highp isampler2D;
-        uniform highp isampler2D uReference;
-        uniform highp isampler2D uCurrent;
-        uniform sampler2D uInitialAlignment;
-        uniform ivec2 uImageSize;
-        uniform ivec2 uInitialGridSize;
-        uniform int uInitialGridMin;
-        uniform int uTargetGridMin;
-        uniform int uInitialTileStride;
-        uniform int uTargetTileStride;
-        uniform int uTargetTileSize;
-        uniform float uInitialScale;
-        uniform int uHasGlobalCandidate;
-        ${if (globalCandidateTexture) "uniform highp sampler2D uGlobalCandidateTexture;" else "uniform vec2 uGlobalCandidate;"}
-        out vec4 oAlignment;
-
-        int valueAt(highp isampler2D image, ivec2 p) {
-            return texelFetch(
-                image,
-                clamp(p, ivec2(0), uImageSize - ivec2(1)),
-                0
-            ).r;
-        }
-        ivec2 boundedInitialTile(ivec2 p) {
-            return clamp(p, ivec2(0), uInitialGridSize - ivec2(1));
-        }
-        vec2 candidateFlow(ivec2 p) {
-            return texelFetch(
-                uInitialAlignment,
-                boundedInitialTile(p),
-                0
-            ).xy * uInitialScale;
-        }
-        float candidateCost(ivec2 origin, vec2 flow) {
-            // The AArch64 worker rounds each candidate to an integer S16-image
-            // displacement and accumulates the block L1 residual in 32-bit integer
-            // lanes. Converting every pixel to float first loses integer precision once
-            // a high-contrast block total exceeds 2^24 and can flip a close whole-flow
-            // candidate, exposing the mistake as a 16-pixel mosaic tile.
-            ivec2 displacement = ivec2(roundEven(flow));
-            int cost = 0;
-            for (int y = 0; y < 64; y += $sampleStep) {
-                if (y >= uTargetTileSize) break;
-                for (int x = 0; x < 64; x += $sampleStep) {
-                    if (x >= uTargetTileSize) break;
-                    ivec2 p = origin + ivec2(x, y);
-                    cost += abs(
-                        valueAt(uReference, p) -
-                        valueAt(uCurrent, p + displacement)
-                    );
-                }
-            }
-            return float(cost) / float((uTargetTileSize / $sampleStep) * (uTargetTileSize / $sampleStep));
-        }
-        void main() {
-            ivec2 targetTile = ivec2(gl_FragCoord.xy);
-            ivec2 targetLogicalTile =
-                targetTile + ivec2(uTargetGridMin);
-            // Express the target tile center in the initial alignment grid. Using
-            // the tile origin here changes the nearest coarse tile at a regular
-            // half-grid cadence and produces block-shaped alignment discontinuities.
-            vec2 targetCenter =
-                (vec2(targetLogicalTile) + vec2(0.5)) *
-                float(uTargetTileStride);
-            vec2 initialGrid =
-                targetCenter /
-                (uInitialScale * float(uInitialTileStride)) -
-                vec2(float(uInitialGridMin) + 0.5);
-
-            vec2 nearestPosition = roundEven(initialGrid);
-            ivec2 nearest = ivec2(nearestPosition);
-            ivec2 nextX = nearest + ivec2(
-                initialGrid.x < nearestPosition.x ? -1 : 1,
-                0
-            );
-            ivec2 nextY = nearest + ivec2(
-                0,
-                initialGrid.y < nearestPosition.y ? -1 : 1
-            );
-            nearest = boundedInitialTile(nearest);
-            nextX = boundedInitialTile(nextX);
-            nextY = boundedInitialTile(nextY);
-
-            ivec2 origin = targetLogicalTile * uTargetTileStride;
-            vec2 bestFlow = candidateFlow(nearest);
-            vec2 nearestFlow = bestFlow;
-            float bestCost = candidateCost(origin, bestFlow);
-            float nearestCost = bestCost;
-            float candidateIndex = 0.0;
-
-            // The generated worker's candidate order is nearest, next Y, next X.
-            // Strict less-than comparison makes this ordering observable on equal costs.
-            // SAD depends only on the rounded displacement. Reuse its cost, but keep the
-            // original fractional flow and candidate order even when displacements coincide.
-            vec2 flowY = candidateFlow(nextY);
-            float costY = all(equal(roundEven(flowY), roundEven(nearestFlow))) ? nearestCost :
-                candidateCost(origin, flowY);
-            if (costY < bestCost) {
-                bestFlow = flowY;
-                bestCost = costY;
-                candidateIndex = 1.0;
-            }
-
-            vec2 flowX = candidateFlow(nextX);
-            float costX = all(equal(roundEven(flowX), roundEven(nearestFlow))) ? nearestCost :
-                all(equal(roundEven(flowX), roundEven(flowY))) ? costY :
-                candidateCost(origin, flowX);
-            if (costX < bestCost) {
-                bestFlow = flowX;
-                bestCost = costX;
-                candidateIndex = 2.0;
-            }
-
-            // AlignPyramid::AlignAlt's final merge-grid pass supplies the robust global
-            // translation as the fourth candidate. Pyramid-level transitions leave it absent.
-            if (uHasGlobalCandidate != 0) {
-                vec2 globalFlow = ${if (globalCandidateTexture) "texelFetch(uGlobalCandidateTexture, ivec2(0), 0).xy" else "uGlobalCandidate"} * uInitialScale;
-                float globalCost = all(equal(roundEven(globalFlow), roundEven(nearestFlow))) ? nearestCost :
-                    all(equal(roundEven(globalFlow), roundEven(flowY))) ? costY :
-                    all(equal(roundEven(globalFlow), roundEven(flowX))) ? costX :
-                    candidateCost(origin, globalFlow);
-                if (globalCost < bestCost) {
-                    bestFlow = globalFlow;
-                    bestCost = globalCost;
-                    candidateIndex = 3.0;
-                }
-            }
-            oAlignment = vec4(bestFlow, bestCost, candidateIndex);
-        }
-    """.trimIndent()
-
-    fun rejectionWithFlowSource(flowSource: String) = """
-        #version 300 es
-        precision highp float;
-        precision highp int;
-        uniform sampler2D uBaseGuide;
-        uniform sampler2D uAltGuide;
-        uniform sampler2D uUnblocker;
-        uniform sampler2D uNoiseEstimates;
-        uniform ivec2 uGuideSize;
-        uniform ivec2 uRejectionSize;
-        uniform vec2 uUnblockerScale;
-        uniform vec4 uNoiseTextureScaleBias;
-        uniform vec2 uColorDifferenceMultiplier;
-        uniform float uUnblockerReductionThreshold;
-        uniform float uExtraMotionRobustnessBoost;
-        uniform float uMotionRobustnessBoostVarianceThreshold;
-        uniform float uExtraMotionRobustnessMotionThreshold;
-        layout(location = 0) out float oReverseWeight;
-        layout(location = 1) out float oPixelDifference;
-
-        $flowSource
-
-        vec2 mirrorUv(vec2 uv) {
-            uv = mod(uv, 2.0);
-            return mix(uv, 2.0 - uv, greaterThan(uv, vec2(1.0)));
-        }
-
-        vec4 sampleBiquadraticAbsolute(sampler2D image, vec2 uv) {
-            vec2 texelSize = 1.0 / vec2(uGuideSize);
-            vec2 fractionalOffset = fract(uv * vec2(uGuideSize));
-            vec2 c = fractionalOffset * fractionalOffset -
-                fractionalOffset + 0.5;
-            vec2 w0 = uv - c * texelSize;
-            vec2 w1 = uv + c * texelSize;
-            vec4 samples =
-                abs(texture(image, vec2(w0.x, w0.y))) +
-                abs(texture(image, vec2(w0.x, w1.y))) +
-                abs(texture(image, vec2(w1.x, w1.y))) +
-                abs(texture(image, vec2(w1.x, w0.y)));
-            samples.w /= 1024.0;
-            return samples * 0.25;
-        }
-
-        void main() {
-            // V25 requires GenerateRejectionTexture and GuideImage to share the RAW/2
-            // Bayer-quad domain.
-            vec2 uv = gl_FragCoord.xy / vec2(uRejectionSize);
-            vec4 flow = rejectionFlow(uv);
-            vec2 warpedUv = mirrorUv(uv + flow.xy);
-            float unblocker = texture(uUnblocker, uv * uUnblockerScale).r;
-            if (flow.z < uUnblockerReductionThreshold) unblocker = 0.0;
-            bool motionPrior = flow.z > uExtraMotionRobustnessMotionThreshold;
-            vec4 reference = texture(uBaseGuide, uv);
-            bool greenOnly = reference.w < 0.0;
-            reference.w = abs(reference.w) / 1024.0;
-            vec4 current = sampleBiquadraticAbsolute(uAltGuide, warpedUv);
-            float luma = greenOnly
-                ? reference.y
-                : dot(reference.rgb, vec3(1.0 / 3.0));
-            vec2 referenceNoiseUv =
-                vec2(luma, 0.0) * uNoiseTextureScaleBias.xy +
-                uNoiseTextureScaleBias.zw;
-            vec2 currentNoiseUv =
-                vec2(luma, 1.0) * uNoiseTextureScaleBias.xy +
-                uNoiseTextureScaleBias.zw;
-            vec3 referenceNoise =
-                texture(uNoiseEstimates, referenceNoiseUv).xyz;
-            vec3 currentNoise =
-                texture(uNoiseEstimates, currentNoiseUv).xyz;
-            float filterVarianceScale = greenOnly ? 0.25 : 0.0976597;
-            referenceNoise *= filterVarianceScale;
-            currentNoise *= filterVarianceScale;
-            reference.w *= filterVarianceScale;
-            current.w *= filterVarianceScale;
-            float pixelVariance = min(reference.w, current.w);
-            float minimumVariance = greenOnly
-                ? referenceNoise.y
-                : dot(referenceNoise, vec3(1.0 / 3.0));
-            float robustnessBoost = 1.0;
-            if (reference.w >
-                    uMotionRobustnessBoostVarianceThreshold * minimumVariance &&
-                motionPrior) {
-                robustnessBoost = uExtraMotionRobustnessBoost;
-            }
-            pixelVariance *= 2.0;
-            // Noise estimates are transported through RGBA16F and can quantize to zero at the
-            // dark end. Keep the recovered equations defined without changing any positive
-            // estimate.
-            vec3 combinedNoise = max(
-                referenceNoise + currentNoise,
-                vec3(1.0e-8)
-            );
-            vec3 difference = current.rgb - reference.rgb;
-            vec3 differenceSquared = max(
-                difference * difference - combinedNoise,
-                vec3(0.0)
-            );
-            vec3 variance = max(vec3(pixelVariance), combinedNoise);
-            vec3 pixelDistanceSquared = differenceSquared / combinedNoise;
-            differenceSquared /= variance;
-            float distance = greenOnly
-                ? uColorDifferenceMultiplier.y * differenceSquared.y
-                : uColorDifferenceMultiplier.x *
-                    dot(differenceSquared, vec3(1.0 / 3.0));
-            float pixelDistance = greenOnly
-                ? uColorDifferenceMultiplier.y * pixelDistanceSquared.y
-                : uColorDifferenceMultiplier.x *
-                    dot(pixelDistanceSquared, vec3(1.0 / 3.0));
-            float pixelDifference = exp2(min(-pixelDistance, 0.0));
-            distance *= robustnessBoost;
-            float frameWeight = exp2(min(-distance, 0.0));
-            float weight = min(1.0 - unblocker, frameWeight);
-            oReverseWeight = 1.0 - weight;
-            oPixelDifference = pixelDifference;
-        }
-    """.trimIndent().trimStart()
 }
