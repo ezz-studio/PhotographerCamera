@@ -323,7 +323,18 @@ fun CameraScreen(navController: NavController) {
         pvm.allZoomStops(pvm.calculateLensZoomStops(state.availableCameras, cam), main, cam)
     }
     val settleZoomStop = {
-        val snap = settleContinuousZoomStop(zoomStops, pvm.zoomRatioByMain).snapZoomStop
+        val zoom = pvm.zoomRatioByMain
+        // 0.9.18 缩放死区修复：显示倍率低于当前镜头可渲染下限（minZoom×dispIntrinsic，
+        // 如本机主摄 [1.0,10.0] → 1x）时，拖拽热路径下发被相机 range 下限钳死、FOV
+        // 冻结，仅靠 ±0.05 软吸附只有贴地快滑才够得到超广角档（慢滑 0.6~1x 无效根因）。
+        // 死区内松手：无视 snapThreshold 强制吸附最近档位（<1x 即超广角档），仍走
+        // pvm.settleZoomRatio 的 settle 单次跨镜头（0.8.3 乒乓教训不破，热路径未动）。
+        val minRenderable = pvm.currentMinRenderableZoomRatio()
+        val snap = if (zoom < minRenderable - 0.001f) {
+            zoomStops.minByOrNull { abs(it - zoom) }
+        } else {
+            settleContinuousZoomStop(zoomStops, zoom).snapZoomStop
+        }
         if (snap != null) pvm.settleZoomRatio(snap)
     }
     var wasZooming by remember { mutableStateOf(false) }
@@ -1563,10 +1574,12 @@ private fun ZoomRotor(
     }
 }
 
-/** Format a zoom multiplier the iPhone way: 1×, 2×, 0.5, 1.4×. */
+/** Format a zoom multiplier the iPhone way: 1×, 2×, 0.6, 1.4×.
+ *  0.9.18：<1x 向下取整到 0.1——本机超广角档 dispIntrinsic≈0.654，四舍五入会显示
+ *  "0.7×"（用户报告"0.6 会变成 0.7x"），向下取整与原厂相机 0.6x 标法一致。 */
 private fun formatZoom(z: Float): String =
     if (abs(z - 1f) < 0.05f) "1×"
-    else if (z < 1f) "%.1f".format(z)
+    else if (z < 1f) "%.1f".format(kotlin.math.floor(z * 10f) / 10f)
     else if (abs(z - z.roundToInt()) < 0.05f) "${z.roundToInt()}×"
     else "%.1f".format(z)
 

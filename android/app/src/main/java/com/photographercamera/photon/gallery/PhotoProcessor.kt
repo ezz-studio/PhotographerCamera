@@ -23,6 +23,8 @@ import com.photographercamera.photon.hdr.SourceKind
 import com.photographercamera.photon.lut.ColorCorrectionPipelineResolver
 import com.photographercamera.photon.lut.LutImageProcessor
 import com.photographercamera.photon.lut.LutManager
+import com.photographercamera.photon.lut.LutRenderLayer
+import com.photographercamera.photon.model.ColorRecipeParams
 import com.photographercamera.photon.processor.DepthBokehProcessor
 import com.photographercamera.photon.processor.BokehStyle
 import com.photographercamera.photon.processor.PhotonCoreImagingTuning
@@ -30,6 +32,7 @@ import com.photographercamera.photon.raw.RawDemosaicProcessor
 import com.photographercamera.photon.raw.RawHdrRenderResult
 import com.photographercamera.photon.raw.RawMetadata
 import com.photographercamera.photon.raw.RawNoiseProfileManager
+import com.photographercamera.photon.raw.RawSharpeningDefaults
 import com.photographercamera.photon.raw.SpectralFilmTuning
 import com.photographercamera.photon.utils.BitmapUtils
 import com.photographercamera.photon.utils.PLog
@@ -752,6 +755,26 @@ class PhotoProcessor(
             metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else chromaNoiseReduction)
 
         val colorCorrection = resolveColorCorrection(metadata)
+        // 0.9.18 原生基线锐化：原生滤镜（lutId="none"）落库 recipe 全中性、sharpness=0，
+        // renderLutSharpenPass 因 |sharpening|≤0.0001 整段跳过，又无 filmGrain 补高频，
+        // 多帧时间融合图本底极净 → 12MP@q95 成片仅 ~1MB（任一滤镜片 2.9-3.4MB）。
+        // 为原生补与 RAW 默认同量纲的基线锐化：RawSharpeningDefaults.DEFAULT_STRENGTH=0.4
+        // （× shader 有效系数 2 = 0.8，与 RAW MAX 默认 0.4×ALGORITHM_STRENGTH_SCALE 一致），
+        // 其余 recipe 字段保持用户已调值，lutConfig 仍为 null（零色彩变换）。
+        // 仅影响 YUV/HEIC 导出链：processDng 与 RAW HDR 源直调 applyLutStack，不经此处。
+        val colorCorrectionWithBaseline = if (metadata.lutId == "none") {
+            val baselineParams = (colorCorrection.creativeLayer?.colorRecipeParams
+                ?: ColorRecipeParams.DEFAULT)
+                .copy(sharpness = RawSharpeningDefaults.DEFAULT_STRENGTH)
+            colorCorrection.copy(
+                creativeLayer = LutRenderLayer(
+                    lutConfig = colorCorrection.creativeLayer?.lutConfig,
+                    colorRecipeParams = baselineParams,
+                )
+            )
+        } else {
+            colorCorrection
+        }
 
         if (useComputationalAperture) {
             metadata.computationalAperture?.let { aperture ->
@@ -768,8 +791,8 @@ class PhotoProcessor(
         if (onLutLuminanceGainMap != null) {
             val lutStackResult = lutImageProcessor.applyLutStackWithLuminanceGain(
                 result,
-                colorCorrection.baselineLayer,
-                colorCorrection.creativeLayer,
+                colorCorrectionWithBaseline.baselineLayer,
+                colorCorrectionWithBaseline.creativeLayer,
                 finalNoiseReduction,
                 finalChromaNoiseReduction,
                 luminanceGainDownsample = lutLuminanceGainDownsample,
@@ -779,8 +802,8 @@ class PhotoProcessor(
         } else {
             result = lutImageProcessor.applyLutStack(
                 result,
-                colorCorrection.baselineLayer,
-                colorCorrection.creativeLayer,
+                colorCorrectionWithBaseline.baselineLayer,
+                colorCorrectionWithBaseline.creativeLayer,
                 finalNoiseReduction,
                 finalChromaNoiseReduction
             )

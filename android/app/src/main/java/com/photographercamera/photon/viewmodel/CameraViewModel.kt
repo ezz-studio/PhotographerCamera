@@ -3333,6 +3333,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 0.9.18：当前镜头可真实渲染的最小「显示倍率」= minZoom × displayIntrinsicZoomRatio。
+     * 显示倍率低于该值时，控制器 setZoomRatio 会被相机 zoomRatioRange 下限钳回
+     * （如主摄 id=2 range [1.0,10.0] → 1x 以下全部钳回 1.0，FOV 冻结）——死区。
+     * settle（ZoomRotor 松手 / 捏合停手 2s）时若落点在死区内，必须无视
+     * ±0.05 软吸附阈值强制吸附最近档位（通常即超广角档），否则慢滑 0.6~1x
+     * 永远无法切到超广角（0.9.18 缩放死区修复的判定源）。
+     * 对支持 <1x HAL 路由的机型（主摄 zoomRange.lower<1），该值 <1x，
+     * 本判定自动不触发，行为与上游连续变焦一致。
+     */
+    fun currentMinRenderableZoomRatio(): Float {
+        val camera = state.value.getCurrentCameraInfo() ?: return 0f
+        return camera.minZoom * camera.displayIntrinsicZoomRatio
+    }
+
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
         zoomRatioByMain = ratio
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
