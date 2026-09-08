@@ -208,15 +208,24 @@ data class CameraInfo(
     fun getBoundPhysicalCameraId(): String? = outputPhysicalCameraId
 
     fun getBoundPhysicalCameraId(zoomRatioByMain: Float): String? {
-        if (physicalCameras.isEmpty()) return outputPhysicalCameraId
-        // 1.1.0 变焦重构：逻辑多摄不再按 zoom 绑定固定物理输出流。旧实现把 stream
-        // 锚定在"zoom 最近物理子镜头"，导致 ① zoom characteristics 取自该物理镜头
-        // （CONTROL_ZOOM_RATIO_RANGE 下限 1.0，1x 以下被判不可用）；② zoom 跨物理
-        // 镜头边界时 recreateSessionForPhysicalZoomIfNeeded 反复重建 session
-        // （0.8.2 乒乓风暴根源）。现返回 null = 逻辑流输出，CONTROL_ZOOM_RATIO
-        // 全程由 HAL 无缝路由物理镜头（用户实测逻辑机 id=0 拖拽丝滑即此路径，
-        // 拍照所见即所得）。无逻辑多摄机型（physicalCameras 为空）不受影响。
-        return null
+        if (physicalCameras.size < 2) return outputPhysicalCameraId
+        // 1.2.0 变焦切镜（用户指令"UI 数字变就切镜头，不等松手"）：
+        // 1.1.0 恒返回 null 委托 HAL 逻辑路由，但真机实测（PLG110）OPPO HAL 在
+        // 连续滑动请求中不切物理镜头、停稳才切——即"松手才切"体验的根源。
+        // 现恢复上游语义：跨镜头边界时显式绑定物理输出流，由
+        // recreateSessionForPhysicalZoomIfNeeded 热路径立即重建 session 完成切换。
+        // 阈值按主摄等效显示倍率（targetZoom = 逻辑机 intrinsic × ctrl ≈ UI 显示）：
+        // ≥2.95 绑长焦、<0.95 绑超广角、1x 附近走逻辑流；退出滞回在
+        // resolveRequestedPhysicalCameraId（基准 activeOutputPhysicalCameraId）。
+        // 绑定物理流后焦段连续性由 controller 的 intrinsic 换算保障（物理流
+        // crop 到匹配焦段，切镜瞬间 FOV 不跳变）。
+        return when {
+            zoomRatioByMain >= 2.95f ->
+                physicalCameras.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
+            zoomRatioByMain < 0.95f ->
+                physicalCameras.minByOrNull { it.intrinsicZoomRatio }?.cameraId
+            else -> null
+        }
     }
 
     /**

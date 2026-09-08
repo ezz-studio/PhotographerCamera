@@ -271,7 +271,7 @@ suspend fun exportVideoWithEffects(
 
         // 将临时文件写入 MediaStore Movies/PhotonCamera/
         val displayName = outputDisplayName
-            ?: "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}_edit"
+            ?: "PhoGraCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}_edit"
         val savedUri = saveVideoToMediaStore(context, tempFile, "$displayName.mp4")
         PLog.d(TAG, "Video saved to MediaStore: $savedUri")
         savedUri

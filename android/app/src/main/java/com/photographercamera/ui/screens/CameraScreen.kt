@@ -57,7 +57,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
@@ -320,6 +319,31 @@ fun CameraScreen(navController: NavController) {
         }
         pvm.allZoomStops(pvm.calculateLensZoomStops(state.availableCameras, cam), main, cam)
     }
+    // 1.2.0 原生焦段（用户指令"滑轮加原生焦段橘线+自动吸附"）：后置各镜头
+    // displayIntrinsicZoomRatio 落点（如 PLG110 = 0.65/1.0/2.99，非整数倍）。
+    // 逻辑机条目（1.037）与主摄（1.0）差 <0.1 合并，避免两条线视觉挤在一起。
+    val nativeZoomStops = remember(state.availableCameras) {
+        state.availableCameras
+            // 排除 FRONT/BACK_MACRO，与 globalMaxZoom"最长焦"口径一致（微距非常规变焦档）
+            .filter {
+                it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO &&
+                    it.displayIntrinsicZoomRatio > 0f
+            }
+            // 1.2.0 标称化（用户指令"原生焦段落到整数上更美观"）：0.65→0.6、1.04→1、
+            // 2.99→3。口径与 formatZoom 一致（|r-1|<0.15 归 1；<1 向下取整到 0.1；
+            // ≥1 取整），滑轮橘线与磁吸目标都落在整洁刻度上。下发标称值由 HAL 按
+            // 各自 range 处理，与原生落点差 <5% 视觉无感。
+            .map {
+                val r = it.displayIntrinsicZoomRatio
+                when {
+                    abs(r - 1f) < 0.15f -> 1f
+                    r < 1f -> kotlin.math.floor(r * 10f) / 10f
+                    else -> kotlin.math.round(r)
+                }
+            }
+            .distinct()
+            .sorted()
+    }
     val settleZoomStop = {
         val zoom = pvm.zoomRatioByMain
         // 0.9.18 缩放死区修复：显示倍率低于当前镜头可渲染下限（minZoom×dispIntrinsic，
@@ -333,11 +357,16 @@ fun CameraScreen(navController: NavController) {
         //  - 非死区不近档位 → 维持现状不吸（当前镜头可渲染，连续值照常保留）。
         // 仍走 pvm.settleZoomRatio 的 settle 单次跨镜头（0.8.3 乒乓教训不破，热路径未动）。
         val minRenderable = pvm.currentMinRenderableZoomRatio()
-        val snap = if (zoom < minRenderable - 0.001f) {
+        val raw = if (zoom < minRenderable - 0.001f) {
             settleContinuousZoomStop(zoomStops, zoom).snapZoomStop ?: zoom
         } else {
             settleContinuousZoomStop(zoomStops, zoom).snapZoomStop
         }
+        // 1.2.0 标称化收口（用户指令"原生焦段落到整数上"）：档位吸附命中原生焦段
+        // （= 某镜头 dispIntrinsic 档）时改吸标称值（0.65→0.6、1.04→1、2.99→3），
+        // 与拖拽磁吸目标一致——否则松手软吸附会把整数又拉回 1.04/2.99 非整档。
+        // 自定义焦段不在映射差值内，保持原值不受影响。
+        val snap = raw?.let { v -> nativeZoomStops.firstOrNull { abs(it - v) < 0.06f } ?: v }
         if (snap != null) pvm.settleZoomRatio(snap)
     }
     var wasZooming by remember { mutableStateOf(false) }
@@ -991,6 +1020,7 @@ fun CameraScreen(navController: NavController) {
             zoomX = zoomState,
             minZoom = minZoom,
             maxZoom = maxZoom,
+            nativeZoomStops = nativeZoomStops,
             onZoom = { z ->
                 pvm.setZoomRatio(z)
             },
@@ -1207,12 +1237,8 @@ private fun TopBar(
             )
         }
         IconButton(onClick = onFlashToggle, modifier = Modifier.size(40.dp)) {
-            // photon flashMode: 0=关, 1=开, 2=手电
-            val icon = when (flashMode) {
-                1 -> Icons.Default.FlashOn
-                2 -> Icons.Default.FlashAuto
-                else -> Icons.Default.FlashOff
-            }
+            // 1.2.0 闪光灯二态化（用户指令去掉自动档）：0=关, 1=开
+            val icon = if (flashMode == 1) Icons.Default.FlashOn else Icons.Default.FlashOff
             val tint = if (flashMode == 0) {
                 TextPrimary.copy(alpha = 0.9f)
             } else AccentOrange
@@ -1523,6 +1549,7 @@ private fun ZoomRotor(
     zoom: Float,
     minZoom: Float,
     maxZoom: Float,
+    nativeStops: List<Float>,
     onZoom: (Float) -> Unit,
     zoomBase: () -> Float,
     onZoomStart: () -> Unit,
@@ -1532,15 +1559,29 @@ private fun ZoomRotor(
     val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
     val tickStep = 0.1f            // zoom represented by each tick (screen-even spacing)
     val sideTicks = 9             // ticks each side of center → tapered ruler width
+    // 1.2.0 原生焦段磁吸（用户指令）：拖拽接近原生焦段（各后置镜头 displayIntrinsic
+    // 落点，如 0.65/1.0/2.99）时自动吸附，滑出阈值即脱离。锚定式实现：手势起点记录
+    // anchorZoom、位移相对 anchor 累计——吸附跳变不污染后续位移，避免"实时基准 +
+    // 吸附回写"互相喂值导致的"贴住拉不走"死锁。
+    val snapThreshold = 0.08f
+    var anchorZoom by remember { mutableFloatStateOf(0f) }
+    var dragAccPx by remember { mutableFloatStateOf(0f) }
     Box(
         modifier = modifier
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { delta ->
-                    val newZoom = (zoomBase() - delta / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
-                    onZoom(newZoom)
+                    dragAccPx += delta
+                    val raw = (anchorZoom - dragAccPx / spacingPx * tickStep).coerceIn(minZoom, maxZoom)
+                    val nearest = nativeStops.minByOrNull { abs(it - raw) }
+                    val snapped = if (nearest != null && abs(nearest - raw) <= snapThreshold) nearest else raw
+                    onZoom(snapped)
                 },
-                onDragStarted = { onZoomStart() },
+                onDragStarted = {
+                    anchorZoom = zoomBase()
+                    dragAccPx = 0f
+                    onZoomStart()
+                },
                 onDragStopped = { onZoomSettle() },
             ),
         contentAlignment = Alignment.Center,
@@ -1580,6 +1621,23 @@ private fun ZoomRotor(
                     .background(Color.White.copy(alpha = alpha), shape = RoundedCornerShape(1.dp)),
             )
         }
+        // 1.2.0 原生焦段标记（用户指令）：滑轮窗口 [zoom-0.9, zoom+0.9] 内的原生焦段
+        // 落点画淡橘色竖线（AccentOrange），中心处最明显、向两侧渐隐；压在白刻度之上。
+        nativeStops.forEach { stop ->
+            val offsetTicks = (stop - zoom) / tickStep
+            if (abs(offsetTicks) <= sideTicks) {
+                val edgeFade = (1f - abs(offsetTicks) / (sideTicks + 1)).coerceIn(0.35f, 1f)
+                Box(
+                    Modifier
+                        .offset { IntOffset((offsetTicks * spacingPx).roundToInt(), 0) }
+                        .width(2.dp).height(20.dp)
+                        .background(
+                            AccentOrange.copy(alpha = 0.55f * edgeFade),
+                            shape = RoundedCornerShape(1.dp),
+                        ),
+                )
+            }
+        }
     }
 }
 
@@ -1613,6 +1671,8 @@ private fun BottomPanel(
     zoomX: Float,
     minZoom: Float,
     maxZoom: Float,
+    // 1.2.0 原生焦段（后置镜头 displayIntrinsic 落点）：滑轮橘线标记 + 拖拽磁吸
+    nativeZoomStops: List<Float> = emptyList(),
     onZoom: (Float) -> Unit,
     // 变焦拖拽的同步基准 / 生命周期钩子（软吸附用）
     zoomBase: () -> Float,
@@ -1638,6 +1698,7 @@ private fun BottomPanel(
             zoom = zoomX,
             minZoom = minZoom,
             maxZoom = maxZoom,
+            nativeStops = nativeZoomStops,
             onZoom = onZoom,
             zoomBase = zoomBase,
             onZoomStart = onZoomStart,

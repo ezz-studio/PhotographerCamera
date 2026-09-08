@@ -25,7 +25,7 @@ data class CaptureInfo(
     // 设备信息
     val make: String = Build.MANUFACTURER,
     val model: String = DeviceUtil.exifModel, // EXIF 设备型号（优先使用有效 ASCII 营销名）
-    val software: String = "PhotonCamera",
+    val software: String = "PhoGraCamera",
     
     // 拍摄参数
     val whiteBalance: Int? = null,           // EXIF 白平衡: 0=Auto, 1=Manual

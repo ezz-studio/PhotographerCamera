@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // Single source of truth for the app version: defaultConfig.versionName AND the
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
-val APP_VERSION_NAME = "1.1.0"
-val APP_VERSION_CODE = 51
+val APP_VERSION_NAME = "1.2.0"
+val APP_VERSION_CODE = 52
 
 plugins {
     id("com.android.application")
@@ -26,7 +26,10 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.photographercamera"
+        // 1.2.0：包名改 PhoGraCamera（用户指令，注意大小写）。applicationId 变更 =
+        // 系统视为全新应用：旧版 com.photographercamera 需手动卸载，数据不迁移。
+        // namespace 保持不变（Kotlin 包结构 / R 类 / Manifest 类引用全部不动）。
+        applicationId = "com.PhoGraCamera"
         minSdk = 26          // adaptive-icon launcher requires >=26; GLES 3.0 (18) & Camera2 (21) both satisfied
         targetSdk = 34
         versionCode = APP_VERSION_CODE

@@ -675,7 +675,7 @@ object SuperResolutionDngWriter {
             add(long(TAG_STRIP_BYTE_COUNTS, imageByteCount))
             add(short(TAG_PLANAR_CONFIGURATION, 1))
             cameraRawProfileXmp?.let { add(byteArray(TAG_XMP, it)) }
-            add(ascii(TAG_SOFTWARE, "PhotonCamera"))
+            add(ascii(TAG_SOFTWARE, "PhoGraCamera"))
             add(ascii(TAG_DATETIME, dateTime))
             if (exifEntries.isNotEmpty()) {
                 add(long(TAG_EXIF_IFD_POINTER, 0))

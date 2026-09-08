@@ -1058,11 +1058,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun resolveCaptureRawRenderingEngine(userPrefs: UserPreferences?): RawRenderingEngine {
-        // 0.9.14：走A，捕获默认 AdobeCurve（上游中性基线，profile LUT 仍于 JPEG 前叠加）
-        val engine = userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AdobeCurve
-        // 0.9.9 曾把 AgX 设为默认（自研电影感）；用户已确认走A，把遗留 AgX 统一归一到上游中性 AdobeCurve。
-        // 其他创意档（Spektrafilm/Filmic/Hncs 等）保留用户显式选择。
-        return if (engine == RawRenderingEngine.AgX) RawRenderingEngine.AdobeCurve else engine
+        // 1.2.0：用户指令恢复 AgX 可选——0.9.14 的"AgX 强制归一 AdobeCurve"导致设置页
+        // 永远无法选中 AgX（选了即被本函数改写、并被写回 prefs）。现在尊重用户显式
+        // 选择；未存值时仍回退 AdobeCurve（0.9.14 走A 的上游中性基线，profile LUT
+        // 仍于 JPEG 前叠加）。
+        return userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AdobeCurve
     }
 
     private fun resolveCaptureRawToneMappingParameters(
@@ -3652,9 +3652,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleFlash() {
         cameraController.setFlashMode(
             when (state.value.flashMode) {
+                // 1.2.0 二态化（用户指令去掉自动档）：0=关 1=开，直接往返。
+                // 历史遗留值 2 一并归到关（UI 已不再产生该值，引擎侧消费代码保留无害）。
                 0 -> 1
-                1 -> 2
-                2 -> 0
                 else -> 0
             }
         )

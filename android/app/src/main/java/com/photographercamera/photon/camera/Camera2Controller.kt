@@ -3307,8 +3307,23 @@ class Camera2Controller(private val context: Context) {
         state: CameraState = _state.value,
         camera: CameraInfo? = state.getCurrentCameraInfo()
     ): String? {
-        return camera
-            ?.getBoundPhysicalCameraId(getTargetZoomRatioByMain(state, camera))
+        val targetZoom = getTargetZoomRatioByMain(state, camera)
+        val bound = camera?.getBoundPhysicalCameraId(targetZoom)
+        // 1.2.0 切镜滞回：进入阈值 2.95/0.95（CameraState），退出保持阈值 2.85/1.05。
+        // 切点附近 zoom 抖动会让 desired 在 null/物理镜头间反复翻转 → session 反复
+        // 重建（0.8.2 乒乓教训）。滞回以 activeOutputPhysicalCameraId（真相源，不
+        // 依赖 state 写回时机）为基准，单向收敛：只有拉离切点 0.1 才退出绑定。
+        // active 不属于当前相机物理子镜头（跨相机残留）时不滞回，直接返回 bound。
+        if (bound == null) {
+            val active = activeOutputPhysicalCameraId ?: return null
+            val physicals = camera?.physicalCameras ?: return null
+            if (physicals.none { it.cameraId == active }) return null
+            val teleId = physicals.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
+            val ultraId = physicals.minByOrNull { it.intrinsicZoomRatio }?.cameraId
+            if (active == teleId && targetZoom >= 2.85f) return active
+            if (active == ultraId && targetZoom < 1.05f) return active
+        }
+        return bound
     }
 
     private fun resolveOutputPhysicalCameraId(
@@ -4600,7 +4615,19 @@ class Camera2Controller(private val context: Context) {
             // 原生最大 2 倍：超 HAL 上限部分走 SCALER_CROP_REGION 数字变焦
             val hardMaxZoom = maxSupportedZoom * 2f
             val userZoomRatio = state.zoomRatio.coerceIn(minZoom, hardMaxZoom)
-            val zoomRatio = userZoomRatio
+            // 1.2.0 绑定物理流的 zoom 换算：CONTROL_ZOOM_RATIO 对物理流的焦段 =
+            // 请求值 × (请求值/镜头 intrinsic 的 clamp，即 max(请求值, intrinsic))。
+            // 本链路请求值一直是"逻辑机 zoom"语义（= 显示/dispIntrinsic），直接
+            // 下发给物理流会让画面焦段偏广 3.5%（= intrinsic 因子，如显示 0.9 实际
+            // 0.868）。绑定物理输出时乘回逻辑机 intrinsic 恢复"主摄等效显示倍率"
+            // 语义：物理流被 HAL crop 到与 UI 数字一致的焦段——切镜瞬间 FOV 连续，
+            // 停手不停在原生焦段。session 重建（recreateSessionForPhysicalZoom
+            // IfNeeded）新建 builder 时也走本函数，首帧即携带正确焦段。
+            // 未绑定（逻辑流）保持原语义。
+            val boundIntrinsic = activeOutputPhysicalCameraId?.let {
+                _state.value.getCurrentCameraInfo()?.intrinsicZoomRatio?.takeIf { r -> r > 0f }
+            }
+            val zoomRatio = if (boundIntrinsic != null) userZoomRatio * boundIntrinsic else userZoomRatio
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
             applyZoomRequestSettings(
@@ -5880,10 +5907,20 @@ class Camera2Controller(private val context: Context) {
             }
 
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+            // 1.2.0 绑定物理流的 zoom 换算（与 applyZoomSettings 同一语义）：
+            // 绑定物理输出时把"逻辑机 zoom"请求值乘回逻辑机 intrinsic，物理流
+            // 被 HAL crop 到与 UI 显示一致的焦段（切镜瞬间 FOV 连续）。未绑定
+            // （逻辑流）保持原语义。recreate=true 分支已提前 return，新建
+            // builder 走 applyZoomSettings 统一换算。
+            val requestZoom = activeOutputPhysicalCameraId
+                ?.let { _state.value.getCurrentCameraInfo()?.intrinsicZoomRatio }
+                ?.takeIf { it > 0f }
+                ?.let { intrinsic -> clampedRatio * intrinsic }
+                ?: clampedRatio
             builder.apply {
                 applyZoomRequestSettings(
                     builder = this,
-                    zoomRatio = clampedRatio,
+                    zoomRatio = requestZoom,
                     activeRect = activeRect,
                     zoomRatioRange = zoomRatioRange,
                     resetCropAtUnitZoom = true,

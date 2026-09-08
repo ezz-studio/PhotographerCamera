@@ -171,7 +171,7 @@ object VideoMediaStoreWriter {
     }
 
     private fun buildFileName(dateTakenMs: Long): String {
-        return "PhotonCamera_${
+        return "PhoGraCamera_${
             SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(dateTakenMs))
         }.mp4"
     }
