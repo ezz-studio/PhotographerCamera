@@ -428,6 +428,14 @@ fun CameraScreen(navController: NavController) {
                         filmCurveShadowFloor = mapping.residual.filmCurveShadowFloor,
                         filmCurveHighlightCeiling = mapping.residual.filmCurveHighlightCeiling,
                         colorMatrix3x3 = mapping.residual.colorMatrix3x3,
+                        // 0.9.17：补通桌面端已实现而 Android 此前未接线的参数
+                        sharpenRadius = mapping.residual.sharpenRadius,
+                        vignetteRadius = mapping.residual.vignetteRadius,
+                        vignetteFeather = mapping.residual.vignetteFeather,
+                        vignetteCenterX = mapping.residual.vignetteCenter.getOrElse(0) { 0.5f },
+                        vignetteCenterY = mapping.residual.vignetteCenter.getOrElse(1) { 0.5f },
+                        bloomThreshold = mapping.residual.bloomThreshold,
+                        bloomRadius = mapping.residual.bloomRadius,
                         // 0.9.2：film_curve 消费端门控标记（默认端点非恒等，须显式区分）
                         profileActive = true,
                     )
@@ -644,40 +652,21 @@ fun CameraScreen(navController: NavController) {
         val fx = (maxW - fw) / 2f
         val fy = topReserve + (slotH - fh)                   // anchor to slot bottom
 
-        // ---- inner capture box -----------------------------------------------
-        // 取景框 = 实际拍摄画面相对预览框的缩放。
-        // 0.9.11 公式（用户规格："0.6-1 预览框内图像变化、取景框最大化保持不动；
-        // 1 以上预览框内图像不变、取景框缩放与实际拍摄范围一致"）：
-        //   zoomState 为显示倍率（相对主摄 1x）。预览 GL 在 >1x 钳到当前相机 1x
-        //   显示静止画面（见 Camera2Controller.applyZoomRequestSettings forPreview），
-        //   该静止画面 = 当前相机 dispIntrinsic 倍视野；实际拍摄 = zoomState 倍视野：
-        //       f = dispIntrinsic / zoomState   （>1x：预览视野 → 实际拍摄视野映射）
-        //       f = 1                           （0.6~1x：预览图像实时变化，取景框不动）
-        //   coerceAtMost(1f)：拖拽中长焦上 zoom<dispIntrinsic 的瞬态（控制器钳 1.0，
-        //   实际=预览视野）取景框回全幅不越界。
-        // 动画：animateFloatAsState + 无过冲 spring——拖拽中平滑跟手，settle 跨镜头
-        // 切换时取景框平滑过渡不跳变（旧实现硬计算，切镜两次硬跳无动画）。
-        val camInfo = state.getCurrentCameraInfo()
-        val dispIntrinsic = camInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
-        val fTarget = if (zoomState > 1.001f) (dispIntrinsic / zoomState).coerceAtMost(1f) else 1f
-        val f by animateFloatAsState(
-            targetValue = fTarget,
-            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
-            label = "viewfinderScale",
-        )
+        // 0.9.16（用户指令：完整去掉取景框缩放动画）：取景框恒等于整个预览框，
+        // 不再随 zoomState 收缩/展开。预览 GL 的缩放本身即真实视野变化
+        //（Camera2Controller.applyZoomRequestSettings），无需第二层框动画。
+        // 0.9.11 的 animateFloatAsState(viewfinderScale) + 内框(bw/bh/bx/by) +
+        // 框外压暗遮罩 + 跟随角标已全部移除；网格/拍照闪屏改锚定整个预览框。
         // 0.9.11：等效焦距基准 = 主摄焦段 × 显示倍率（zoomState 即相对主摄 1x），
         // 跨镜头恒正确（26×0.62≈16 超广角 / 26×3=78 长焦）；前置用前置自身焦段。
         // 旧逻辑 18..40 过滤拒掉超广角（~16mm），且用当前相机焦段跨镜头后错误。
+        val camInfo = state.getCurrentCameraInfo()
         val eqBase = if (camInfo?.lensType == LensType.FRONT) {
             camInfo?.focalLength35mmEquivalent?.takeIf { it > 0f } ?: 26f
         } else {
             state.availableCameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
                 ?.focalLength35mmEquivalent?.takeIf { it > 0f } ?: 26f
         }
-        val bw = fw * f
-        val bh = fh * f
-        val bx = fx + (fw - bw) / 2f
-        val by = fy + (fh - bh) / 2f
 
         // vignette 由 photon CameraPreviewGL 内部 GL 管线处理（ColorRecipeParams.vignette），
         // 不再需要外部 setVignetteWindow 调用。
@@ -737,23 +726,10 @@ fun CameraScreen(navController: NavController) {
                 }
             }
 
-            // dimming scrim OUTSIDE the capture box (drawn ABOVE the GL surface —
-            // everything outside the box is a translucent black cover)
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        val scrim = Color.Black.copy(alpha = 0.45f)
-                        val l = bx - fx; val t = by - fy
-                        drawRect(scrim, Offset(0f, 0f), androidx.compose.ui.geometry.Size(size.width, t))
-                        drawRect(scrim, Offset(0f, t + bh), androidx.compose.ui.geometry.Size(size.width, size.height - t - bh))
-                        drawRect(scrim, Offset(0f, t), androidx.compose.ui.geometry.Size(l, bh))
-                        drawRect(scrim, Offset(l + bw, t), androidx.compose.ui.geometry.Size(size.width - l - bw, bh))
-                    },
-            )
+            // 0.9.16：框外压暗遮罩已随取景框缩放动画一并移除（取景框恒为全预览框）。
 
             // tap = focus + meter there; long press = back to average metering.
-            // Ring + corner brackets drawn ABOVE the GL view (sibling layer).
+            // Ring drawn ABOVE the GL view (sibling layer).
             Box(
                 Modifier
                     .fillMaxSize()
@@ -783,20 +759,7 @@ fun CameraScreen(navController: NavController) {
                             drawCircle(rc, radius = 26.dp.toPx(), center = Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
                             drawCircle(rc, radius = 3.dp.toPx(), center = Offset(cx, cy))
                         }
-                        // corner brackets track the animated capture box
-                        val color = Color.White.copy(alpha = 0.9f)
-                        val stroke = 2.dp.toPx()
-                        val corner = 18.dp.toPx().coerceAtMost(bw * 0.22f)
-                        val l = bx - fx; val t = by - fy
-                        val r = l + bw; val btm = t + bh
-                        drawLine(color, Offset(l, t + corner), Offset(l, t), stroke)
-                        drawLine(color, Offset(l, t), Offset(l + corner, t), stroke)
-                        drawLine(color, Offset(r - corner, t), Offset(r, t), stroke)
-                        drawLine(color, Offset(r, t), Offset(r, t + corner), stroke)
-                        drawLine(color, Offset(r, btm - corner), Offset(r, btm), stroke)
-                        drawLine(color, Offset(r, btm), Offset(r - corner, btm), stroke)
-                        drawLine(color, Offset(l + corner, btm), Offset(l, btm), stroke)
-                        drawLine(color, Offset(l, btm), Offset(l, btm - corner), stroke)
+                        // 0.9.16：跟随取景框的 corner brackets 已随缩放动画一并移除。
                     },
             )
 
@@ -892,23 +855,18 @@ fun CameraScreen(navController: NavController) {
                 }
             }
 
-            // grid lives INSIDE the capture box → always within the shot range
+            // grid lives INSIDE the preview frame → always within the shot range
             if (showGrid) {
-                Box(
-                    Modifier
-                        .offset { IntOffset((bx - fx).roundToInt(), (by - fy).roundToInt()) }
-                        .size(with(density) { bw.toDp() }, with(density) { bh.toDp() }),
-                ) {
+                Box(Modifier.fillMaxSize()) {
                     GridOverlay()
                 }
             }
 
-            // capture feedback: brief white flash over the box content only
+            // capture feedback: brief white flash over the preview frame only
             if (flashAnim.value > 0f) {
                 Box(
                     Modifier
-                        .offset { IntOffset((bx - fx).roundToInt(), (by - fy).roundToInt()) }
-                        .size(with(density) { bw.toDp() }, with(density) { bh.toDp() })
+                        .fillMaxSize()
                         .background(Color.White.copy(alpha = flashAnim.value)),
                 )
             }

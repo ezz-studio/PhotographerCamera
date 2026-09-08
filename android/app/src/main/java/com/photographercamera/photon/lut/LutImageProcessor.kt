@@ -1002,6 +1002,28 @@ class LutImageProcessor(context: Context? = null) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uToneShoulder"), toneShoulder)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uTonePivot"), tonePivot)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uVignette"), vignette)
+            // 0.9.17：profile.vignette 桌面语义（radius/feather/center）
+            run {
+                val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+                val profileVignette = fp.profileActive && vignette > 0f
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(program, "uVignetteStyle"),
+                    if (profileVignette) 1f else 0f
+                )
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(program, "uVignetteRadius"),
+                    fp.vignetteRadius.coerceIn(0.1f, 1f)
+                )
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(program, "uVignetteFeather"),
+                    fp.vignetteFeather.coerceIn(0.05f, 1f)
+                )
+                GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(program, "uVignetteCenter"),
+                    fp.vignetteCenterX.coerceIn(0f, 1f),
+                    fp.vignetteCenterY.coerceIn(0f, 1f)
+                )
+            }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uFlash"), flash)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uBleachBypass"), bleachBypass)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uNoise"), noise)
@@ -1938,7 +1960,14 @@ class LutImageProcessor(context: Context? = null) {
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(lutSharpenProgram, "uRadius"),
-            SrgbSharpnessShader.DEFAULT_RADIUS
+            // 0.9.17：profile.sharpen.radius 对齐桌面端 apply_sharpen(radius)——
+            // 仅 profile 注入时覆盖，否则保持上游默认半径
+            if (com.photographercamera.core.photon.color.FilmParamsStore.current.profileActive) {
+                com.photographercamera.core.photon.color.FilmParamsStore.current.sharpenRadius
+                    .coerceIn(0.5f, 3f)
+            } else {
+                SrgbSharpnessShader.DEFAULT_RADIUS
+            }
         )
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(lutSharpenProgram, "uThreshold"),
@@ -3322,6 +3351,11 @@ class LutImageProcessor(context: Context? = null) {
             uniform float uToneShoulder;  // -1.0 ~ +1.0 (亮部曲线塑形)
             uniform float uTonePivot;     // -1.0 ~ +1.0 (曲线中点偏移)
             uniform float uVignette;      // -1.0 ~ +1.0 (晕影)
+            // 0.9.17：profile.vignette 的桌面语义参数（tools/profile_renderer.apply_vignette）
+            uniform float uVignetteStyle;    // 0=上游默认公式 1=profile 桌面公式（radius/feather/center）
+            uniform float uVignetteRadius;   // 0..1 dist 归一半径
+            uniform float uVignetteFeather;  // 0..1 边缘过渡带
+            uniform vec2  uVignetteCenter;   // uv 空间中心（y 自顶行起，与桌面约定一致）
             uniform float uFlash;         // 0.0 ~ 1.0 (镜头轴向直闪模拟)
             uniform float uBleachBypass;  // 0.0 ~ 1.0 (留银冲洗强度)
             uniform float uNoise;         // 0.0 ~ 1.0 (噪点)
@@ -3599,13 +3633,21 @@ class LutImageProcessor(context: Context? = null) {
 
                     // 9. 晕影（Vignette - 边缘光线衰减/增强）
                     if (abs(uVignette) > 0.0) {
+                        if (uVignetteStyle > 0.5) {
+                            // 0.9.17：profile 桌面公式（apply_vignette: amount>0 仅暗角）
+                            // dist = |uv - center| / (radius*0.7071)；mask = 1 - amount*clamp((dist-(1-feather))/feather,0,1)
+                            float vdist = distance(uvCoord, uVignetteCenter) / max(0.05, uVignetteRadius * 0.7071);
+                            float vfeather = max(0.001, uVignetteFeather);
+                            float vmask = 1.0 - uVignette * clamp((vdist - (1.0 - vfeather)) / vfeather, 0.0, 1.0);
+                            color.rgb *= vmask;
+                        } else {
                         // 计算从中心到边缘的距离
                         vec2 center = vec2(0.5, 0.5);
                         float dist = distance(uvCoord, center);
-                        
+
                         // 使用 smoothstep 创建平滑过渡
                         float vignetteMask = smoothstep(0.8, 0.3, dist);
-                        
+
                         // 根据 uVignette 符号决定是暗角还是亮角
                         if (uVignette < 0.0) {
                             // 暗角：边缘变暗（更强的效果：从0.01到1.0）
@@ -3613,6 +3655,7 @@ class LutImageProcessor(context: Context? = null) {
                         } else {
                             // 亮角：边缘变亮（增强效果）
                             color.rgb = mix(color.rgb, vec3(1.0), (1.0 - vignetteMask) * uVignette);
+                        }
                         }
                     }
 

@@ -925,6 +925,28 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 FilmGrainShaders.pixelScale(width, height)
             )
             GLES30.glUniform1f(locations.uVignetteLocation, params.vignette)
+            // 0.9.17：profile.vignette 桌面语义（radius/feather/center），与成片端同步
+            run {
+                val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+                val profileVignette = fp.profileActive && params.vignette > 0f
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(locations.programId, "uVignetteStyle"),
+                    if (profileVignette) 1f else 0f
+                )
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(locations.programId, "uVignetteRadius"),
+                    fp.vignetteRadius.coerceIn(0.1f, 1f)
+                )
+                GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(locations.programId, "uVignetteFeather"),
+                    fp.vignetteFeather.coerceIn(0.05f, 1f)
+                )
+                GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(locations.programId, "uVignetteCenter"),
+                    fp.vignetteCenterX.coerceIn(0f, 1f),
+                    fp.vignetteCenterY.coerceIn(0f, 1f)
+                )
+            }
             GLES30.glUniform1f(locations.uFlashLocation, params.flash)
             GLES30.glUniform1f(locations.uBleachBypassLocation, params.bleachBypass)
             GLES30.glUniform1f(locations.uNoiseLocation, params.noise)

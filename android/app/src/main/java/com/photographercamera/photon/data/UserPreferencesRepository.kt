@@ -57,6 +57,7 @@ import com.photographercamera.photon.model.CameraPreset
 import com.photographercamera.photon.model.LutSelectorMode
 import com.photographercamera.photon.mgc.PhotonLookContract
 import com.photographercamera.photon.processor.DenoiseStrength
+import com.photographercamera.photon.processor.MgcRawMaxMode
 import org.json.JSONObject
 
 /**
@@ -539,8 +540,14 @@ class UserPreferencesRepository(private val context: Context) {
             val useHeicExport = preferences[USE_HEIC_EXPORT] ?: false
             val useJpeg444Export =
                 (preferences[USE_JPEG_444_EXPORT] ?: false) && !useHeicExport
-            val hdrPlusBracketExposureEnabled = preferences[HDR_PLUS_BRACKET_EXPOSURE_ENABLED]
-                ?: MultiFrameConfig.DEFAULT_HDR_PLUS_BRACKET_EXPOSURE
+            // 0.9.16 对齐上游：SABRE 融合模式不支持包围曝光（supportsBracketExposure=false），
+            // 此时强制忽略用户的 bracket 开关——同曝光帧走 HDR 融合会产生重影。
+            val rawMaxModeForBracket = runCatching {
+                MgcRawMaxMode.valueOf(preferences[RAW_MAX_MERGE_MODE] ?: MgcRawMaxMode.DEFAULT.name)
+            }.getOrDefault(MgcRawMaxMode.DEFAULT)
+            val hdrPlusBracketExposureEnabled = rawMaxModeForBracket.supportsBracketExposure &&
+                (preferences[HDR_PLUS_BRACKET_EXPOSURE_ENABLED]
+                    ?: MultiFrameConfig.DEFAULT_HDR_PLUS_BRACKET_EXPOSURE)
             val storedVideoStabilizationMode = VideoStabilizationMode.entries.firstOrNull {
                 it.name == preferences[VIDEO_STABILIZATION_MODE]
             } ?: VideoStabilizationMode.OIS

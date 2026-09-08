@@ -8,11 +8,28 @@ internal object BloomLdrSettings {
     private const val HIGHLIGHT_THRESHOLD_SOFTNESS = 0.2f
     private const val MAX_COMPOSITE_STRENGTH = 0.8f
 
+    /**
+     * 0.9.17：profile.bloom 的 threshold/radius 覆盖（对齐桌面端 apply_bloom）。
+     * 从 FilmParamsStore 读取；未注入 profile 时返回 null → 保持上游默认语义。
+     */
+    private fun profileBloomThreshold(): Float? {
+        val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+        return if (fp.profileActive) fp.bloomThreshold?.coerceIn(0f, 1f) else null
+    }
+
+    /** 桌面 bloom.radius(0.5..4) → 0..1 mip 选择因子（radius=1 → 0.5 中性）。 */
+    private fun profileBloomRadiusFactor(): Float? {
+        val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+        if (!fp.profileActive) return null
+        return fp.bloomRadius?.let { ((it - 1f) / 3f + 0.5f).coerceIn(0f, 1f) }
+    }
+
     fun thresholdPrecomputations(): FloatArray {
-        val knee = HIGHLIGHT_THRESHOLD * HIGHLIGHT_THRESHOLD_SOFTNESS.coerceIn(0f, 1f)
+        val threshold = profileBloomThreshold() ?: HIGHLIGHT_THRESHOLD
+        val knee = threshold * HIGHLIGHT_THRESHOLD_SOFTNESS.coerceIn(0f, 1f)
         return floatArrayOf(
-            HIGHLIGHT_THRESHOLD,
-            HIGHLIGHT_THRESHOLD - knee,
+            threshold,
+            threshold - knee,
             2.0f * knee,
             0.25f / (knee + 0.00001f)
         )
@@ -20,7 +37,7 @@ internal object BloomLdrSettings {
 
     fun mipAddWeight(sourceMip: Int, mipCount: Int, bloom: Float): Float {
         if (mipCount <= 1) return 1f
-        val radius = smooth01(bloom.coerceIn(0f, 1f))
+        val radius = profileBloomRadiusFactor() ?: smooth01(bloom.coerceIn(0f, 1f))
         val mipPosition = sourceMip.toFloat() / (mipCount - 1).toFloat()
         val localDamping = 0.45f + mipPosition * 0.75f
         val radiusBoost = 0.7f + radius * 0.8f
@@ -51,7 +68,7 @@ internal object BloomLdrSettings {
         val maxMip = (mipCount - 1).coerceAtLeast(0)
         if (maxMip == 0) return 0f
         val maxSelectableMip = minOf(maxMip, 5)
-        val radius = smooth01(bloom.coerceIn(0f, 1f))
+        val radius = profileBloomRadiusFactor() ?: smooth01(bloom.coerceIn(0f, 1f))
         return radius * maxSelectableMip.toFloat()
     }
 

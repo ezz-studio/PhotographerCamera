@@ -58,6 +58,11 @@ internal object PreviewColorShader {
             uniform float uFilmGrainPixelScale;
             """ else ""}
             uniform float uVignette;
+            // 0.9.17：profile.vignette 桌面语义（radius/feather/center，与成片端同步）
+            uniform float uVignetteStyle;
+            uniform float uVignetteRadius;
+            uniform float uVignetteFeather;
+            uniform vec2 uVignetteCenter;
             uniform float uFlash;
             uniform float uBleachBypass;
             uniform float uChromaticAberration;
@@ -289,12 +294,20 @@ internal object PreviewColorShader {
                     }
 
                     if (abs(uVignette) > 0.001) {
+                        if (uVignetteStyle > 0.5) {
+                            // 0.9.17：profile 桌面公式（apply_vignette）
+                            float vdist = distance(vTexCoord, uVignetteCenter) / max(0.05, uVignetteRadius * 0.7071);
+                            float vfeather = max(0.001, uVignetteFeather);
+                            float vmask = 1.0 - uVignette * clamp((vdist - (1.0 - vfeather)) / vfeather, 0.0, 1.0);
+                            color.rgb *= vmask;
+                        } else {
                         float dist = distance(vTexCoord, vec2(0.5));
                         float vignetteMask = smoothstep(0.8, 0.3, dist);
                         if (uVignette < 0.0) {
                             color.rgb *= mix(0.01, 1.0, vignetteMask) * abs(uVignette) + (1.0 + uVignette);
                         } else {
                             color.rgb = mix(color.rgb, vec3(1.0), (1.0 - vignetteMask) * uVignette);
+                        }
                         }
                         color.rgb = sanitizeColor(color.rgb);
                     }

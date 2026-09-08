@@ -36,6 +36,20 @@ object FilmParamsStore {
          * 门控 film 曲线消费端，保证非 profile 状态下引擎行为与上游一致。
          */
         val profileActive: Boolean = false,
+        // ===== 0.9.17：补通桌面端 profile_renderer.py 已实现而 Android 端未接线的参数 =====
+        /** sharpen.radius（0.5..3），SrgbSharpnessShader uRadius。 */
+        val sharpenRadius: Float = 1f,
+        /** vignette.radius（0..1，桌面 dist 归一半径），成片/预览 vignette shader。 */
+        val vignetteRadius: Float = 1f,
+        /** vignette.feather（0..1，边缘过渡带宽度）。 */
+        val vignetteFeather: Float = 0.5f,
+        /** vignette.center（0..1×2，uv 空间，y 自顶行起——与桌面 UV 约定一致）。 */
+        val vignetteCenterX: Float = 0.5f,
+        val vignetteCenterY: Float = 0.5f,
+        /** bloom.threshold（0..1，桌面高光提取阈值）；null=未注入，走上游默认 0.9。 */
+        val bloomThreshold: Float? = null,
+        /** bloom.radius（0.5..4，桌面高斯核半径）；null=未注入，radius 由 bloom 强度推导。 */
+        val bloomRadius: Float? = null,
     ) {
         val isIdentity: Boolean
             get() = halationStrength <= 0f && grainSize == 1f && grainDensity == 1f &&
