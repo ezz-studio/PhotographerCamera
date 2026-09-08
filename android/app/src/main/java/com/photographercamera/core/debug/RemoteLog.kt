@@ -179,7 +179,10 @@ object RemoteLog {
         if (logLines.isEmpty()) return "暂无日志可上传"
         return runCatching {
             val body = buildBody(logLines.takeLast(MAX_BATCH_LINES * 4))
-            if (post(body)) null else lastError.ifBlank { "上传失败" }
+            // 1.0.1 修复：post 必须显式传入 url——旧实现无参调用 post(body)，post
+            // 内部用 object 字段 endpoint（bootstrap 已从启动链移除，永远为空串），
+            // URL("") 抛 MalformedURLException: no protocol（用户报障根因）。
+            if (post(url, body)) null else lastError.ifBlank { "上传失败" }
         }.getOrElse { "上传失败：${it.javaClass.simpleName}" }
     }
 
@@ -217,7 +220,7 @@ object RemoteLog {
             }
         }
         val body = buildBody(batch)
-        val ok = post(body)
+        val ok = post(endpoint, body)
         if (ok) {
             sentBatches++
             lastError = ""
@@ -254,10 +257,11 @@ object RemoteLog {
         return sb.toString()
     }
 
-    private fun post(body: String): Boolean {
+    /** POST one batch to [targetEndpoint]. Returns true on 2xx. Never throws. */
+    private fun post(targetEndpoint: String, body: String): Boolean {
         var conn: HttpURLConnection? = null
         return try {
-            val url = URL(endpoint)
+            val url = URL(targetEndpoint)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
@@ -282,7 +286,8 @@ object RemoteLog {
                 false
             }
         } catch (t: Throwable) {
-            lastError = t.javaClass.simpleName + ": " + (t.message ?: "")
+            // message 截短：异常原文可能携带超长 URL/上下文，行内提示显示不全（用户报障）。
+            lastError = t.javaClass.simpleName + ": " + (t.message ?: "").take(120)
             false
         } finally {
             runCatching { conn?.disconnect() }

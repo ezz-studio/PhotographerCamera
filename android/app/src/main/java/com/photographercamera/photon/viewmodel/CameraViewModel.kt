@@ -3323,6 +3323,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        // 1.1.0 变焦重构：当前镜头是逻辑多摄（≥2 物理子镜头，HAL 无缝变焦）时，
+        // settle 不做 app 层跨镜头路由——逻辑机 zoomRatioRange 覆盖全局（如
+        // [0.6,20]），显示倍率换算后直接下发，物理镜头切换由 CONTROL_ZOOM_RATIO
+        // 的 HAL 路由完成（拖拽与松手全程无 session 重建）。findOptimalLens 的
+        // 物理镜头候选池不适用于"当前=逻辑机"形态，否则会把丝滑的逻辑机切回
+        // 物理机（session 重建 + FOV 跳变）。单物理机型的 settle 路由行为不变。
+        if (currentCamera.physicalCameras.size >= 2) {
+            setZoomRatio(ratio)
+            return
+        }
         if (isCurrentLensCustomZoomRatioStop(ratio)) {
             setZoomRatio(ratio)
             return

@@ -209,9 +209,14 @@ data class CameraInfo(
 
     fun getBoundPhysicalCameraId(zoomRatioByMain: Float): String? {
         if (physicalCameras.isEmpty()) return outputPhysicalCameraId
-        return physicalCameras.minByOrNull {
-            abs(it.intrinsicZoomRatio - zoomRatioByMain)
-        }?.cameraId ?: outputPhysicalCameraId
+        // 1.1.0 变焦重构：逻辑多摄不再按 zoom 绑定固定物理输出流。旧实现把 stream
+        // 锚定在"zoom 最近物理子镜头"，导致 ① zoom characteristics 取自该物理镜头
+        // （CONTROL_ZOOM_RATIO_RANGE 下限 1.0，1x 以下被判不可用）；② zoom 跨物理
+        // 镜头边界时 recreateSessionForPhysicalZoomIfNeeded 反复重建 session
+        // （0.8.2 乒乓风暴根源）。现返回 null = 逻辑流输出，CONTROL_ZOOM_RATIO
+        // 全程由 HAL 无缝路由物理镜头（用户实测逻辑机 id=0 拖拽丝滑即此路径，
+        // 拍照所见即所得）。无逻辑多摄机型（physicalCameras 为空）不受影响。
+        return null
     }
 
     /**

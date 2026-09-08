@@ -31,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -712,8 +713,10 @@ fun AppSettingsScreen(
             SettingsPage.MAINTENANCE -> SettingsCard {
                 // 复用 CameraScreen.kt 中的 UpdateCheckRow（internal，同包可见）
                 UpdateCheckRow()
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                // 1.0.1：外层 Column 包裹——上传失败原因（如 MalformedURLException）
+                // 文本较长，旧布局挤在行内右侧被截断遮挡（用户报障）。现长文本
+                // （>24 字符）另起一整行显示，最多 3 行省略。
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
@@ -732,19 +735,34 @@ fun AppSettingsScreen(
                         }
                         .padding(vertical = 10.dp),
                 ) {
-                    Icon(
-                        Icons.Default.BugReport,
-                        contentDescription = null,
-                        tint = TextPrimary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text("上传日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    Text(
-                        uploadMsg ?: "手动上传 ›",
-                        color = TextSecondary,
-                        fontSize = 12.sp,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.BugReport,
+                            contentDescription = null,
+                            tint = TextPrimary.copy(alpha = 0.9f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text("上传日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        Text(
+                            uploadMsg ?: "手动上传 ›",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    val uploadDetail = uploadMsg
+                    if (uploadDetail != null && uploadDetail.length > 24) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            uploadDetail,
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

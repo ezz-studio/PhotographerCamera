@@ -1628,7 +1628,16 @@ class Camera2Controller(private val context: Context) {
         }
 
         // 默认选择主摄
+        // 1.1.0：后置逻辑多摄优先（≥2 个物理子镜头，排除单物理 supplemental 绑定条目）。
+        // 逻辑机 zoomRatioRange 覆盖全局（如 [0.6,20]），配合逻辑流输出 =
+        // CONTROL_ZOOM_RATIO HAL 无缝路由，拖拽全程不松手自动切镜头（用户实测
+        // "把 0 作为默认镜头比你写的更丝滑"）。无逻辑多摄的机型此层为 null，
+        // 自然回落到 BACK_MAIN，机型自适应。
         val defaultCamera = cameras.firstOrNull { it.cameraId == preferredCameraId }
+            ?: cameras.firstOrNull {
+                it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                        it.physicalCameras.size >= 2
+            }
             ?: cameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
             ?: cameras.firstOrNull { it.lensFacing == CameraCharacteristics.LENS_FACING_BACK }
             ?: cameras.firstOrNull()
@@ -4110,6 +4119,12 @@ class Camera2Controller(private val context: Context) {
                                 effectiveUseStillFlashAeMode ->
                             resolveStillFlashAeMode()
 
+                        // 1.1.0：UI 闪光第三态"自动"（数值 2，与 Camera2 TORCH 撞值但
+                        // 语义不同）：AE_MODE=ON_AUTO_FLASH 交给 HAL 在拍摄时自动判定
+                        // 闪光，预览请求与 still 请求均命中本分支，预览不再常亮。
+                        state.flashMode == 2 ->
+                            resolveSupportedAeMode(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+
                         else -> resolveSupportedAeMode(CaptureRequest.CONTROL_AE_MODE_ON)
                     }
                 }
@@ -4544,7 +4559,14 @@ class Camera2Controller(private val context: Context) {
             }
 
             CameraMetadata.FLASH_MODE_TORCH -> {
-                builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_TORCH)
+                // 1.1.0 闪光灯语义修复：photo 模式下 state.flashMode 的数值 2 是 UI
+                // 第三态"自动"（CameraScreen FlashAuto 图标），与 Camera2 的
+                // FLASH_MODE_TORCH(=2) 数值相同但语义不同。旧行为把它当 torch 下发
+                // → 预览常亮手电（用户报障）。现改为 FLASH_MODE_OFF（预览不亮），
+                // AE_MODE=ON_AUTO_FLASH 由 applyExposureSettings 统一下发，HAL 在
+                // 拍摄时自动判定是否击发。真正的手电常亮走 videoConfig.torchEnabled
+                // 分支（上方已提前 return），互不影响。
+                builder.set(CaptureRequest.FLASH_MODE, CameraMetadata.FLASH_MODE_OFF)
             }
 
             else -> {
@@ -7317,7 +7339,11 @@ class Camera2Controller(private val context: Context) {
         val needsPrecapture =
             isFlashSupported &&
             isAePrecaptureSupported() &&
-            currentState.flashMode == CameraMetadata.FLASH_MODE_SINGLE &&
+            (currentState.flashMode == CameraMetadata.FLASH_MODE_SINGLE ||
+                // 1.1.0：UI 闪光"自动"态（数值 2）同样需要 precapture——AE 收敛后
+                // HAL 才能正确自动判定是否闪光。precapture 会话的 AE_MODE 由
+                // applyExposureSettings 按本模式解析为 ON_AUTO_FLASH，不会强制击发。
+                currentState.flashMode == 2) &&
             currentState.isIsoAuto &&
             currentState.isShutterSpeedAuto &&
             resolveStillFlashAeMode() != CaptureRequest.CONTROL_AE_MODE_OFF
