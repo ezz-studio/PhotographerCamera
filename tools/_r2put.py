@@ -41,7 +41,11 @@ def read_version():
 
 def find_apk(version: str) -> str:
     apk_name = f"PhotographerCamera-{version}.apk"
+    # 1.0.0 起正式发布走 release 包（R8 minified + debug key 签名，可原地升级）；
+    # release 目录优先，找不到再回退 debug 目录（历史流程兼容）。
     roots = [
+        os.path.join(REPO, "android", "app", "build2", "outputs", "apk", "release"),
+        os.path.join(REPO, "android", "app", "build", "outputs", "apk", "release"),
         os.path.join(REPO, "android", "app", "build2", "outputs", "apk", "debug"),
         os.path.join(REPO, "android", "app", "build", "outputs", "apk", "debug"),
     ]
@@ -49,7 +53,7 @@ def find_apk(version: str) -> str:
         path = os.path.join(root, apk_name)
         if os.path.isfile(path):
             return path
-    raise SystemExit(f"APK not found: {apk_name} (searched build2/build debug dirs)")
+    raise SystemExit(f"APK not found: {apk_name} (searched build2/build release+debug dirs)")
 
 
 def default_notes(version: str) -> str:

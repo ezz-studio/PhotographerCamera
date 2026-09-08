@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PhotographerCamera</string>
+    <string name="app_name">PhoGraCamera</string>
 
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>

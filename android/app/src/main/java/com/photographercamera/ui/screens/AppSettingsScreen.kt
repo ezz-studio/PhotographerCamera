@@ -163,6 +163,9 @@ fun AppSettingsScreen(
 
     // ---- 维护组状态 ----------------------------------------------------------
     var restoreMsg by remember { mutableStateOf<String?>(null) }
+    // 1.0.0：手动上传日志的状态（null=未上传/初始提示；"上传中…"期间禁点）
+    var uploading by remember { mutableStateOf(false) }
+    var uploadMsg by remember { mutableStateOf<String?>(null) }
 
     // 位置权限：开启"保存地址位置"时请求；拒绝则回落关闭态
     val locPermLauncher = rememberLauncherForActivityResult(
@@ -226,12 +229,9 @@ fun AppSettingsScreen(
                 }
                 SectionLabel("维护")
                 SettingsCard {
-                    NavRow("维护", "检查更新 · 调试日志 · 恢复内置预设") { page = SettingsPage.MAINTENANCE }
+                    NavRow("维护", "检查更新 · 手动上传日志 · 恢复内置预设") { page = SettingsPage.MAINTENANCE }
                 }
-                SectionLabel("其他")
-                SettingsCard {
-                    NavRow("关于相机", "成像参数与管线参与状态") { page = SettingsPage.ABOUT }
-                }
+                // 1.0.0 用户指令：移除"关于相机"设置项（不再展示成像参数与管线参与状态）
                 Spacer(Modifier.height(24.dp))
             }
 
@@ -717,7 +717,19 @@ fun AppSettingsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onDebugClick)
+                        .clickable(enabled = !uploading) {
+                            uploading = true
+                            uploadMsg = "上传中…"
+                            scope.launch {
+                                // 1.0.0：日志先存 APP 隐私目录（filesDir/logs），此处用户
+                                // 手动触发一次上传；完成后行内直接提示结果。
+                                val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.photographercamera.core.debug.DebugLog.manualUpload(context)
+                                }
+                                uploading = false
+                                uploadMsg = result ?: "已上传 ✓"
+                            }
+                        }
                         .padding(vertical = 10.dp),
                 ) {
                     Icon(
@@ -727,8 +739,12 @@ fun AppSettingsScreen(
                         modifier = Modifier.size(20.dp),
                     )
                     Spacer(Modifier.width(12.dp))
-                    Text("调试日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    Text("远程日志 ›", color = TextSecondary, fontSize = 12.sp)
+                    Text("上传日志", color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text(
+                        uploadMsg ?: "手动上传 ›",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -748,21 +764,9 @@ fun AppSettingsScreen(
                 }
             }
 
-            SettingsPage.ABOUT -> {
-                // 0.7.5：AboutCard 包进卡片留出两侧边距（此前直贴 Column 顶边）
-                SettingsCard {
-                    AboutCard("多帧融合", "JPEG MAX · 默认 6 帧 · Spatial 融合", OkGreen, "已参与成像管线（GlesYuvStacker）")
-                    AboutCard("RAW MAX", "Spatial/Sabre 融合模式可选 · 画质调优默认启用", OkGreen, "已参与成像管线（GlesMgcRawSpatialStacker）")
-                    AboutCard("照片质量", "JPEG 质量 100", OkGreen, "已参与成像管线（ImageCapture.setJpegQuality）")
-                    AboutCard("镜头阴影校正", "已开启（写死）", OkGreen, "RAW 显影管线内已实现")
-                    AboutCard("拍摄后自动保存", "已开启", OkGreen, "已参与成像管线（photon GalleryManager）")
-                    AboutCard("RAW MAX 锐化", "默认 0.5 · 亮度降噪 1 · 色度降噪 1", OkGreen, "已参与成像管线（RawDemosaicProcessor）")
-                    AboutCard("JPEG 4:4:4 导出", "目标启用", Color(0xFFB9A15A), "未参与：待 libjpeg-turbo 4:4:4 编码集成")
-                    AboutCard("降噪 / 锐化", "高质量", OkGreen, "已参与成像管线（photon NRLevel / EdgeLevel）")
-                    AboutCard("RAW 渲染引擎", "Adobe 曲线 · Camera2 降噪模型", OkGreen, "已参与成像管线（RawRenderingEngine.AdobeCurve）")
-                }
-                Spacer(Modifier.height(12.dp))
-            }
+            // 1.0.0 用户指令：SettingsPage.ABOUT 分支移除——"关于相机"设置项已删，
+            // 不再展示成像参数与管线参与状态（AboutCard 组件一并退役）。
+            else -> {}
         }
     }
 }
@@ -816,29 +820,7 @@ private fun NavRow(title: String, summary: String, onClick: () -> Unit) {
     }
 }
 
-/** 关于相机页参数卡：参数名 + 取值 + 管线参与状态。 */
-@Composable
-private fun AboutCard(name: String, value: String, statusColor: Color, status: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(name, color = TextPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-            Text(value, color = TextSecondary, fontSize = 12.sp)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(statusColor),
-            )
-            Text(status, color = TextSecondary, fontSize = 11.sp, modifier = Modifier.padding(start = 6.dp))
-        }
-    }
-}
+// 1.0.0：AboutCard 组件随"关于相机"设置项一并移除（用户指令：不再展示参数与状态）。
 
 @Composable
 private fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {

@@ -103,6 +103,35 @@ object UpdateChecker {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
 
     /**
+     * 1.0.0 全 semver 版本比较：逐段取数值比较（"0.10.0" vs "0.9.19" → 10>9 → 正）。
+     * 旧实现只依赖 versionCode 单调递增，服务器/本地 code 一旦脱钩（历史构建
+     * versionCode 回退/重复）就会把任意 0.10.x/1.0.x 误判为"已是最新"。
+     * 返回正值 = a 更新，0 = 相等，负值 = a 更旧。非数字段按 0 处理，长度不等
+     * 以 0 补齐（"1.0" == "1.0.0"）。
+     */
+    fun compareVersionNames(a: String, b: String): Int {
+        val pa = a.split('.').map { it.takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        val pb = b.split('.').map { it.takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrElse(i) { 0 }
+            val y = pb.getOrElse(i) { 0 }
+            if (x != y) return x - y
+        }
+        return 0
+    }
+
+    /**
+     * 1.0.0 更新判定（替代裸 versionCode 比较）：
+     *  - versionName semver 更新 → 有更新（覆盖 0.10.x / 1.0.x / 2.0 任意跳变）；
+     *  - versionName 相同但服务器 versionCode 更大 → 有更新（同版本号热修复重发）。
+     */
+    fun isUpdateAvailable(context: Context, info: UpdateInfo): Boolean {
+        val nameCmp = compareVersionNames(info.versionName, installedVersionName(context))
+        return nameCmp > 0 ||
+            (nameCmp == 0 && info.versionCode > installedVersionCode(context))
+    }
+
+    /**
      * Query the current release: R2 version.json first, legacy server as
      * fallback. Null/empty = unreachable or no release.
      */

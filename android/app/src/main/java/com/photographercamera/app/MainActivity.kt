@@ -28,10 +28,9 @@ import com.photographercamera.ui.theme.PhotographerCameraTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Remote shipping must be configured BEFORE the first line is logged,
-        // otherwise the BOOT record would never reach the dev server.
-        com.photographercamera.core.debug.RemoteLog.bootstrap(this)
-        // Device-side diagnostics to Downloads/PhotographerCamera_debug.txt:
+        // 1.0.0 用户指令：去掉实时日志上送（RemoteLog.bootstrap 移除）。
+        // 日志只写入 APP 隐私目录 filesDir/logs/，维护页"上传日志"按钮手动发送。
+        // Device-side diagnostics to filesDir/logs/PhotographerCamera_debug.txt:
         // must init BEFORE any camera/GL code logs (buffered lines flush after).
         com.photographercamera.core.debug.DebugLog.init(this)
         // 0.8.3：photon 内部 PLog 桥接到远程调试日志（拍摄保存/失败、手动 WB

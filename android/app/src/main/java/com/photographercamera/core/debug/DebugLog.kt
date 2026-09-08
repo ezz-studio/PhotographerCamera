@@ -1,11 +1,7 @@
 package com.photographercamera.core.debug
 
-import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Date
@@ -13,9 +9,17 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * DebugLog — device-side diagnostics written to the PUBLIC Downloads folder
- * (Downloads/PhotographerCamera_debug.txt), so real-device issues can be
+ * DebugLog — device-side diagnostics written to the APP-PRIVATE directory
+ * (filesDir/logs/PhotographerCamera_debug.txt) so real-device issues can be
  * diagnosed without adb / USB debugging.
+ *
+ * 1.0.0 privacy rework (user directive):
+ *  - logs NO LONGER stream to any server in near-real-time (the RemoteLog
+ *    background shipper is detached from the logging path entirely);
+ *  - the buffer flushes into app-private storage ONLY — nothing leaves the
+ *    device until the user explicitly taps "上传日志" in the maintenance page,
+ *    which posts the buffered lines once via [manualUpload] and reports the
+ *    result inline (成功/失败提示).
  *
  * Design (per android_camera_performance_optimization_agent.json):
  *  - every pipeline stage is timestamped (T0 shutter -> ... -> storage done);
@@ -37,7 +41,6 @@ object DebugLog {
     private val lock = Any()
 
     @Volatile private var appContext: Context? = null
-    @Volatile private var fileUri: Uri? = null
     @Volatile private var lastFlush = 0L
     @Volatile private var flushPending = false
 
@@ -54,6 +57,9 @@ object DebugLog {
         )
     }
 
+    /** Snapshot of the in-memory ring buffer (used by the manual uploader). */
+    fun snapshotLines(): List<String> = synchronized(lock) { lines.toList() }
+
     fun log(tag: String, msg: String) {
         val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
         val line = "$ts [$tag] $msg"
@@ -61,10 +67,8 @@ object DebugLog {
             lines.addLast(line)
             while (lines.size > MAX_LINES) lines.removeFirst()
         }
-        // Ship to the dev server as well. RemoteLog.offer() is O(1) and does all
-        // I/O on its own thread; the extra runCatching is belt-and-braces so a
-        // diagnostics failure can never reach a camera/GL caller.
-        runCatching { RemoteLog.offer(line) }
+        // 1.0.0: no automatic shipping. Lines stay in-memory and flush to the
+        // app-private log file; upload is a user-initiated action only.
         scheduleFlush()
     }
 
@@ -97,23 +101,29 @@ object DebugLog {
      * SYNCHRONOUS flush for the crash path: the async [flushNow] may never run
      * because the process dies right after the uncaught handler returns, so the
      * crash handler calls this on the crashing thread to guarantee the log tail
-     * (including the crash itself) hits Downloads.
+     * (including the crash itself) lands in the app-private log file.
      */
     fun flushSync() {
         flush(force = true)
-        // Best-effort synchronous push so a crash still reaches the dev server.
-        runCatching { RemoteLog.flushSync() }
     }
 
     /**
-     * Turn on (or retarget) remote shipping. Pass a blank URL to switch it off.
-     * Example: `DebugLog.configureRemote("http://1.2.3.4:8080/log")`
+     * 1.0.0 手动上传（用户指令：去实时上送，改为隐私目录存储 + 手动上传 + 结果提示）。
+     * 把内存 ring 里的日志一次性 POST 到配置的 endpoint（SharedPreferences
+     * pc_debug.remote_log_endpoint 优先，其次 assets/remote_log_endpoint.txt）。
+     * 返回 null = 上传成功（服务器 2xx），否则返回给用户看的失败原因。
+     * 在 IO 协程中调用；绝不抛异常。
      */
-    fun configureRemote(endpointUrl: String, device: String? = null, sessionId: String? = null) {
-        runCatching {
-            RemoteLog.configure(endpointUrl, device, sessionId)
-            log("LOG", RemoteLog.status())
+    fun manualUpload(context: Context): String? {
+        val endpoint = RemoteLog.storedEndpoint(context)
+        if (endpoint.isBlank()) {
+            return "未配置日志服务器地址"
         }
+        val payload = snapshotLines()
+        if (payload.isEmpty()) {
+            return "暂无日志可上传"
+        }
+        return RemoteLog.uploadOnce(endpoint, payload)
     }
 
     private fun flush(force: Boolean) {
@@ -124,39 +134,12 @@ object DebugLog {
         try {
             val text = synchronized(lock) { lines.joinToString("\n") }
             if (text.isEmpty()) return
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val resolver = ctx.contentResolver
-                var uri = fileUri ?: queryExisting(resolver)
-                if (uri == null) {
-                    val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME)
-                        put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                    }
-                    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    fileUri = uri
-                }
-                if (uri != null) {
-                    resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val f = java.io.File(dir, FILE_NAME)
-                f.parentFile?.mkdirs()
-                if (f.canWrite() || (!f.exists() && dir.canWrite())) f.writeText(text)
-            }
+            // 1.0.0：写入 APP 隐私目录（context.filesDir/logs/），不再落公共 Downloads
+            val dir = java.io.File(ctx.filesDir, "logs")
+            dir.mkdirs()
+            java.io.File(dir, FILE_NAME).writeText(text)
         } catch (_: Throwable) {
             // diagnostics must never take the app down
         }
     }
-
-    private fun queryExisting(resolver: android.content.ContentResolver): Uri? = runCatching {
-        resolver.query(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Downloads._ID),
-            "${MediaStore.Downloads.DISPLAY_NAME}=?",
-            arrayOf(FILE_NAME),
-            null,
-        )?.use { c -> if (c.moveToFirst()) Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, c.getLong(0).toString()) else null }
-    }.getOrNull()
 }

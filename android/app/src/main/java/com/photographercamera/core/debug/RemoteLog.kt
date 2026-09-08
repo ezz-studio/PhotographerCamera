@@ -167,6 +167,22 @@ object RemoteLog {
         runCatching { drainOnce() }
     }
 
+    /**
+     * 1.0.0 手动一次上传（用户指令：日志默认只存 APP 隐私目录，由用户在维护页
+     * 点击"上传日志"时才发送）。绕过常驻 worker 与 enabled 状态，直接把
+     * [logLines] 打包 POST 到 [endpointUrl]；返回 null = 成功（2xx），
+     * 否则返回可展示的失败原因。在调用方提供的 IO 线程上执行，绝不抛异常。
+     */
+    fun uploadOnce(endpointUrl: String, logLines: List<String>): String? {
+        val url = endpointUrl.trim()
+        if (url.isBlank()) return "未配置日志服务器地址"
+        if (logLines.isEmpty()) return "暂无日志可上传"
+        return runCatching {
+            val body = buildBody(logLines.takeLast(MAX_BATCH_LINES * 4))
+            if (post(body)) null else lastError.ifBlank { "上传失败" }
+        }.getOrElse { "上传失败：${it.javaClass.simpleName}" }
+    }
+
     // ---- worker -------------------------------------------------------------
     private fun startWorker() {
         if (!running.compareAndSet(false, true)) {

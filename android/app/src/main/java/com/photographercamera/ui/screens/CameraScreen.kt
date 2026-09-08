@@ -57,7 +57,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
@@ -65,7 +64,6 @@ import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SystemUpdateAlt
@@ -327,11 +325,16 @@ fun CameraScreen(navController: NavController) {
         // 0.9.18 缩放死区修复：显示倍率低于当前镜头可渲染下限（minZoom×dispIntrinsic，
         // 如本机主摄 [1.0,10.0] → 1x）时，拖拽热路径下发被相机 range 下限钳死、FOV
         // 冻结，仅靠 ±0.05 软吸附只有贴地快滑才够得到超广角档（慢滑 0.6~1x 无效根因）。
-        // 死区内松手：无视 snapThreshold 强制吸附最近档位（<1x 即超广角档），仍走
-        // pvm.settleZoomRatio 的 settle 单次跨镜头（0.8.3 乒乓教训不破，热路径未动）。
+        // 1.0.0 语义收敛（机型自适应）：
+        //  - 距档位 ≤0.05 → 吸附档位（0.6 附近吸 0.654、1x 附近吸 1.0、3x 附近吸 2.98）；
+        //  - 死区内不近任何档位 → 直接 settle 连续值本身，findOptimalLens（已排除逻辑
+        //    多摄）自动选可渲染该显示倍率的物理镜头（0.8 → 超广角 crop 1.22）——
+        //    数码变焦中间值保留连续效果，不再强制跳档（"松手跳回 1x"根因）；
+        //  - 非死区不近档位 → 维持现状不吸（当前镜头可渲染，连续值照常保留）。
+        // 仍走 pvm.settleZoomRatio 的 settle 单次跨镜头（0.8.3 乒乓教训不破，热路径未动）。
         val minRenderable = pvm.currentMinRenderableZoomRatio()
         val snap = if (zoom < minRenderable - 0.001f) {
-            zoomStops.minByOrNull { abs(it - zoom) }
+            settleContinuousZoomStop(zoomStops, zoom).snapZoomStop ?: zoom
         } else {
             settleContinuousZoomStop(zoomStops, zoom).snapZoomStop
         }
@@ -1216,23 +1219,27 @@ private fun TopBar(
             Icon(icon, contentDescription = "闪光灯", tint = tint, modifier = Modifier.size(22.dp))
         }
         // 0.6.0 RAW 开关从设置迁入顶栏（仅 RAW-capable 设备显示）
+        // 1.0.0 用户指令：图标改为 RAW 字样（视觉状态语义不变）
         if (rawCapable) {
             IconButton(onClick = onRawToggle, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Default.Camera,
-                    contentDescription = "RAW",
-                    tint = if (rawOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
-                    modifier = Modifier.size(22.dp),
+                Text(
+                    "RAW",
+                    color = if (rawOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp,
                 )
             }
         }
         // 0.7.3 LIVE 图开关（指导手册 #2）：拍摄同时录制动态照片短视频
+        // 1.0.0 用户指令：图标改为 LIVE 字样（视觉状态语义不变）
         IconButton(onClick = onLiveToggle, modifier = Modifier.size(40.dp)) {
-            Icon(
-                Icons.Default.MotionPhotosOn,
-                contentDescription = "动态照片",
-                tint = if (liveOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
-                modifier = Modifier.size(22.dp),
+            Text(
+                "LIVE",
+                color = if (liveOn) AccentOrange else TextPrimary.copy(alpha = 0.9f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp,
             )
         }
         // 0.6.0 测光模式：点击循环切换（系统默认→中央重点→平均→高光优先→点测）
@@ -1339,7 +1346,9 @@ internal fun UpdateCheckRow() {
                                 status = "检查失败：无法连接更新服务器"
                                 phase = UpdPhase.IDLE
                             }
-                            info.versionCode <= UpdateChecker.installedVersionCode(context) -> {
+                            // 1.0.0：semver versionName 判定（versionCode 仅在同版本号
+                            // 热修复时兜底）——适配 0.10.x/1.0.x 任意版本号跳变
+                            !UpdateChecker.isUpdateAvailable(context, info) -> {
                                 status = "已是最新版本（服务器 v${info.versionName}）"
                                 phase = UpdPhase.IDLE
                             }

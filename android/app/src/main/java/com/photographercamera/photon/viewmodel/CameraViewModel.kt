@@ -533,7 +533,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     var currentBaselineLutConfig: LutConfig? by mutableStateOf(null)
         private set
 
-    var currentLutId = MutableStateFlow("standard")
+    // 1.0.0：初始滤镜 id = "none"（原生）。新装（无持久化 lutId）必须落在原生成像，
+    // 而不是隐式依赖内置清单的 isDefault 标记（当前清单不存在该标记，旧值 "standard"
+    // 会让新装第一次打开就带着一个未加载成功的滤镜 id）。用户选择滤镜后由 DataStore
+    // 持久化，之后每次启动记忆选择。
+    var currentLutId = MutableStateFlow("none")
         private set
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -2291,9 +2295,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 应用保存的虚拟光圈
                 applyDefaultVirtualAperture(prefs.defaultVirtualAperture)
             } else {
-                // 如果没有任何偏好设置，使用配置文件中的默认 LUT（第一个）
-                val defaultLut = availableLutList.firstOrNull { it.isDefault }
-                defaultLut?.let { setLut(it.id, persist = false) }
+                // 1.0.0：新装（无任何偏好设置）默认原生滤镜——不再依赖清单的
+                // isDefault 标记（内置清单并无该项，旧实现会让 currentLutId 停在
+                // 初始 id 上）。persist=false：用户第一次手动选滤镜时才落库，
+                // 之后由 DataStore 记忆选择。
+                setLut("none", persist = false)
             }
 
             _isInitialized.value = true
@@ -4908,13 +4914,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val zoomableCameras =
             cameras.filter { if (currentLensType == LensType.FRONT) it.lensType == LensType.FRONT else (it.lensType != LensType.FRONT && it.lensType != LensType.BACK_MACRO) }
         if (zoomableCameras.isEmpty()) return null
+        // 1.0.0 连续变焦跨镜头修复：排除逻辑多摄设备（physicalCameras 非空 = 厂商
+        // 虚拟逻辑机，如本机 id=0）。逻辑机的 HAL 不响应 zoom 下发（<1x 不路由、
+        // ≥1x 实测 FOV 不动），settle 连续值（0.7~3.0 之间任意数码变焦落点）会被
+        // "intrinsic ≤ target 的最大值"规则选中逻辑机（dispIntrinsic 1.034 恰好是
+        // 全镜头最大可达值下方的近邻），切换后 FOV 卡回 1x 视角 = 用户感知"松手
+        // 跳回 1x 无变焦效果"。排除后候选池只剩物理镜头：连续值自动落到可渲染
+        // 该显示倍率的物理镜头上（0.8 → 超广角 crop；2.0 → 主摄/长焦 crop），
+        // 全机型通用（单摄机型候选池=主摄自身，行为退化为普通数码变焦）。
         val candidates = zoomableCameras
+            .filter { it.physicalCameras.isEmpty() }
             .filter { it.displayIntrinsicZoomRatio <= targetZoom + 0.01f }
         val bestZoom = candidates.maxOfOrNull { it.displayIntrinsicZoomRatio }
-            ?: zoomableCameras.minOfOrNull { it.displayIntrinsicZoomRatio }
+            ?: zoomableCameras
+                .filter { it.physicalCameras.isEmpty() }
+                .minOfOrNull { it.displayIntrinsicZoomRatio }
             ?: return null
         val tiedCandidates = candidates.filter { abs(it.displayIntrinsicZoomRatio - bestZoom) <= 0.01f }
-            .ifEmpty { zoomableCameras.filter { abs(it.displayIntrinsicZoomRatio - bestZoom) <= 0.01f } }
+            .ifEmpty {
+                zoomableCameras
+                    .filter { it.physicalCameras.isEmpty() }
+                    .filter { abs(it.displayIntrinsicZoomRatio - bestZoom) <= 0.01f }
+            }
         return tiedCandidates.firstOrNull { it.cameraId == currentCameraId }
             ?: tiedCandidates.firstOrNull()
     }
