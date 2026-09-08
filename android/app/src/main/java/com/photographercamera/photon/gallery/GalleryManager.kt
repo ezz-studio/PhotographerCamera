@@ -2941,12 +2941,15 @@ object GalleryManager {
             // Auto Save
             if (shouldAutoSave) {
                 val metadata = loadMetadata(context, photoId) ?: return@withContext
-                // 0.9.15：始终把 MultiFrameStacker 直出的内存位图直接传给 exportPhoto，
-                // 不再因 hasHighQualityPhoto 命中而传 null、触发"从有损 HEIC 中间图重新
-                // 处理"的回退。那道多余往返会把 JPEG max 成片二次压缩、丢细节，体积塌到
-                // ~1MB（同分辨率质量95 下单帧 saveYuvPhoto 直传位图=2.88MB）。
-                // 与单帧 saveYuvPhoto / 堆叠 saveRawStackedPhoto 保持一致：直出位图直传，
-                // 由 exportPhoto 统一叠加 profile LUT（JPEG 前应用 profile，符合走A意图）。
+                // 0.9.15 修复（勿回退）：上游此处为 `if (hasHighQualityPhoto) null else result`，
+                // 传 null 会让 exportPhoto 重新加载 original.heic 中间图再处理。
+                // 但 fork 上该重载路径实测严重退化——真机日志：
+                //   saveYuvStackedPhoto output=2880x3840 input=null  → 1,008,682 B
+                //   saveYuvPhoto(单帧) 直传位图                      → 2,886,713 B
+                // 即 fork 走 null 重载路径只有 ~1MB，直传内存位图反而 ~2.9~3.4MB。
+                // 因此这里始终直传 MultiFrameStacker.processBurst 的内存位图 result。
+                // 若要追平上游 5MB+，真正要修的是 exportPhoto(null) 的重载/重编码链路，
+                // 而不是恢复 null 分支（会回退成 1MB）。
                 exportPhoto(
                     context,
                     photoId,

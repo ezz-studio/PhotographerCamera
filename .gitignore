@@ -71,3 +71,18 @@ build2/
 # one-off refactor scripts (0.9.7 core->photon package migration)
 /_core_photon_closure.py
 /_core_photon_keep.txt
+
+# upstream-source diffing session artifacts (0.9.16 成片体积诊断)
+/_engine_diff.json
+/_up_diff_hunks.txt
+/_up_tree.json
+tools/_up_*.txt
+tools/_diff_gallery.txt
+tools/_devlog.json
+tools/_cmp_filter.py
+tools/_cmp_full.py
+tools/_show_diff.py
+tools/_scan_log_sizes.py
+tools/_fetch_upfile.py
+tools/_fetch_uptree.py
+tools/_diff_raw_engine.py
