@@ -2941,16 +2941,16 @@ object GalleryManager {
             // Auto Save
             if (shouldAutoSave) {
                 val metadata = loadMetadata(context, photoId) ?: return@withContext
-                val exportBitmap = if (hasHighQualityPhoto(context, photoId)) {
-                    null
-                } else {
-                    PLog.w(TAG, "Internal HEIC unavailable; exporting stacked preview bitmap")
-                    result
-                }
+                // 0.9.15：始终把 MultiFrameStacker 直出的内存位图直接传给 exportPhoto，
+                // 不再因 hasHighQualityPhoto 命中而传 null、触发"从有损 HEIC 中间图重新
+                // 处理"的回退。那道多余往返会把 JPEG max 成片二次压缩、丢细节，体积塌到
+                // ~1MB（同分辨率质量95 下单帧 saveYuvPhoto 直传位图=2.88MB）。
+                // 与单帧 saveYuvPhoto / 堆叠 saveRawStackedPhoto 保持一致：直出位图直传，
+                // 由 exportPhoto 统一叠加 profile LUT（JPEG 前应用 profile，符合走A意图）。
                 exportPhoto(
                     context,
                     photoId,
-                    exportBitmap,
+                    result,
                     photoProcessor,
                     metadata,
                     sharpeningValue,
