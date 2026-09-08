@@ -1899,7 +1899,8 @@ class Camera2Controller(private val context: Context) {
             // 形成恢复循环，且每次 open 都给 OIS 防抖马达上电（用户可闻咔哒声）。
             // 回前台后 CameraScreen 的 ON_RESUME → pvm.openCamera（幂等）负责恢复。
             if (!AppForeground.isForeground) {
-                PLog.d(TAG, "Camera recovery deferred: app in background")
+                // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
+                PLog.i(TAG, "Camera recovery deferred: app in background")
                 return@postDelayed
             }
             PLog.w(TAG, "Recovering camera after error=$error")

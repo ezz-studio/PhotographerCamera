@@ -1276,7 +1276,8 @@ class LutImageProcessor(context: Context? = null) {
             // 对策：读前清空错误队列 + 失败重试一次 + 兜底改为恒合法的 HALF_FLOAT 读。
             val staleErrors = drainGlErrors()
             if (staleErrors > 0) {
-                PLog.d(TAG, "performRender: drained $staleErrors stale GL error(s) before final encode")
+                // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
+                PLog.i(TAG, "performRender: drained $staleErrors stale GL error(s) before final encode")
             }
             var encodeReady = renderFinalEncodePass(lastPassTextureId, width, height)
             if (!encodeReady) {
@@ -2183,7 +2184,8 @@ class LutImageProcessor(context: Context? = null) {
             // 与 FBO 分配阶段的错误与本 pass 绘制成败无关，立即清场隔离。
             val programNoise = drainGlErrors()
             if (programNoise > 0) {
-                PLog.d(
+                // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
+                PLog.i(
                     TAG,
                     "renderFinalEncodePass: drained $programNoise GL error(s) after program create"
                 )
@@ -2227,7 +2229,8 @@ class LutImageProcessor(context: Context? = null) {
         // 非首次执行时此 drain 为 no-op。保证尾部检查只反映本 pass 绘制本身。
         val allocNoise = drainGlErrors()
         if (allocNoise > 0) {
-            PLog.d(
+            // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
+            PLog.i(
                 TAG,
                 "renderFinalEncodePass: drained $allocNoise GL error(s) after final encode FBO alloc"
             )

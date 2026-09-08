@@ -87,7 +87,11 @@ def main():
     version_payload = {
         "versionName": version,
         "versionCode": code,
-        "url": f"{PUBLIC_BASE}/PhotographerCamera-{version}.apk",
+        # ?v=<code>：Cloudflare 边缘对静态 APK 缓存 max-age≈186 天，同文件名
+        # 覆盖上传后公网 URL 会长时间回旧对象。versionCode 每轮递增 → query
+        # 变化 → 缓存 key 变化 → 必 MISS 回源。App 端文件名取自 versionName
+        # 字段（UpdateChecker.apkFileName），URL 尾段加 query 无副作用。
+        "url": f"{PUBLIC_BASE}/PhotographerCamera-{version}.apk?v={code}",
         "size": apk_size,
         "ts": int(time.time() * 1000),
         "notes": notes,
