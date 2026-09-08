@@ -1612,32 +1612,25 @@ private fun ZoomRotor(
             val alpha = (0.7f * edgeFade * rangeFade).coerceIn(0f, 1f)
             if (alpha <= 0.02f) continue
             val isInt = abs(tZoom - tZoom.roundToInt()) < 0.04f
+            // 1.2.2 原生焦段着色（用户指令"当滚动到原生焦段时，白色粗线变成橙色"）：
+            // 刻度槽位值 tZoom 命中某原生焦段（displayIntrinsic 落点，如 0.65/1.0/2.99）
+            // 时该刻度整根变橙。容差 0.04 < 半格 0.05，保证同时只有一个槽位命中；
+            // zoom 连续滚动时橙色随槽位迁移，视觉上"橙色标记滑过滚轮"。
+            val isNative = nativeStops.any { abs(it - tZoom) < 0.04f }
+            val tickColor = if (isNative) AccentOrange else Color.White
             val thick = if (isInt) 2.dp else 1.dp
             val tall = if (isInt) 16.dp else 9.dp
             Box(
                 Modifier
                     .offset { IntOffset((i * spacingPx).roundToInt(), 0) }
                     .width(thick).height(tall)
-                    .background(Color.White.copy(alpha = alpha), shape = RoundedCornerShape(1.dp)),
+                    .background(tickColor.copy(alpha = alpha), shape = RoundedCornerShape(1.dp)),
             )
         }
-        // 1.2.0 原生焦段标记（用户指令）：滑轮窗口 [zoom-0.9, zoom+0.9] 内的原生焦段
-        // 落点画淡橘色竖线（AccentOrange），中心处最明显、向两侧渐隐；压在白刻度之上。
-        nativeStops.forEach { stop ->
-            val offsetTicks = (stop - zoom) / tickStep
-            if (abs(offsetTicks) <= sideTicks) {
-                val edgeFade = (1f - abs(offsetTicks) / (sideTicks + 1)).coerceIn(0.35f, 1f)
-                Box(
-                    Modifier
-                        .offset { IntOffset((offsetTicks * spacingPx).roundToInt(), 0) }
-                        .width(2.dp).height(20.dp)
-                        .background(
-                            AccentOrange.copy(alpha = 0.55f * edgeFade),
-                            shape = RoundedCornerShape(1.dp),
-                        ),
-                )
-            }
-        }
+        // 1.2.0 原生焦段标记（用户指令）→ 1.2.2 改版（用户指令"不单独再加橙色线"）：
+        // 删除独立橘线层（原 AccentOrange 竖线压在白刻度上，与整数倍白色粗线重合不美观）。
+        // 改为刻度着色：白色刻度滑到原生焦段落点时整根变橙色（见上方 isNative 逻辑），
+        // 粗细/高度/渐隐动画维持原有规则不变。
     }
 }
 

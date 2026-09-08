@@ -1633,10 +1633,20 @@ class Camera2Controller(private val context: Context) {
         // CONTROL_ZOOM_RATIO HAL 无缝路由，拖拽全程不松手自动切镜头（用户实测
         // "把 0 作为默认镜头比你写的更丝滑"）。无逻辑多摄的机型此层为 null，
         // 自然回落到 BACK_MAIN，机型自适应。
+        // 1.2.2 根因修复（用户实测 1.2.1"变焦问题依旧"）：本层判断此前用
+        // physicalCameras.size >= 2——该字段对逻辑机自身条目恒空（supplemental
+        // binding 被"Skip logical binding for direct camera 2/3/4"跳过），导致
+        // 逻辑机 0 从未被选为默认，实际打开独立主摄 id2。在 id2 上：
+        // selfPhysicalCameras 空 → 拖动中显式绑定切换（getBoundPhysicalCameraId）
+        // 永久短路；ctrl zoom <1 被 HAL range clamp → 画面不动；接近 3 无物理路由；
+        // 只有松手 settleZoomRatio 的 findOptimalLens 跨相机 reopen 在工作——即
+        // "松手才切"的真凶。改用 selfPhysicalCameras（1.2.1 新数据源，对逻辑机
+        // 自身填充 HAL physicalCameraIds）后默认打开逻辑机 0，拖动中跨 0.95/2.95
+        // 阈值即由 recreateSessionForPhysicalZoomIfNeeded 显式绑定切流。
         val defaultCamera = cameras.firstOrNull { it.cameraId == preferredCameraId }
             ?: cameras.firstOrNull {
                 it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
-                        it.physicalCameras.size >= 2
+                        it.selfPhysicalCameras.size >= 2
             }
             ?: cameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
             ?: cameras.firstOrNull { it.lensFacing == CameraCharacteristics.LENS_FACING_BACK }
@@ -2176,7 +2186,7 @@ class Camera2Controller(private val context: Context) {
             TAG,
             "打开相机: selected=$cameraId, open=$openCameraId, targetZoom=$targetZoomRatioByMain, " +
                     "physicalOutput=$outputPhysicalCameraId, " +
-                    "模式: ${captureMode.name}"
+                    "模式: ${captureMode.name}, ver=${com.photographercamera.BuildConfig.VERSION_NAME}(${com.photographercamera.BuildConfig.VERSION_CODE})"
         )
 
         var previewSize = _state.value.currentPreviewSize
