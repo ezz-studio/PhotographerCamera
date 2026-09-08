@@ -4850,7 +4850,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        return stops.sorted()
+        // 0.9.19 软吸附档位归一：与主摄原生倍率差 <0.05 的档位（如本机逻辑机 id=0
+        // dispIntrinsic=1.034 vs 主摄 id=2 的 1.0）合并为主摄精确值。否则 1x 附近
+        // （1.017~1.084）松手会吸附到 1.034 → findOptimalLens 命中逻辑机 → 为"同一个
+        // 1x"跨镜头重建 session，违背"松手吸附原生焦段"的软吸附语义。合并后
+        // findOptimalLens(1.0) 平手优先当前镜头 → 停在主摄不切镜。数码变焦连续值
+        // （距档位 >0.05）不受影响，拖拽热路径照旧。
+        val mainIntrinsic = mainCamera.displayIntrinsicZoomRatio
+        if (mainIntrinsic > 0f) {
+            for (i in stops.indices) {
+                val diff = abs(stops[i] - mainIntrinsic)
+                if (diff in 0.001f..0.05f) {
+                    stops[i] = mainIntrinsic
+                }
+            }
+        }
+
+        return stops.distinct().sorted()
     }
 
     private fun addDefaultMinimumZoomStop(
