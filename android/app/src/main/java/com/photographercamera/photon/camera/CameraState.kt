@@ -232,14 +232,18 @@ data class CameraInfo(
         // 现恢复上游语义：跨镜头边界时显式绑定物理输出流，由
         // recreateSessionForPhysicalZoomIfNeeded 热路径立即重建 session 完成切换。
         // 阈值按主摄等效显示倍率（targetZoom = 逻辑机 intrinsic × ctrl ≈ UI 显示）：
-        // ≥2.95 绑长焦、<0.95 绑超广角、1x 附近走逻辑流；退出滞回在
+        // ≥2.95 绑长焦、<0.99 绑超广角（1.2.3 从 0.95 提前：用户 1.2.1 需求原话
+        // "UI数字只要向左侧划出远离1x就调用超广角镜头的数码放大画面"——离开 1x
+        // 即衔接超广角，对齐原厂相机行为）、1x 附近走逻辑流；退出滞回在
         // resolveRequestedPhysicalCameraId（基准 activeOutputPhysicalCameraId）。
         // 绑定物理流后焦段连续性由 controller 的 intrinsic 换算保障（物理流
         // crop 到匹配焦段，切镜瞬间 FOV 不跳变）。
+        // 1.2.3 补充：绑定切换的 session 重建实测 260-380ms（PLG110 18:24 日志
+        // recreate→Preview started 间隔），越早触发用户在拖动中越早看到新画面。
         return when {
             zoomRatioByMain >= 2.95f ->
                 physicals.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
-            zoomRatioByMain < 0.95f ->
+            zoomRatioByMain < 0.99f ->
                 physicals.minByOrNull { it.intrinsicZoomRatio }?.cameraId
             else -> null
         }

@@ -88,6 +88,15 @@ class Camera2Controller(private val context: Context) {
     companion object {
         private const val TAG = "Camera2Controller"
 
+        // 1.2.3 变焦 ctrl 下发最小间隔（30Hz）。OPPO 逻辑机 HAL 对 15ms 级高频
+        // setRepeatingRequest 响应积压（PLG110 18:24 日志拖动中 400-550ms 断档），
+        // 独立相机无此问题。30Hz 控制频率对连续变焦平滑度无感知影响。
+        private const val ZOOM_APPLY_MIN_INTERVAL_MS = 33L
+
+        // 1.2.3 物理输出切换（session 重建）冷却：实测每次重建 260-380ms 断流，
+        // 快速往返拖动防乒乓。
+        private const val PHYSICAL_ZOOM_RECREATE_COOLDOWN_MS = 500L
+
         // 自定义错误代码
         const val ERROR_CAMERA_DISCONNECTED = 1000
         const val ERROR_CAMERA_OPEN_FAILED = 1001
@@ -328,6 +337,20 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
+
+    // 1.2.3 变焦热路径节流（真机日志实锤：PLG110 18:24 时段拖动中出现 400-550ms
+    // 日志断档，期间无 session recreate——OPPO 逻辑机 HAL 对每 15ms 一次的
+    // setRepeatingRequest 响应积压丢帧 = "0.6x-6x 全程预览超级卡"的主因；
+    // 0.9.x 时代独立相机同频率不卡，逻辑机 HAL 是唯一变量）。
+    // 策略：ctrl 下发最小间隔 33ms（30Hz，人眼无感）+ 请求值未变化时幂等跳过；
+    // 被节流跳过的最终值由 cameraHandler postDelayed 补发，保证松手 settle 收敛。
+    private var lastZoomApplyAtMs = 0L
+    private var zoomApplyPending = false
+
+    // 1.2.3 物理输出切换冷却：滞回外的快速往返拖动（1→0.6→1→0.6）会连续触发
+    // session 重建（实测每次 260-380ms 断流），冷却 500ms 防乒乓，冷却结束后
+    // 下一次 setZoomRatio 若 desired 仍不同会再次触发切换（不会丢切换）。
+    private var lastPhysicalZoomRecreateAtMs = 0L
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
     private var cachedLensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
@@ -5940,7 +5963,24 @@ class Camera2Controller(private val context: Context) {
                 )
             }
             if (cameraDevice != null && captureSession != null) {
-                updatePreview()
+                // 1.2.3 热路径节流：applyZoomRequestSettings（纯内存写 builder）每次
+                // 都执行，只有 updatePreview（HAL setRepeatingRequest）被节流。跳过时
+                // postDelayed 补发保证最终值收敛（松手 settle 不会丢下发）。
+                val nowMs = android.os.SystemClock.elapsedRealtime()
+                if (nowMs - lastZoomApplyAtMs >= ZOOM_APPLY_MIN_INTERVAL_MS) {
+                    lastZoomApplyAtMs = nowMs
+                    zoomApplyPending = false
+                    updatePreview()
+                } else if (!zoomApplyPending) {
+                    zoomApplyPending = true
+                    handler?.postDelayed({
+                        zoomApplyPending = false
+                        if (cameraDevice != null && captureSession != null) {
+                            lastZoomApplyAtMs = android.os.SystemClock.elapsedRealtime()
+                            updatePreview()
+                        }
+                    }, ZOOM_APPLY_MIN_INTERVAL_MS)
+                }
             }
 
             val zoomMode = if (shouldUseControlZoomRatio(zoomRatioRange)) {
@@ -5964,6 +6004,19 @@ class Camera2Controller(private val context: Context) {
         val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(state)
         if (desiredPhysicalCameraId == activeOutputPhysicalCameraId) return false
         if (cameraDevice == null || previewSurface == null) return false
+        // 1.2.3 切换冷却：每次 session 重建实测 260-380ms 预览断流，快速往返拖动
+        // （跨切点来回甩）会在滞回窗口外连续触发重建造成连环卡顿。冷却期内拒绝
+        // 重建，期间 ctrl 仍按当前（未绑定/已绑定）语义下发，冷却结束后下一次
+        // setZoomRatio 若 desired 仍不同会再次触发——切换不会丢失。
+        val nowMs = android.os.SystemClock.elapsedRealtime()
+        if (nowMs - lastPhysicalZoomRecreateAtMs < PHYSICAL_ZOOM_RECREATE_COOLDOWN_MS) {
+            com.photographercamera.core.debug.DebugLog.log(
+                "ZOOM",
+                "ctrl recreate cooldown ${PHYSICAL_ZOOM_RECREATE_COOLDOWN_MS}ms, " +
+                    "desired=$desiredPhysicalCameraId active=$activeOutputPhysicalCameraId"
+            )
+            return false
+        }
 
         PLog.i(
             TAG,
@@ -5973,6 +6026,7 @@ class Camera2Controller(private val context: Context) {
         )
 
         activeOutputPhysicalCameraId = desiredPhysicalCameraId
+        lastPhysicalZoomRecreateAtMs = android.os.SystemClock.elapsedRealtime()
         refreshActiveFocusLimit()
         refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
         safeCloseCaptureSession(captureSession, "physical zoom output changed")

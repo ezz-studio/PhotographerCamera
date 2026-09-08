@@ -1556,9 +1556,12 @@ private fun ZoomRotor(
     onZoomSettle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+    // 1.2.3 行程加长（用户反馈"动画太紧凑，挪一点点就动很多焦段"）：每格刻度
+    // 物理宽度 8dp→14dp（140dp/1.0x，原 80dp/1.0x，同样手指位移的 zoom 变化量
+    // 减小约 43%）；可见半窗 9 格→7 格（±0.7x，总宽 196dp 不超 200dp 容器）。
+    val spacingPx = with(LocalDensity.current) { 14.dp.toPx() }
     val tickStep = 0.1f            // zoom represented by each tick (screen-even spacing)
-    val sideTicks = 9             // ticks each side of center → tapered ruler width
+    val sideTicks = 7             // ticks each side of center → tapered ruler width
     // 1.2.0 原生焦段磁吸（用户指令）：拖拽接近原生焦段（各后置镜头 displayIntrinsic
     // 落点，如 0.65/1.0/2.99）时自动吸附，滑出阈值即脱离。锚定式实现：手势起点记录
     // anchorZoom、位移相对 anchor 累计——吸附跳变不污染后续位移，避免"实时基准 +
