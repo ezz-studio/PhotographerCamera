@@ -6,8 +6,7 @@ import com.photographercamera.photon.utils.PLog
 /** Encodes a linear RGB texture to sRGB. */
 internal class RawSrgbPass(
     private val quad: RawFullscreenQuad,
-) {
-    data class Input(
+) {    data class Input(
         val textureId: Int,
         val targetFramebufferId: Int,
         val targetTextureId: Int,
@@ -76,7 +75,11 @@ internal class RawSrgbPass(
 
             void main() {
                 vec3 color = texture(uInputTexture, vTexCoord).rgb;
-                fragColor = vec4(linearToSrgb(color), 1.0);
+                color = linearToSrgb(color);
+                // 1.3.4 Option B：目标 FBO 已是 RGBA16F，此处不再做 8-bit 量化，
+                // 因此 1.3.1 的 TPDF 抖动移除（抖动属于最终单次 8-bit 编码，
+                // 由 LutImageProcessor.renderFinalEncodePass 在链路终点执行）。
+                fragColor = vec4(color, 1.0);
             }
         """.trimIndent()
     }

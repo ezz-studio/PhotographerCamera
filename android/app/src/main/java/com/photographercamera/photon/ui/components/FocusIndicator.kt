@@ -37,6 +37,11 @@ fun FocusIndicator(
     modifier: Modifier = Modifier
 ) {
     var visible by remember { mutableStateOf(position != null) }
+    // 1.3.4：记住最近一次有效位置。对焦结束后（场景变化自动恢复连续对焦）
+    // focusPoint 会被清成 null，旧实现此时回退到 (0,0) —— 圆圈几率性跳到
+    // 左上角闪烁。淡出期间必须停留在最后一次点击的位置。
+    var lastPosition by remember { mutableStateOf(position) }
+    SideEffect { if (position != null) lastPosition = position }
     
     // 透明度动画
     val alpha by animateFloatAsState(
@@ -76,7 +81,8 @@ fun FocusIndicator(
         }
     }
 
-    val displayPosition = position ?: Pair(0f, 0f)
+    // 1.3.4：position==null 时不画（而非回退 (0,0)）；淡出用 lastPosition。
+    val displayPosition = position ?: lastPosition
     val density = LocalDensity.current
 
     AnimatedVisibility(visible = visible, modifier = modifier.fillMaxSize()) {
@@ -84,8 +90,10 @@ fun FocusIndicator(
             Canvas(
                 modifier = Modifier.fillMaxSize()
             ) {
-                val x = displayPosition.first * size.width
-                val y = displayPosition.second * size.height
+                val pos = displayPosition ?: return@Canvas
+                val x = pos.first * size.width
+                val y = pos.second * size.height
+                if (!x.isFinite() || !y.isFinite() || x < 0f || y < 0f) return@Canvas
                 val circleSize = (if (source == FocusPointSource.EYE) 24.dp else 60.dp).toPx() * scale
                 val strokeWidth = (if (source == FocusPointSource.EYE) 1.5.dp else 2.dp).toPx()
 

@@ -620,6 +620,13 @@ fun CameraScreen(navController: NavController) {
         applyAdjustments()
     }
 
+    // 实时预览 LUT 重推：currentLutId 改变（选滤镜/切原生）即把当前 recipe+LUT
+    // 重推到 GL 预览，避免「选中原生却显示胶片人像、须拍摄一次才刷新」的滞后。
+    // restorePreviewLutAfterResume 仅在相机重开/拍摄时触发，这里补齐选择路径。
+    LaunchedEffect(currentLutId) {
+        pvm.reapplyPreviewLut()
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -761,11 +768,22 @@ fun CameraScreen(navController: NavController) {
             // device's exposure-compensation index range; 0 = no adjustment.
             var evFrac by remember { mutableFloatStateOf(0f) }
             var evRange by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+            // 1.3.4：EV 滑杆此前只依赖 ringPos != null（从不清 null）→ 一旦点击
+            // 过就永久驻留。现在用独立 evAlpha：出现后 1.6s 自动淡出，拖动续期。
+            var evHold by remember { mutableIntStateOf(0) }
             LaunchedEffect(ringPos) {
                 if (ringPos != null) {
                     ringAlpha.snapTo(1f)
                     delay(900)
                     ringAlpha.animateTo(0f, tween(durationMillis = 350))
+                }
+            }
+            val evAlpha = remember { Animatable(0f) }
+            LaunchedEffect(ringPos, evHold) {
+                if (ringPos != null) {
+                    evAlpha.snapTo(1f)
+                    delay(1600)
+                    evAlpha.animateTo(0f, tween(durationMillis = 350))
                 }
             }
 
@@ -811,6 +829,7 @@ fun CameraScreen(navController: NavController) {
             // EXACTLY on the ring's horizontal center line; +EV (brighter) goes
             // UP. The old version had no rail and the sun drifted off-line.
             if (meteringManual && ringPos != null && evRange != null &&
+                evAlpha.value > 0.01f &&
                 (evRange?.let { it.second - it.first > 0 } == true)
             ) {
                 val ring = ringPos!!
@@ -837,7 +856,9 @@ fun CameraScreen(navController: NavController) {
                         .offset { IntOffset(containerX.roundToInt(), containerY.roundToInt()) }
                         .size(with(density) { 48.dp }, with(density) { 156.dp })
                         .pointerInput(span, sunRange) {
-                            detectVerticalDragGestures { change, dragAmount ->
+                            detectVerticalDragGestures(
+                                onDragStart = { evHold++ }   // 拖动续期：重置 1.6s 淡出计时
+                            ) { change, dragAmount ->
                                 change.consume()
                                 if (span > 0) {
                                     evFrac = (evFrac - dragAmount / sunRange).coerceIn(-1f, 1f)

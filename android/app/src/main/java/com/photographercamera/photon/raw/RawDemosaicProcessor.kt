@@ -6315,9 +6315,11 @@ class RawDemosaicProcessor {
         GLES30.glGenTextures(1, textures, 0)
         combinedTextureId = textures[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, combinedTextureId)
+        // 1.3.4 Option B：sRGB 编码目标改 16F —— 线性→sRGB 编码后到 LutImageProcessor
+        // 末级单次 8-bit 编码之间全程无量化，抬黑/曲线重塑不再放大读出噪声。
         GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0,
-            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null
         )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
@@ -6339,7 +6341,7 @@ class RawDemosaicProcessor {
             textureId = combinedTextureId,
             width = width,
             height = height,
-            internalFormat = "RGBA8",
+            internalFormat = "RGBA16F",
         )
         checkGlError("setupCombinedFramebuffer")
     }
@@ -6569,9 +6571,11 @@ class RawDemosaicProcessor {
         GLES30.glGenTextures(1, textures, 0)
         sharpenTextureId = textures[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sharpenTextureId)
+        // 1.3.4 Option B：锐化目标改 16F —— 锐化是梯度增强，8-bit 量化噪声会被
+        // 锐化核放大；16F 中间精度让成片端噪声水平与 JPEG MAX 一致。
         GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0,
-            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null
         )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
@@ -6593,7 +6597,7 @@ class RawDemosaicProcessor {
             textureId = sharpenTextureId,
             width = width,
             height = height,
-            internalFormat = "RGBA8",
+            internalFormat = "RGBA16F",
         )
         checkGlError("setupSharpenFramebuffer")
     }

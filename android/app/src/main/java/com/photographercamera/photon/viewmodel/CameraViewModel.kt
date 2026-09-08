@@ -127,8 +127,13 @@ private fun resolveEffectiveRawAutoExposure(): Boolean = false
 private fun resolveCaptureSharpening(
     isRawCapture: Boolean,
     userPrefs: UserPreferences?,
+    lutId: String? = null,
 ): Float = when {
     !isRawCapture -> 0f
+    // 1.3.3：创意 profile 自带 sharpen 语义（recipe.sharpness），RAW 基线锐化(0.4)叠加会
+    // 放大全分辨率读出噪声与摩尔纹，且与 JPEG MAX（无基线锐化）观感不一致。
+    // 创意 profile 激活时关闭 RAW 基线，交由 profile 的 recipe.sharpness 接管。
+    lutId != null && lutId != "none" -> 0f
     // 0.9.10：RAWmax 画质调优总开关（上游 release MAX&HDR 菜单语义）——
     // 关闭时忽略用户调优值，回退默认成像参数
     userPrefs?.rawMaxQualityTuning == false -> RawSharpeningDefaults.DEFAULT_STRENGTH
@@ -2821,6 +2826,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setExposureCompensation(0)
     }
 
+    /** 公开给 UI：选中滤镜后立即把当前 LUT/recipe 重推到实时预览（不止在相机重开/拍摄后）。
+     *  修复「选中原生却显示胶片人像、需拍摄一次才刷新」——之前预览只在
+     *  restorePreviewLutAfterResume（相机重开/拍摄）时重推，选择滤镜不会触发。 */
+    fun reapplyPreviewLut() {
+        restorePreviewLutAfterResume()
+    }
+
     private fun restorePreviewLutAfterResume() {
         val lutId = currentLutId.value
         PLog.d(TAG, "restorePreviewLutAfterResume: lutId=$lutId")
@@ -5342,6 +5354,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val sharpeningValue = resolveCaptureSharpening(
                 isRawCapture = isRawCapture,
                 userPrefs = userPrefs,
+                lutId = currentLutId.value,
             )
             val denoiseStrengths = resolveCaptureDenoiseStrengths(
                 isRawCapture = isRawCapture,

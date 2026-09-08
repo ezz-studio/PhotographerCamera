@@ -79,9 +79,21 @@ class LutImageProcessor(context: Context? = null) {
     private var outputTextureId = 0
     private var outputFramebufferWidth = 0
     private var outputFramebufferHeight = 0
+    // 1.3.4 Option B：当前主输出 FBO 是否为 RGBA16F（16F 工作空间模式）
+    private var framebufferIs16F = false
     private var pboId = 0
     private var readbackBuffer: ByteBuffer? = null
     private var readbackBufferSize = 0
+
+    // 1.3.4 Option B：16F 工作空间链路终点的唯一一次 8-bit sRGB 编码 pass（带 TPDF 抖动）
+    private var finalEncodeProgram = 0
+    private var finalEncodeFboId = 0
+    private var finalEncodeTextureId = 0
+    private var finalEncodeWidth = 0
+    private var finalEncodeHeight = 0
+
+    // 1.3.5：16F 中间层读回用——最后一级后处理纹理直通渲回主 16F FBO 的无抖动 passthrough
+    private var intermediatePassthroughProgram = 0
 
     private var vertexBuffer: FloatBuffer? = null
     private var texCoordBuffer: FloatBuffer? = null
@@ -504,6 +516,7 @@ class LutImageProcessor(context: Context? = null) {
         noiseReductionValue: Float = 0f,
         chromaNoiseReductionValue: Float = 0f,
         lutMaskType: Int = 0,
+        output16F: Boolean = false,
     ): Bitmap = withContext(glDispatcher) {
         currentCoroutineContext().ensureActive()
         if (!isInitialized) {
@@ -530,8 +543,12 @@ class LutImageProcessor(context: Context? = null) {
         val width = bitmap.width
         val height = bitmap.height
 
+        // 1.3.4 Option B：F16 输入（RAW 引擎交接 / 双层链中间层）→ 16F 工作空间。
+        // recipe/LUT 数学在 16F 中进行，仅链路终点做一次 8-bit 编码。
+        val working16F = bitmap.config == Bitmap.Config.RGBA_F16
+
         // 创建/更新帧缓冲
-        setupFramebuffer(width, height)
+        setupFramebuffer(width, height, working16F)
         currentCoroutineContext().ensureActive()
 
         // 上传图片纹理
@@ -584,6 +601,8 @@ class LutImageProcessor(context: Context? = null) {
             effectiveRecipeParams,
             sharpening,
             lutMaskType,
+            working16F = working16F,
+            output16F = output16F && working16F,
         )
 
         outputBitmap
@@ -669,6 +688,10 @@ class LutImageProcessor(context: Context? = null) {
         val bitmap = source
         val hasBaseline = baselineLayer?.lutConfig != null || baselineLayer?.colorRecipeParams != null
         val hasCreative = creativeLayer?.lutConfig != null || creativeLayer?.colorRecipeParams != null
+        // 1.3.4 Option B：16F 工作空间输入时，baseline→creative 双层链的中间层
+        // 保持半精度交接（output16F=true），仅最后一层做单次 8-bit 编码+抖动；
+        // 旧实现两层各自 8-bit 往返，量化误差叠加。
+        val intermediate16F = bitmap.config == Bitmap.Config.RGBA_F16
         return when {
             hasBaseline && hasCreative -> {
                 val baseBitmap = applyLut(
@@ -677,6 +700,7 @@ class LutImageProcessor(context: Context? = null) {
                     colorRecipeParams = baselineLayer.colorRecipeParams,
                     noiseReductionValue = 0f,
                     chromaNoiseReductionValue = 0f,
+                    output16F = intermediate16F,
                 )
                 applyLut(
                     bitmap = baseBitmap,
@@ -915,6 +939,8 @@ class LutImageProcessor(context: Context? = null) {
         effectiveRecipeParams: ColorRecipeParams?,
         sharpening: Float,
         lutMaskType: Int,
+        working16F: Boolean = false,
+        output16F: Boolean = false,
     ): Bitmap {
         val colorRecipeEnabled = effectiveRecipeParams != null && !effectiveRecipeParams.isDefault()
         val exposure = effectiveRecipeParams?.exposure ?: 0f
@@ -1190,44 +1216,156 @@ class LutImageProcessor(context: Context? = null) {
             null
         }
         val readFramebufferId = filmGrainOutput?.framebufferId ?: postBloomFramebufferId
+        val lastPassTextureId = filmGrainOutput?.textureId ?: postBloomTextureId
 
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readFramebufferId)
-        val pixelSize = width * height * 4
-        val pixelBuffer = obtainReadbackBuffer(pixelSize)
-        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
-        GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
-        GLES30.glReadPixels(
-            0,
-            0,
-            width,
-            height,
-            GLES30.GL_RGBA,
-            GLES30.GL_UNSIGNED_BYTE,
-            pixelBuffer
-        )
-        pixelBuffer.position(0)
+        // ── 1.3.4 Option B：16F 工作空间读回 ──
+        if (working16F && output16F) {
+            // 双层链中间层：半精度直读交接（无 8-bit 量化、无抖动），下一层继续 16F 处理。
+            // 1.3.5 致命修复：clarity/sharpen/bloom/grain 任一后处理激活时 readFramebufferId
+            // 是 8-bit FBO——对其 glReadPixels(GL_HALF_FLOAT) 属非法组合（GL_INVALID_OPERATION），
+            // 缓冲区不写入，残留旧数据/未初始化内存被当作像素 → 成片饱和色块 + 鬼影。
+            // 此时先把最后一级 pass 的纹理无抖动直通渲回主 16F FBO，再从主 FBO 读。
+            var readbackReady = false
+            if (readFramebufferId == framebufferId) {
+                readbackReady = true
+            } else if (renderPassthroughToMainFbo(lastPassTextureId, width, height)) {
+                readbackReady = true
+            } else {
+                PLog.e(TAG, "performRender: passthrough to main 16F FBO failed; falling back to 8-bit encode")
+            }
+            if (readbackReady) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
+                val f16Size = width * height * 8
+                val f16Buffer = obtainReadbackBuffer(f16Size)
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+                GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 8)
+                // 清空上游遗留错误（RAW 引擎/DNG 物化路径），避免污染读回校验
+                drainGlErrors()
+                GLES30.glReadPixels(
+                    0, 0, width, height,
+                    GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, f16Buffer
+                )
+                val readError = GLES30.glGetError()
+                if (readError == GLES30.GL_NO_ERROR) {
+                    f16Buffer.position(0)
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                    val intermediateBitmap = try {
+                        Bitmap.createBitmap(width, height, Bitmap.Config.RGBA_F16, true, inputColorSpace)
+                    } catch (t: Throwable) {
+                        Bitmap.createBitmap(
+                            width, height, Bitmap.Config.RGBA_F16, true,
+                            ColorSpace.get(ColorSpace.Named.SRGB)
+                        )
+                    }
+                    intermediateBitmap.copyPixelsFromBuffer(f16Buffer)
+                    return intermediateBitmap
+                }
+                // 读回失败（缓冲区内容不可信）：落回下方 8-bit 终点编码路径，成片仍正常
+                PLog.e(TAG, "performRender: 16F intermediate readback glError $readError; falling back to 8-bit encode")
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            }
+        }
 
-        // 创建临时 Bitmap
-        val tempBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
-        tempBitmap.copyPixelsFromBuffer(pixelBuffer)
+        if (working16F) {
+            // 链路终点：整个调色链路唯一一次 8-bit sRGB 量化，带 TPDF 抖动。
+            // 1.3.5 修复：真机日志实证 renderFinalEncodePass 误报陈旧 GL 错误
+            // （RAW 引擎/DNG 物化路径遗留，PLG110 真机：glError 1281/1282）→
+            // 被判失败 → 旧兜底从 16F attachment 读 UNSIGNED_BYTE（Mali 拒绝，
+            // GL_INVALID_OPERATION）→ 缓冲区不写入 → 陈旧缓存/未初始化内存被
+            // 当作像素 = 成片大面积色块+鬼影（HDR 开/关两条链共用此尾部，均崩）。
+            // 对策：读前清空错误队列 + 失败重试一次 + 兜底改为恒合法的 HALF_FLOAT 读。
+            val staleErrors = drainGlErrors()
+            if (staleErrors > 0) {
+                PLog.d(TAG, "performRender: drained $staleErrors stale GL error(s) before final encode")
+            }
+            var encodeReady = renderFinalEncodePass(lastPassTextureId, width, height)
+            if (!encodeReady) {
+                drainGlErrors()
+                encodeReady = renderFinalEncodePass(lastPassTextureId, width, height)
+                PLog.e(TAG, "performRender: final encode retry ready=$encodeReady")
+            }
+            if (encodeReady) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, finalEncodeFboId)
+                val encodeBuffer = obtainReadbackBuffer(width * height * 4)
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+                GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
+                GLES30.glReadPixels(
+                    0, 0, width, height,
+                    GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, encodeBuffer
+                )
+                val encodeReadError = GLES30.glGetError()
+                encodeBuffer.position(0)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                if (encodeReadError == GLES30.GL_NO_ERROR) {
+                    // 创建临时 Bitmap
+                    val tempBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
+                    tempBitmap.copyPixelsFromBuffer(encodeBuffer)
+                    return tempBitmap
+                }
+                PLog.e(TAG, "performRender: final encode readback glError $encodeReadError; falling back to F16 read")
+                drainGlErrors()
+            } else {
+                PLog.e(TAG, "performRender: final encode unavailable; falling back to F16 read")
+            }
+            // 安兜底：16F attachment 上 UNSIGNED_BYTE 读回不受驱动保证（真机已证伪），
+            // 改用恒合法的 HALF_FLOAT 读 + Skia 软件转换（仅损失 TPDF 抖动，不花片）。
+            if (readFramebufferId == framebufferId) {
+                return readMain16FAs8Bit(width, height, inputColorSpace)
+            }
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readFramebufferId)
+            val fallbackBuffer = obtainReadbackBuffer(width * height * 4)
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+            GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
+            GLES30.glReadPixels(
+                0, 0, width, height,
+                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, fallbackBuffer
+            )
+            GLES30.glGetError()
+            fallbackBuffer.position(0)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            val fallbackBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
+            fallbackBitmap.copyPixelsFromBuffer(fallbackBuffer)
+            return fallbackBitmap
+        } else {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readFramebufferId)
+            val pixelSize = width * height * 4
+            val pixelBuffer = obtainReadbackBuffer(pixelSize)
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+            GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
+            GLES30.glReadPixels(
+                0,
+                0,
+                width,
+                height,
+                GLES30.GL_RGBA,
+                GLES30.GL_UNSIGNED_BYTE,
+                pixelBuffer
+            )
+            pixelBuffer.position(0)
 
-        // 翻转 Y 轴（glReadPixels 从左下角开始读取，需要翻转）
-//        val matrix = android.graphics.Matrix()
-//        matrix.preScale(1f, -1f)
-//        val outputBitmap = Bitmap.createBitmap(tempBitmap, 0, 0, width, height, matrix, true)
-//        tempBitmap.recycle()
+            // 创建临时 Bitmap
+            val tempBitmap = createBitmap(width, height, colorSpace = inputColorSpace)
+            tempBitmap.copyPixelsFromBuffer(pixelBuffer)
 
-        // 解绑帧缓冲
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            // 翻转 Y 轴（glReadPixels 从左下角开始读取，需要翻转）
+//            val matrix = android.graphics.Matrix()
+//            matrix.preScale(1f, -1f)
+//            val outputBitmap = Bitmap.createBitmap(tempBitmap, 0, 0, width, height, matrix, true)
+//            tempBitmap.recycle()
 
-        return tempBitmap
+            // 解绑帧缓冲
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+            return tempBitmap
+        }
     }
 
-    private fun setupFramebuffer(width: Int, height: Int) {
+    private fun setupFramebuffer(width: Int, height: Int, use16F: Boolean = false) {
         if (framebufferId != 0 &&
             outputTextureId != 0 &&
             outputFramebufferWidth == width &&
-            outputFramebufferHeight == height
+            outputFramebufferHeight == height &&
+            framebufferIs16F == use16F
         ) {
             return
         }
@@ -1240,10 +1378,20 @@ class LutImageProcessor(context: Context? = null) {
         outputTextureId = textures[0]
 
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, outputTextureId)
-        GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0,
-            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
-        )
+        if (use16F) {
+            // 1.3.4 Option B：16F 工作空间 —— recipe/LUT 数学全程无 8-bit 量化，
+            // 抬黑/曲线重塑不再放大读出噪声、不再产生量化断层；
+            // 仅在链路终点做一次 8-bit sRGB 编码（renderFinalEncodePass，带 TPDF 抖动）。
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0,
+                GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null
+            )
+        } else {
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0,
+                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+            )
+        }
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -1268,6 +1416,7 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         outputFramebufferWidth = width
         outputFramebufferHeight = height
+        framebufferIs16F = use16F
     }
 
     private fun releaseOutputFramebuffer() {
@@ -1281,6 +1430,7 @@ class LutImageProcessor(context: Context? = null) {
         }
         outputFramebufferWidth = 0
         outputFramebufferHeight = 0
+        framebufferIs16F = false
         releaseLutSharpenFramebuffer()
     }
 
@@ -1328,6 +1478,32 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+        // 1.3.4 Option B：RAW 引擎交接的 RGBA_F16 位图 —— 半精度直传 GL_RGBA16F，
+        // 禁止 asGlUploadCompatibleBitmap 的 F16→ARGB_8888 隐式量化（旧实现把
+        // 引擎 16F 输出在进入 recipe/LUT 前先打成 8-bit，正是抬黑重新暴露
+        // 读出噪声的量化点）。分配失败再降级旧路径。
+        if (bitmap.config == Bitmap.Config.RGBA_F16) {
+            val byteCount = bitmap.byteCount.toLong()
+            val f16Buffer = com.photographercamera.photon.utils.DirectBufferAllocator
+                .allocateNative(byteCount)
+            if (f16Buffer != null) {
+                try {
+                    f16Buffer.position(0)
+                    bitmap.copyPixelsToBuffer(f16Buffer)
+                    f16Buffer.position(0)
+                    GLES30.glTexImage2D(
+                        GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                        bitmap.width, bitmap.height, 0,
+                        GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, f16Buffer
+                    )
+                    return
+                } finally {
+                    com.photographercamera.photon.utils.DirectBufferAllocator.freeNative(f16Buffer)
+                }
+            }
+            PLog.w(TAG, "F16 upload buffer allocation failed; falling back to 8-bit conversion")
+        }
 
         val uploadBitmap = bitmap.asGlUploadCompatibleBitmap()
         android.opengl.GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, uploadBitmap, 0)
@@ -1988,6 +2164,189 @@ class LutImageProcessor(context: Context? = null) {
             return false
         }
         return true
+    }
+
+    /**
+     * 1.3.4 Option B：16F 工作空间链路终点的唯一一次 8-bit sRGB 编码。
+     * 直通 + TPDF 抖动（±1 LSB，不可见），均匀化量化误差，消除渐变断层。
+     * 写入专用 8-bit FBO，调用方从 finalEncodeFboId 读回。
+     */
+    private fun renderFinalEncodePass(sourceTextureId: Int, width: Int, height: Int): Boolean {
+        if (finalEncodeProgram == 0) {
+            finalEncodeProgram = createFragmentProgram(
+                IMAGE_VERTEX_SHADER,
+                FINAL_ENCODE_DITHER_SHADER,
+                "FinalEncodeDither",
+            )
+        }
+        if (finalEncodeProgram == 0) return false
+        if (finalEncodeFboId == 0 || finalEncodeWidth != width || finalEncodeHeight != height) {
+            releaseFinalEncodeResources()
+            val textures = IntArray(1)
+            GLES30.glGenTextures(1, textures, 0)
+            finalEncodeTextureId = textures[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, finalEncodeTextureId)
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0,
+                GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+            )
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+            val fbos = IntArray(1)
+            GLES30.glGenFramebuffers(1, fbos, 0)
+            finalEncodeFboId = fbos[0]
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, finalEncodeFboId)
+            GLES30.glFramebufferTexture2D(
+                GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D, finalEncodeTextureId, 0
+            )
+            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                PLog.e(TAG, "Final encode FBO incomplete")
+                releaseFinalEncodeResources()
+                return false
+            }
+            finalEncodeWidth = width
+            finalEncodeHeight = height
+        }
+
+        val identityMatrix = FloatArray(16)
+        android.opengl.Matrix.setIdentityM(identityMatrix, 0)
+
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glUseProgram(finalEncodeProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, finalEncodeFboId)
+        GLES30.glViewport(0, 0, width, height)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(finalEncodeProgram, "uInputTexture"), 0)
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(finalEncodeProgram, "uMVPMatrix"),
+            1, false, identityMatrix, 0
+        )
+        drawQuad(finalEncodeProgram)
+
+        val error = GLES30.glGetError()
+        if (error != GLES30.GL_NO_ERROR) {
+            PLog.e(TAG, "renderFinalEncodePass: glError $error")
+            return false
+        }
+        return true
+    }
+
+    private fun releaseFinalEncodeResources() {
+        if (finalEncodeProgram != 0) {
+            GLES30.glDeleteProgram(finalEncodeProgram)
+            finalEncodeProgram = 0
+        }
+        if (finalEncodeFboId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(finalEncodeFboId), 0)
+            finalEncodeFboId = 0
+        }
+        if (finalEncodeTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(finalEncodeTextureId), 0)
+            finalEncodeTextureId = 0
+        }
+        finalEncodeWidth = 0
+        finalEncodeHeight = 0
+    }
+
+    /**
+     * 1.3.5：把最后一级后处理 pass（clarity/sharpen/bloom/grain，输出 FBO 均为 8-bit）
+     * 的纹理无抖动直通渲染回主 16F FBO，供 16F 中间层读回。
+     * 中间层交接必须保持全精度——绝不能从 8-bit FBO 读 HALF_FLOAT（非法组合，
+     * 1.3.4 崩坏回归根因），也不能让中间层经过 8-bit 量化。
+     * 调用前提：sourceTextureId 不是主 FBO 的附着纹理（否则构成反馈环）。
+     */
+    private fun renderPassthroughToMainFbo(sourceTextureId: Int, width: Int, height: Int): Boolean {
+        if (intermediatePassthroughProgram == 0) {
+            intermediatePassthroughProgram = createFragmentProgram(
+                IMAGE_VERTEX_SHADER,
+                INTERMEDIATE_PASSTHROUGH_SHADER,
+                "IntermediatePassthrough",
+            )
+        }
+        if (intermediatePassthroughProgram == 0) return false
+        if (framebufferId == 0) return false
+
+        val identityMatrix = FloatArray(16)
+        android.opengl.Matrix.setIdentityM(identityMatrix, 0)
+
+        // 清空遗留错误，确保函数尾部检查只反映本 pass 自身
+        drainGlErrors()
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glUseProgram(intermediatePassthroughProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
+        GLES30.glViewport(0, 0, width, height)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(
+            GLES30.glGetUniformLocation(intermediatePassthroughProgram, "uInputTexture"), 0
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(intermediatePassthroughProgram, "uMVPMatrix"),
+            1, false, identityMatrix, 0
+        )
+        drawQuad(intermediatePassthroughProgram)
+
+        val error = GLES30.glGetError()
+        if (error != GLES30.GL_NO_ERROR) {
+            PLog.e(TAG, "renderPassthroughToMainFbo: glError $error")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * 1.3.5：清空上下文遗留的 GL 错误队列，返回清掉的条数（上限 64 防御死循环）。
+     * GL 错误是上下文级队列、跨调用残留——RAW 引擎/DNG 物化等路径产生的陈旧
+     * 错误若不清场，会让后续 glGetError 检查（终点编码等）误判失败，进而触发
+     * 非法格式读回兜底（1.3.4 真机花片根因链的一环）。
+     */
+    private fun drainGlErrors(): Int {
+        var count = 0
+        while (count < 64 && GLES30.glGetError() != GLES30.GL_NO_ERROR) {
+            count++
+        }
+        return count
+    }
+
+    /**
+     * 1.3.5 终点编码失败时的安全兜底：从主 16F FBO 以 HALF_FLOAT 直读
+     * （RGBA16F attachment + RGBA/HALF_FLOAT 组合恒合法，1.3.4 已实证），
+     * 再用 Skia 软件转换成 ARGB_8888。仅损失 TPDF 抖动，绝不产生花片。
+     * 调用前提：主 framebufferId 当前持有链路最终图像（无后处理 pass 激活）。
+     */
+    private fun readMain16FAs8Bit(width: Int, height: Int, colorSpace: ColorSpace): Bitmap {
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
+        val f16Buffer = obtainReadbackBuffer(width * height * 8)
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+        GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 8)
+        GLES30.glReadPixels(
+            0, 0, width, height,
+            GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, f16Buffer
+        )
+        val readError = GLES30.glGetError()
+        f16Buffer.position(0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        val f16Bitmap = try {
+            Bitmap.createBitmap(width, height, Bitmap.Config.RGBA_F16, true, colorSpace)
+        } catch (t: Throwable) {
+            Bitmap.createBitmap(width, height, Bitmap.Config.RGBA_F16)
+        }
+        if (readError == GLES30.GL_NO_ERROR) {
+            f16Bitmap.copyPixelsFromBuffer(f16Buffer)
+        } else {
+            PLog.e(TAG, "readMain16FAs8Bit: glError $readError; output will be blank")
+        }
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(out).drawBitmap(f16Bitmap, 0f, 0f, null)
+        f16Bitmap.recycle()
+        return out
     }
 
     private fun releaseLutSharpenFramebuffer() {
@@ -3198,6 +3557,11 @@ class LutImageProcessor(context: Context? = null) {
             if (bitmapDenoiseFboId[i] != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(bitmapDenoiseFboId[i]), 0)
         }
         releaseLutSharpenFramebuffer()
+        releaseFinalEncodeResources()
+        if (intermediatePassthroughProgram != 0) {
+            GLES30.glDeleteProgram(intermediatePassthroughProgram)
+            intermediatePassthroughProgram = 0
+        }
         if (bitmapDenoiseNlmU2BufferId != 0) {
             GLES31.glDeleteBuffers(1, intArrayOf(bitmapDenoiseNlmU2BufferId), 0)
             bitmapDenoiseNlmU2BufferId = 0
@@ -3281,6 +3645,49 @@ class LutImageProcessor(context: Context? = null) {
 
             void main() {
                 fragColor = texture(uInputTexture, vTexCoord);
+            }
+        """.trimIndent()
+
+        // 1.3.5：16F 中间层交接专用直通 shader。mediump 在 GLSL ES 3.0 下仅保证 fp16
+        // 精度，中间层交接是精度关键路径（Option B 的核心价值），必须 highp 采样输出。
+        private val INTERMEDIATE_PASSTHROUGH_SHADER = """
+            #version 300 es
+            precision highp float;
+
+            in vec2 vTexCoord;
+            out vec4 fragColor;
+
+            uniform sampler2D uInputTexture;
+
+            void main() {
+                fragColor = texture(uInputTexture, vTexCoord);
+            }
+        """.trimIndent()
+
+        // 1.3.4 Option B：16F 工作空间终点的单次 8-bit 编码。TPDF 抖动 ±1 LSB
+        // （Dave Hoskins hash12，与 RawSrgbPass/LutImageProcessor 主 shader 同源），
+        // 把 8-bit 量化误差均匀化，消除渐变断层。
+        private val FINAL_ENCODE_DITHER_SHADER = """
+            #version 300 es
+            precision highp float;
+
+            in vec2 vTexCoord;
+            out vec4 fragColor;
+
+            uniform sampler2D uInputTexture;
+
+            float hash12(vec2 p) {
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
+
+            void main() {
+                vec4 color = texture(uInputTexture, vTexCoord);
+                float d1 = hash12(gl_FragCoord.xy + 0.1) - 0.5;
+                float d2 = hash12(gl_FragCoord.xy + 0.7) - 0.5;
+                color.rgb += (d1 + d2) / 255.0;
+                fragColor = vec4(clamp(color.rgb, 0.0, 1.0), color.a);
             }
         """.trimIndent()
 
@@ -3492,6 +3899,15 @@ class LutImageProcessor(context: Context? = null) {
                 return exp(-x * invSigmaSq2);
             }
             
+            // Dave Hoskins hash12 (公开算法) — profile 在 8-bit sRGB 上重塑曲线/抬黑会暴露
+            // 量化台阶(断层)与读出噪声；末级 ±1 LSB TPDF 抖动打散色带且不可见，
+            // 与 1.3.1 的 RawSrgbPass 抖动一致，覆盖 profile 应用这一阶段。
+            float hash12(vec2 p) {
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
+
             // RGB 转 YCbCr
             vec3 rgb2ycbcr(vec3 rgb) {
                 float y  =  0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
@@ -3762,6 +4178,12 @@ class LutImageProcessor(context: Context? = null) {
                     color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
                     color.rgb = (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5;
                 }
+                // 末级 TPDF 抖动：打散 profile 曲线重塑带来的 8-bit 量化台阶（色彩断层），
+                // ±1 LSB 不可见；RAW_MAX 的读出噪声 / JPEG 压缩噪声经抬黑后被放大，
+                // 抖动使其均匀化而非成带状聚集。
+                float d1 = hash12(gl_FragCoord.xy + 0.1) - 0.5;
+                float d2 = hash12(gl_FragCoord.xy + 0.7) - 0.5;
+                color += (d1 + d2) / 255.0;
                 fragColor = clamp(color, 0.0, 1.0);
             }
         """.trimIndent()

@@ -72,8 +72,15 @@ object ProfileToRecipeMapper {
             // 光学暗角走 LensStage（Stage 0，色彩链之前），此处只保留风格化暗角。
             vignette = p.vignette.amount,
             chromaticAberration = p.lens.chromaticAberration,
+            // 颗粒（银盐质感）走原生 applyDensityFilmGrain 通路（simplex 银盐颗粒，
+            // 与原生滤镜同一套），保持 1:1 接线上游。下方 noise 才是「刺眼噪点」元凶。
             filmGrain = p.grain.amount,
-            noise = (p.noise.luma + p.noise.chroma).coerceIn(0f, 1f),
+            // 0.10.x 修复（用户指令：去掉 profile 里面的噪点）：profile 不再驱动独立的
+            // uNoise 纯随机通道。该通道每帧重随机、带彩色、观感刺眼，且原生滤镜的
+            // noise 恒为 0 —— 收敛到原生行为后，profile 与原生滤镜一致只有银盐颗粒，
+            // 不再叠加传感器式噪点 / 色彩断层。profile 自身的 noise.luma/chroma 仅用于
+            // 桌面端分析参考，不再下发到实时渲染通道。
+            noise = 0f,
             halation = p.halation.amount,
             bloom = p.bloom.amount,
             sharpness = p.sharpen.amount,
@@ -97,7 +104,12 @@ object ProfileToRecipeMapper {
             bloomRadius = p.bloom.radius,
             bloomThreshold = p.bloom.threshold,
             shadowTint = p.shadow.tint,
-            filmCurveShadowFloor = p.filmCurve.shadowFloor,
+            // 0.10.x / 1.3.1 修复（用户指令：胶片人像等「抬黑」profile 显形噪点）：
+            // shadow_floor 把 0..N 区间整体抬到 N 的「黑位抬升」，会把传感器读出噪声
+            // 暴露在暗部（尤其 RAW_MAX）。原生 identity profile 此值为 0（noise 埋在纯黑），
+            // 故对超过引擎中性基准 8 的值做硬上限 10，压制过度抬黑带来的显形噪点，
+            // 同时保留轻微胶片抬黑感。recipe 的 shadow.blackPoint 抬黑由 toneToe 单独处理。
+            filmCurveShadowFloor = minOf(p.filmCurve.shadowFloor, 10f),
             filmCurveHighlightCeiling = p.filmCurve.highlightCeiling,
             halationAmount = p.halation.amount,
             shadowSaturation = p.shadow.saturation,

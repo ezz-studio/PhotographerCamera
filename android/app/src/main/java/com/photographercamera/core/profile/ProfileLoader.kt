@@ -122,13 +122,19 @@ object ProfileLoader {
     suspend fun import(context: Context, uri: Uri, id: String? = null): String = withContext(Dispatchers.IO) {
         val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: throw IllegalArgumentException("Cannot read $uri")
-        // 0.9.1 修复：SAF 的 lastPathSegment 形如 "primary:Download/xxx.json"（含
-        // 冒号/斜杠），直接当文件名写缓存会失败。先取末段文件名，再把 id 消毒为
-        // [A-Za-z0-9_-]（缓存目录/注册表键/lutId 前缀都用它）。
-        val rawName = id
+        // 0.9.1→0.9.18 修复：注册名 = profile 自身的 display.name 优先，其次文件名。
+        // 旧逻辑用 [^A-Za-z0-9_-] 把中文名整个压成下划线、或沿用导出时生成的随机 id
+        // （如 msf_19890），导致「桌面叫胶片人像、手机里显示乱码/另一个名字」，且选中的
+        // 是错误 profile（含 grain/随机噪声）→ 成片严重噪点。现仅剔除文件名/键非法字符，
+        // 保留中文与空格；同名重导 = 原地覆盖，符合预期。
+        val preferredName = id
+            ?: runCatching { json.decodeFromString(PhotographerProfile.serializer(), text).display?.name }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
             ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')
-        val name = (rawName ?: "imported")
-            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val name = (preferredName ?: "imported")
+            .replace(Regex("""[\\/:*?"<>|]+"""), "_") // 仅剔除 Windows/路径非法字符
+            .trim()
             .ifBlank { "imported_${System.currentTimeMillis()}" }
         loadFromText(text, name)
         exportToCache(context, registry[name]!!, name)

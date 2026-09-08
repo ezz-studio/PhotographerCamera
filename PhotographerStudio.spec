@@ -1,16 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import collect_submodules
+
+# scipy is imported lazily *inside* functions (style_analyzer -> ndimage.laplace,
+# profile_optimizer -> optimize.minimize), which the static graph can miss —
+# without these the built exe dies at "generate" time with ImportError.
+_hidden = [
+    'style_analyzer', 'ai_profile_generator', 'profile_optimizer', 'profile_validator',
+    'build_profile', 'profile_renderer', 'profile_schema', 'dataset_loader',
+    'loss_function', 'glsl_reference', 'PIL.Image',
+]
+_hidden += collect_submodules('scipy.ndimage')
+_hidden += collect_submodules('scipy.optimize')
+
 a = Analysis(
     ['desktop/server.py'],
     pathex=['.', 'tools'],
     binaries=[],
     datas=[('desktop/web', 'desktop/web'), ('profiles/schema', 'profiles/schema')],
-    hiddenimports=['style_analyzer', 'ai_profile_generator', 'profile_optimizer', 'profile_validator', 'build_profile', 'profile_renderer', 'profile_schema', 'dataset_loader', 'glsl_reference', 'PIL.Image'],
+    hiddenimports=_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'pytest'],
+    excludes=['tkinter', 'matplotlib', 'pytest', 'torch', 'IPython', 'notebook'],
     noarchive=False,
     optimize=0,
 )
