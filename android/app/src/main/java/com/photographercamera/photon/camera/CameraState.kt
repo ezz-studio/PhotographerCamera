@@ -171,6 +171,16 @@ data class CameraInfo(
     val logicalCameraId: String? = null,
     val outputPhysicalCameraId: String? = null,
     val physicalCameras: List<CameraPhysicalInfo> = emptyList(),
+    // 1.2.1：逻辑多摄相机自身的物理子镜头列表（变焦显式绑定的数据源）。
+    // physicalCameras 只会被 supplemental/forced binding 填充（key=物理相机 id），
+    // 逻辑机自身条目 logicalBinding=null → 恒空，导致 1.2.0 的 getBoundPhysical
+    // CameraId 被 size<2 守卫短路（真机日志 physOut=null 全程、0 次 session
+    // recreate）。此字段由 discovery 对"具备 LOGICAL_MULTI_CAMERA 能力且 HAL 广告
+    // physicalCameraIds 的相机自身"填充；有意与 physicalCameras 隔离——
+    // getOwnedPhysicalCameraIds 去重会消费 physicalCameras 声明所有权，填了会把
+    // 独立相机条目（id=2/3/4）整批剔除。消费点仅 getBoundPhysicalCameraId 与
+    // controller 滞回。
+    val selfPhysicalCameras: List<CameraPhysicalInfo> = emptyList(),
     val lensFacing: Int,
     val lensType: LensType,
     val physicalCameraIds: List<String>,
@@ -208,7 +218,14 @@ data class CameraInfo(
     fun getBoundPhysicalCameraId(): String? = outputPhysicalCameraId
 
     fun getBoundPhysicalCameraId(zoomRatioByMain: Float): String? {
-        if (physicalCameras.size < 2) return outputPhysicalCameraId
+        // 1.2.1：数据源从 physicalCameras 改为 selfPhysicalCameras——前者只被
+        // supplemental/forced binding 填充且 key 全是物理相机 id，逻辑机自身条目
+        // 恒空（size 0 < 2 早退），1.2.0 显式绑定从未生效（真机日志实锤：全程
+        // physOut=null、0 次 session recreate，滑动行为与 1.1.0 完全一致）。
+        // selfPhysicalCameras 由 discovery 对逻辑多摄相机自身填充（HAL 广告的
+        // physicalCameraIds 逐一 calculateIntrinsicZoomRatio）。
+        val physicals = selfPhysicalCameras
+        if (physicals.size < 2) return outputPhysicalCameraId
         // 1.2.0 变焦切镜（用户指令"UI 数字变就切镜头，不等松手"）：
         // 1.1.0 恒返回 null 委托 HAL 逻辑路由，但真机实测（PLG110）OPPO HAL 在
         // 连续滑动请求中不切物理镜头、停稳才切——即"松手才切"体验的根源。
@@ -221,9 +238,9 @@ data class CameraInfo(
         // crop 到匹配焦段，切镜瞬间 FOV 不跳变）。
         return when {
             zoomRatioByMain >= 2.95f ->
-                physicalCameras.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
+                physicals.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
             zoomRatioByMain < 0.95f ->
-                physicalCameras.minByOrNull { it.intrinsicZoomRatio }?.cameraId
+                physicals.minByOrNull { it.intrinsicZoomRatio }?.cameraId
             else -> null
         }
     }

@@ -1530,11 +1530,36 @@ class CameraDiscovery(private val context: Context) {
         // 硬件支持级别
         val hardwareLevel = characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL) ?: -1
 
+        // 1.2.1：逻辑多摄相机自身的物理子镜头列表（变焦显式绑定数据源）。
+        // logicalCameraBindings map 的 key 全是物理相机 id（supplemental/forced
+        // binding），逻辑机自身条目 logicalBinding=null → physicalCameras 恒空 →
+        // 1.2.0 的 getBoundPhysicalCameraId 被 size<2 守卫短路（真机日志实锤：
+        // physOut=null 全程、0 次 session recreate）。此处对具备 LOGICAL_MULTI_CAMERA
+        // 能力的相机自身，用 HAL 广告的 physicalCameraIds 逐一构建 CameraPhysicalInfo
+        // （intrinsic 同 calculateIntrinsicZoomRatio 口径）。有意与 physicalCameras
+        // 隔离：getOwnedPhysicalCameraIds 去重会消费 physicalCameras 声明所有权，
+        // 填了会把独立相机条目（id=2/3/4）整批剔除。
+        val selfPhysicalCameras = if (
+            logicalBinding == null &&
+            characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                ?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) == true
+        ) {
+            characteristics.physicalCameraIds.mapNotNull { physicalId ->
+                createPhysicalCameraCandidate(
+                    logicalCameraId = cameraId,
+                    physicalCameraId = physicalId
+                )
+            }
+        } else {
+            emptyList()
+        }
+
         return CameraInfo(
             cameraId = cameraId,
             logicalCameraId = logicalBinding?.logicalCameraId,
             outputPhysicalCameraId = null,
             physicalCameras = logicalBinding?.physicalCameras ?: emptyList(),
+            selfPhysicalCameras = selfPhysicalCameras,
             lensFacing = lensFacing,
             lensType = LensType.BACK_MAIN, // 临时，后续分类
             physicalCameraIds = logicalBinding?.physicalCameraIds ?: characteristics.physicalCameraIds.toList(),

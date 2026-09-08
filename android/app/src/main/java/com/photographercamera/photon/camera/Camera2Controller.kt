@@ -3313,10 +3313,12 @@ class Camera2Controller(private val context: Context) {
         // 切点附近 zoom 抖动会让 desired 在 null/物理镜头间反复翻转 → session 反复
         // 重建（0.8.2 乒乓教训）。滞回以 activeOutputPhysicalCameraId（真相源，不
         // 依赖 state 写回时机）为基准，单向收敛：只有拉离切点 0.1 才退出绑定。
+        // 1.2.1：物理子镜头数据源改 selfPhysicalCameras（physicalCameras 对逻辑机
+        // 自身条目恒空，见 CameraDiscovery.createCameraInfo 注释）。
         // active 不属于当前相机物理子镜头（跨相机残留）时不滞回，直接返回 bound。
         if (bound == null) {
             val active = activeOutputPhysicalCameraId ?: return null
-            val physicals = camera?.physicalCameras ?: return null
+            val physicals = camera?.selfPhysicalCameras ?: return null
             if (physicals.none { it.cameraId == active }) return null
             val teleId = physicals.maxByOrNull { it.intrinsicZoomRatio }?.cameraId
             val ultraId = physicals.minByOrNull { it.intrinsicZoomRatio }?.cameraId

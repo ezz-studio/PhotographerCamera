@@ -3329,7 +3329,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 的 HAL 路由完成（拖拽与松手全程无 session 重建）。findOptimalLens 的
         // 物理镜头候选池不适用于"当前=逻辑机"形态，否则会把丝滑的逻辑机切回
         // 物理机（session 重建 + FOV 跳变）。单物理机型的 settle 路由行为不变。
-        if (currentCamera.physicalCameras.size >= 2) {
+        // 1.2.1：守卫数据源修正——physicalCameras 只被 supplemental binding 填充
+        // （key=物理相机 id），逻辑机自身条目恒空 → 本守卫 1.1.0 起从未生效，
+        // "松手才切"（settle.crossLens reopen 独立相机）的直接来源。改用
+        // selfPhysicalCameras（discovery 对逻辑多摄自身填充）。
+        // 1.2.1 起逻辑机上 settle 直接 setZoomRatio：跨镜头切流由滑动热路径的
+        // 显式物理输出绑定完成（见 CameraState.getBoundPhysicalCameraId）。
+        if (currentCamera.selfPhysicalCameras.size >= 2 ||
+            currentCamera.physicalCameras.size >= 2
+        ) {
             setZoomRatio(ratio)
             return
         }
@@ -4919,6 +4927,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): CameraInfo? {
         if (isVideoLensLocked()) {
             return cameras.firstOrNull { it.cameraId == currentCameraId }
+        }
+        val currentCameraInfo = cameras.find { it.cameraId == currentCameraId }
+        // 1.2.1：当前镜头是逻辑多摄（selfPhysicalCameras ≥2）时恒返回当前镜头，
+        // 不做 app 层跨镜头路由——滑动热路径的显式物理输出绑定
+        // （CameraState.getBoundPhysicalCameraId + recreateSessionForPhysicalZoom
+        // IfNeeded）已覆盖跨镜头切流需求（滑动中即切、FOV 连续），再 reopen 独立
+        // 相机只会产生双重切换与 FOV 跳变。此守卫同时覆盖 settle / 音量键档位
+        // 步进 / 默认焦距三个调用点（此前"松手才切"即本函数在逻辑机上返回独立
+        // 相机导致）。
+        if (currentCameraInfo != null && currentCameraInfo.selfPhysicalCameras.size >= 2) {
+            return currentCameraInfo
         }
         val currentLensType = cameras.find { it.cameraId == currentCameraId }?.lensType
         val zoomableCameras =
