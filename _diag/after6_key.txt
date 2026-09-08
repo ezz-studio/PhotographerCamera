@@ -1,0 +1,186 @@
+06:00 后起始行: 3600 总行数: 4200
+ 3670 06:24:27.899 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+ 3673 06:24:27.933 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+ 3680 06:24:32.539 [CameraViewModel] I/FACE_MASK stage=CAPTURE_LATCH available=false source=BLAZEFACE_VALIDATED_SOFT_FACE_ELLIPSE size=null ageMs=null sensorOrientation=null previewToCaptureRotation=null frontFacing=null cameraId=null
+ 3681 06:24:32.540 [Camera2Controller] I/开始拍照 - 闪光模式: 0, ISO模式: 自动
+ 3684 06:24:32.559 [Camera2Controller] D/直接拍照
+ 3686 06:24:32.562 [Camera2Controller] D/Multi-frame capture locked exposure=true ae=0 flash=0 iso=293 shutter=4995741 af=0 focus=1.3205929 afState=2 lensState=0 focusSource=settled_continuous_af
+ 3687 06:24:32.562 [Camera2Controller] D/Capture request built and ready to send: aeMode=0, aeTrigger=0, aeLock=false, flashMode=0, iso=293, shutter=4995741
+ 3689 06:24:32.714 [Camera2Controller] D/Burst capture started at frame 135
+ 3690 06:24:32.782 [Camera2Controller] D/Burst capture started at frame 136
+ 3692 06:24:32.788 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=293 shutter=4995741, afMode=0 afState=0 focus=1.3205929 lensState=0, result buffered (timestamp: 181206572764419). Pending images: 0, Pending
+ 3694 06:24:32.827 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=293 shutter=4995741, afMode=0 afState=0 focus=1.3205929 lensState=0, result buffered (timestamp: 181206639435419). Pending images: 0, Pending
+ 3695 06:24:32.848 [Camera2Controller] D/Burst capture started at frame 137
+ 3697 06:24:32.893 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=293 shutter=4995741, afMode=0 afState=0 focus=1.3205929 lensState=0, result buffered (timestamp: 181206706106419). Pending images: 0, Pending
+ 3698 06:24:32.914 [Camera2Controller] D/Burst capture started at frame 138
+ 3700 06:24:32.960 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=293 shutter=4995741, afMode=0 afState=0 focus=1.3205929 lensState=0, result buffered (timestamp: 181206772776419). Pending images: 0, Pending
+ 3701 06:24:32.980 [Camera2Controller] D/Burst capture started at frame 139
+ 3703 06:24:33.012 [Camera2Controller] D/Capture completed role=BASE aeMode=0 aeState=0 flashState=2 ISO=293 shutter=4995741, afMode=0 afState=0 focus=1.3205929 lensState=0, result buffered (timestamp: 181206839447419). Pending images: 0, Pending
+ 3707 06:24:33.015 [Camera2Controller] I/Multi-frame sequence end: requested=5 captured=5 failed=0
+ 3708 06:24:33.016 [SHOT] multi-frame sequence end requested=5 captured=5 failed=0
+ 3709 06:24:33.017 [Camera2Controller] I/Multi-frame focus state released: reason=capture sequence finished
+ 3712 06:24:33.347 [RawProcessor] I/RAW_CROP_TRACE stage=CAMERA2_RESULT buffer=4096x3072 pixelArray=4096x3072 activePre=Rect(0, 0 - 4096, 3072) activePost=Rect(0, 0 - 4096, 3072) scalerCrop=Rect(0, 0 - 4096, 3072) scalerReturned=true zoomRatio=1.
+ 3717 06:24:33.427 [MultiFrameStacker] D/Starting MGC Spatial RGB fusion for 5 frames source=4096x3072 physicalCrop=Rect(0, 0 - 4096, 3072) Pattern=3 outputScale=1.0 BL=64.008545, 63.996338, 63.999023, 64.00928 WL=1023 noiseProfile=system_camera2
+ 3721 06:24:33.696 [GlesMgcRawFusion] I/MGC Spatial RGB baseFrame=135 source=gles_raw_sharpness
+ 3722 06:24:33.697 [GlesMgcRawFusion] I/MGC Spatial RGB schedule baseFrame=135 normal=5 long=0 ultrashort=0 shortRatio=none excluded=0 outputScale=1.0 AI alignment=disabled
+ 3723 06:24:33.721 [GlesMgcRawSpatial] I/MGC RAW black levels master=[64.008545, 63.996338, 63.999023, 64.00928] perFrame=[[64.008545, 63.996338, 63.999023, 64.00928], [64.008545, 63.996338, 63.999023, 64.00928], [64.008545, 63.996338, 63.999023,
+ 3724 06:24:33.723 [GlesMgcRawSpatial] I/MGC Spatial GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none strengthSsboMax=2147483648 strengthPackGroups=65535x65535
+ 3725 06:24:33.747 [GlesSpatialGlobalAlignment] I/Spatial global alignment GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none group=[1024, 1024, 1024] invocations=1024 ssb
+ 3726 06:24:33.823 [GlesMgcRawSpatial] I/MGC Spatial domains bayerQuad=2048x1536 guide=2048x1536 rejection=2048x1536 mergeWeight=1024x768 rgbAotRejection=RAW/4-direct filter=256x192 pixelDiff=ClippedGaussian20(sigma=500.0) downsample=4x colorSigm
+ 3727 06:24:33.824 [GlesMgcRawSpatial] I/MGC Raw10 unblocker fullresTile=8 domain=256x192 scale=1.0 offset=0.45 postBlur=binomial3x3U8
+ 3728 06:24:34.048 [GlesMgcRawSpatial] I/MGC Spatial noise profile source=Camera2 SENSOR_NOISE_PROFILE fallback=gcam-c:builtin_noise_pixel8_pro perFrame=5/5 systemFallback=0/5 calibrated=0/5
+ 3729 06:24:34.049 [GlesMgcRawSpatial] I/MGC Spatial Bayer kernel referenceSnr=12.843781 baseSpatialScale=0.35145187 referenceSigma=2.8453398 alignmentInputGain=16.0 alignmentDomain=signed-s16
+ 3730 06:24:34.067 [GlesMgcRawSpatial] I/MGC Spatial RAW temporal window textures=2 bytes=50331648 referenceUpload=1 took=17ms
+ 3731 06:24:34.090 [GlesMgcRawSpatial] I/MGC Align reference products cached levels=4 grids=62x46, 30x22, 14x10, 6x4 cpuSubmit=5ms
+ 3732 06:24:34.091 [GlesMgcRawSpatial] I/MGC Spatial output exposure normalizationScale=1.0 baselineExposureEv=null domain=reference
+ 3733 06:24:34.091 [GlesMgcRawSpatial] I/MGC linear kernel mask mode=zero reason=no-accepted-bento-selected-slice
+ 3734 06:24:34.092 [GlesMgcRawSpatial] I/MGC Spatial strength atlas layout frames=5 maxTexture=16384 alignment=256x1920 grid=1x10 rejection=1024x3840 grid=1x5
+ 3735 06:24:34.136 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-gpu/3-candidate median=false runtimeOptions=256/8
+ 3736 06:24:34.158 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=136 role=NORMAL guideCov=2ms pyramid=8ms align=13ms flow=11ms rejectionScale=1.0 rejectionAdjusted=false rejection=9ms total=45ms
+ 3737 06:24:34.162 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=1 frame=136 role=NORMAL uploadCall=13ms prepareCall=46ms postPrepareSubmit=2ms totalCpu=62ms
+ 3738 06:24:34.196 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-gpu/3-candidate median=false runtimeOptions=256/8
+ 3739 06:24:34.206 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=137 role=NORMAL guideCov=0ms pyramid=3ms align=16ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=8ms total=30ms
+ 3740 06:24:34.210 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=2 frame=137 role=NORMAL uploadCall=13ms prepareCall=31ms postPrepareSubmit=2ms totalCpu=46ms
+ 3741 06:24:34.324 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-gpu/3-candidate median=false runtimeOptions=256/8
+ 3742 06:24:34.325 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=138 role=NORMAL guideCov=0ms pyramid=2ms align=84ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=0ms total=89ms
+ 3743 06:24:34.326 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=3 frame=138 role=NORMAL uploadCall=25ms prepareCall=89ms postPrepareSubmit=0ms totalCpu=115ms
+ 3744 06:24:34.514 [GlesMgcRawSpatial] I/MGC AlignPyramid target=256 guide=2048x1536 final=2048x1536 flowGrid=256x192 flowScale=1.0 useL1=false gradientProducts=cached upsampleL1=merge-grid/global-gpu/3-candidate median=false runtimeOptions=256/8
+ 3745 06:24:34.515 [GlesMgcRawSpatial] I/MGC Spatial temporal cpuSubmit frame=139 role=NORMAL guideCov=0ms pyramid=0ms align=176ms flow=0ms rejectionScale=1.0 rejectionAdjusted=false rejection=0ms total=177ms
+ 3746 06:24:34.515 [GlesMgcRawSpatial] I/MGC Spatial frame schedule index=4 frame=139 role=NORMAL uploadCall=11ms prepareCall=177ms postPrepareSubmit=0ms totalCpu=189ms
+ 3747 06:24:34.516 [GlesMgcRawSpatial] I/MGC Spatial RGB temporal resources=161776562 advisoryBytes=671088640 estimateExceedsAdvisory=false
+ 3748 06:24:34.894 [GlesMgcRawSpatial] I/MGC Spatial RGB temporal arena released textures=46 releasedBytes=155878322 retainedTextures=2 retainedBytes=5898240 beforeBytes=161776562 gpuWait=374ms
+ 3749 06:24:34.897 [GlesMgcRawSpatial] I/MGC Spatial strength PBO submit label=MGC Spatial RGB strength alignment atlas mode=compute-ssbo-pack-3840x1 bytes=1966080 setup=0ms submit=0ms total=0ms
+ 3750 06:24:34.899 [LargeDirectBuffer] D/Allocated MGC Spatial RGB strength alignment host buffer with native allocator: 1966080 bytes
+ 3751 06:24:34.901 [GlesMgcRawSpatial] I/MGC Spatial strength PBO mapped label=MGC Spatial RGB strength alignment host bytes=1966080 wait=0ms
+ 3752 06:24:34.908 [GlesMgcRawSpatial] I/MGC Spatial diagnostic host materialized label=MGC Spatial RGB strength alignment host bytes=1966080 took=8ms
+ 3753 06:24:34.913 [GlesMgcRawSpatial] I/MGC Spatial strength PBO submit label=MGC Spatial RGB strength rejection atlas mode=compute-ssbo-pack-7680x1 bytes=3932160 setup=0ms submit=0ms total=0ms
+ 3754 06:24:34.919 [LargeDirectBuffer] D/Allocated MGC Spatial RGB strength rejection host buffer with native allocator: 3932160 bytes
+ 3755 06:24:34.921 [GlesMgcRawSpatial] I/MGC Spatial strength PBO mapped label=MGC Spatial RGB strength rejection host bytes=3932160 wait=1ms
+ 3756 06:24:34.937 [GlesMgcRawSpatial] I/MGC Spatial diagnostic host materialized label=MGC Spatial RGB strength rejection host bytes=3932160 took=17ms
+ 3757 06:24:34.939 [LargeDirectBuffer] D/Allocated MGC V25 Spatial RGB planar F16/Q14 buffer with native allocator: 75497472 bytes
+ 3758 06:24:35.021 [CameraViewModel] D/Multi-frame convergence skipped: processing already dispatched (requested=5 captured=5 failed=0)
+ 3759 06:24:35.400 [GlesMgcRawSpatial] I/MGC Spatial RGB V25 AOT fusion arena released textures=1 releasedBytes=2312 retainedBytes=100663296 iirWorkingSetBytes=301989888 beforeBytes=100665608 gpuWait=5ms
+ 3760 06:24:35.699 [GlesMgcRawSpatial] I/MGC Spatial V25 RGB AOT frames=5 native=4096x3072 storage=4096x3072 output=4096x3072 rawScale=16.0 mergeSharpness=0.8 aot=379ms colorNoiseIir=283ms chromaFinal=7ms
+ 3761 06:24:35.704 [GlesMgcRawSpatial] I/MGC Spatial strength PBOs prepared mode=RGB image=4096x3072 bytes=81395712 took=0ms
+ 3762 06:24:35.705 [GlesMgcRawSpatial] I/MGC Spatial RGB dispatch complete frames=5 took=767ms mode=mgc-v25-merge-rgb-raw16-f16-aot aotNative=4096x3072 aotStorage=4096x3072
+ 3763 06:24:35.705 [GlesMgcRawSpatial] I/MGC Spatial strength readback queued mode=RGB bytes=81395712 fixed16PrepareSubmit=379ms modes=compute-ssbo-pack-3840x1-host/compute-ssbo-pack-7680x1-host/mgc-v25-aot-planar-q14-host alignmentSubmit=8ms rej
+ 3764 06:24:35.749 [GlesMgcRawSpatial] I/MGC Spatial strength resolve mode=RGB diagnostics=0ms aot=43ms unmap=0ms total=43ms
+ 3765 06:24:35.750 [GlesMgcRawSpatial] I/MGC Spatial strength readback resolved mode=RGB took=44ms
+ 3766 06:24:35.750 [GlesMgcRawSpatial] I/MGC Spatial denoise model aotMode=RGB captureFrames=5 diag0=[3.824314, 7.648628, 3.824314] diag1=[1.3882984, 2.7765965, 1.3882984] savannahRatio=0.090754725 savannahTaps=[0.10951344,0.79867584,0.10951344] 
+ 3767 06:24:35.750 [GlesMgcRawSpatial] I/MGC Spatial RGB merge complete frames=5 output=4096x3072 referenceSnr=12.843781 finishRawDenoiseSnr=28.51299 finishRawDenoiseSnrSource=spatial-output-noise-model lscApplied=true result=RGBA16F_GPU programI
+ 3769 06:24:35.814 [RawDemosaicProcessor] I/MGC Spatial default denoise noise source=spatial-aot captureFrames=5 read=[8.164692E-8, 7.7067554E-8, 7.920548E-8] shot=[4.0368977E-5, 7.832577E-5, 4.633748E-5]
+ 3770 06:24:37.158 [MgcFullResolutionDenoise] D/MGC static denoise complete: size=4096x3072 origin=(0,0) input=CAMERA_RGBA16F snr=28.51299 pass=SPATIAL_DEFAULT luma=true(1.0) chroma=true(1.0) measureMoire=true outputScale=1.0 rgbShot=[4.0368977E-
+ 3771 06:24:37.163 [RawDemosaicProcessor] I/MGC Spatial GPU LinearRaw ready: source=SPATIAL_RGB16F_GPU size=4096x3072 outputScale=1.0 pass=SPATIAL_DEFAULT luma=1.0 chroma=1.0 frames=5 readNoise=[8.164692E-8, 7.7067554E-8, 7.920548E-8] shotNoise=[
+ 3772 06:24:37.166 [PhotoManager] D/MGC default-denoised RAW stack DNG stores normalized RAW values; clearing metadata black/white level overrides
+ 3773 06:24:37.167 [PhotoManager] I/RAW_ADAPTIVE_EXPOSURE stage=DNG_PREPARE mode=PHOTON_HDR curve=DEFAULT blackBorderDefaultCrop=null photonPgtm=true processingBounds=null scalarViewfinderMatching=false capturePreview=true portraitMask=false addi
+ 3774 06:24:37.181 [RawProcessor] I/RAW LSC ownership: fused pixels already corrected; capture profile will not apply Camera2/DNG gain map
+ 3778 06:24:37.217 [RawDemosaicProcessor] D/RAW DCP pipeline: source=provided profile=Embedded matrixSource=DCP planSpace=ProPhoto profileSpace=ProPhoto engineSpace=ProPhoto requestedEngine=AdobeCurve actualEngine=AdobeCurve profileMapsBeforeEngi
+ 3779 06:24:37.217 [RawDemosaicProcessor] D/Processing RAW image: 4096x3072, colorEngine=AdobeCurve profileSpace=ProPhoto engineWorkingSpace=ProPhoto
+ 3789 06:24:37.733 [RawProcessor] I/RAW_SCENE_EXPOSURE stage=SHARED_PROFILE_READY enabled=true viewfinderBrightnessMatch=false sourceBaselineEv=0.0 sourceBaselineGain=1.0 viewfinderExposureOffsetEv=null baselineExposureSource=SOURCE_METADATA fina
+ 3790 06:24:37.738 [RawDemosaicProcessor] I/RAW_DNG_BUFFER_BYPASS source=GPU_STACK_TEXTURE metadata=SHARED_DNG_PARAMS size=4096x3072 samplesPerPixel=3 rowStride=24576 baselineExposure=0.0 defaultCrop=Rect(0, 0 - 4096, 3072) black=[0.0, 0.0, 0.0, 
+ 3791 06:24:37.741 [RawDemosaicProcessor] D/Using embedded DNG profile plan: Embedded
+ 3794 06:24:37.743 [RawDemosaicProcessor] I/DNG embedded profile: action=apply selected=none engine=AdobeCurve customDcp=false photonHdr=true pgtmSource=photon-hdr
+ 3795 06:24:37.744 [RawDemosaicProcessor] D/RAW DCP pipeline: source=embedded-dng profile=Embedded matrixSource=DCP planSpace=ProPhoto profileSpace=ProPhoto engineSpace=ProPhoto requestedEngine=AdobeCurve actualEngine=AdobeCurve profileMapsBefore
+ 3796 06:24:37.744 [RawDemosaicProcessor] D/Processing RAW image: 4096x3072, colorEngine=AdobeCurve profileSpace=ProPhoto engineWorkingSpace=ProPhoto
+ 3799 06:24:37.805 [RawDemosaicProcessor] D/RAW_GL target=Combined fbo=3 texture=14 size=4096x3072 format=RGBA16F status=complete
+ 3800 06:24:37.885 [RawDemosaicProcessor] D/RAW_GL target=EngineTone fbo=4 texture=15 size=4096x3072 format=RGBA16F status=complete
+ 3802 06:24:37.992 [RawDemosaicProcessor] D/RAW_GL target=Sharpen fbo=5 texture=17 size=4096x3072 format=RGBA16F status=complete
+ 3803 06:24:37.994 [RawDemosaicProcessor] I/MGC final sharpen uses GLES adaptive USM size=4096x3072 runtimeAttenuation=1.0 slider=0.0 algorithmStrength=0.0 effectiveStrength=0.0 cpuReadback=false
+ 3805 06:24:38.025 [RawDemosaicProcessor] D/RAW_GL target=Output fbo=3 texture=18 size=3072x4096 format=RGBA16F status=complete
+ 3807 06:24:38.396 [RawDemosaicProcessor] D/RAW output materialization timing target=SDR upstreamStackGpuWait=0ms renderGpuQueueWait=6ms pixelTransferAndBitmap=361ms
+ 3809 06:24:38.440 [RawRenderingEngineToneAlgorithm] D/RAW HDR curve engine=AdobeCurve join=0.30596286/0.60546875 joinSlope=1.4985366 white=1.4142135 whiteSlope=0.8320154
+ 3810 06:24:38.789 [RawDemosaicProcessor] I/RAW output materialization timing target=HDR renderGpuQueueWait=33ms pixelTransferAndBitmap=314ms total=392ms
+ 3814 06:24:38.792 [PhotoManager] I/RAW GPU render completed; DNG materialization queued behind SDR JPEG publication
+ 3815 06:24:38.945 [PhotoManager] D/writeFinalJpeg took 152ms, size=3072x4096, gainmap=false, success=true
+ 3816 06:24:38.961 [PhotoManager] I/RAW output schedule stage=SDR_JPEG_PUBLISHED
+ 3817 06:24:38.961 [PhotoManager] I/RAW output schedule stage=DNG_MATERIALIZATION_START
+ 3818 06:24:38.963 [LargeDirectBuffer] D/Allocated Stacked LinearRaw deferred RGB16 materialization buffer with native allocator: 75497472 bytes
+ 3819 06:24:38.963 [LargeDirectBuffer] D/Allocated Stacked LinearRaw deferred RGBA16 tile buffer with native allocator: 8388608 bytes
+ 3820 06:24:39.072 [RawDemosaicProcessor] I/Stacked LinearRaw DNG materialization timing total=108ms upstreamStackGpuWait=0ms materializationGpuWait=0ms pixelTransfer=51ms cpuPack=43ms allocation=0ms setup=14ms bytes=75497472
+ 3821 06:24:39.073 [RawProcessor] I/RAW_CROP_TRACE stage=CAMERA2_RESULT buffer=4096x3072 pixelArray=4096x3072 activePre=Rect(0, 0 - 4096, 3072) activePost=Rect(0, 0 - 4096, 3072) scalerCrop=Rect(0, 0 - 4096, 3072) scalerReturned=true zoomRatio=1.
+ 3822 06:24:39.074 [RawProcessor] I/Writing stacked RAW DNG with custom writer: 4096x3072 layout=LINEAR_RAW_RGB compression=JPEG_LOSSLESS
+ 3823 06:24:39.082 [LutImageProcessor] D/LutImageProcessor initialized
+ 3824 06:24:39.231 [LutImageProcessor] E/renderFinalEncodePass: glError 1281
+ 3825 06:24:39.373 [LutImageProcessor] E/renderLutLuminanceGainMap: glError 1282
+ 3826 06:24:39.375 [LargeDirectBuffer] D/Allocated LUT luminance gain RGBA16F buffer with native allocator: 25165824 bytes
+ 3827 06:24:39.463 [SuperResolutionDngWriter] I/RAW_CROP_TRACE stage=DNG_WRITE buffer=4096x3072 activeArea=[0, 0, 3072, 4096] defaultCropOrigin=0.0,0.0 defaultCropSize=4096.0x3072.0 sourceOrigin=0,0 sourceSize=4096x3072 includesPixelArray=true sc
+ 3828 06:24:39.467 [LargeDirectBuffer] D/Allocated gainmap RGBA_F16 upload buffer with native allocator: 25165824 bytes
+ 3829 06:24:39.499 [LargeDirectBuffer] D/Allocated gainmap RGBA_F16 upload buffer with native allocator: 100663296 bytes
+ 3830 06:24:39.530 [SuperResolutionDngWriter] I/DNG focal metadata: physical=6.75mm recorded=6.8mm encoded=6.8mm equivalent35mm=23mm
+ 3831 06:24:39.587 [SuperResolutionDngWriter] I/Wrote super-resolution DNG 4096x3072 layout=LINEAR_RAW_RGB compression=JPEG_LOSSLESS rowStepSamples=12288 colStepSamples=3 blackLevel=0.0, 0.0, 0.0, 0.0 whiteLevel=65535 lscInPixels=true baselineExp
+ 3832 06:24:39.589 [PhotoManager] I/Deferred stacked DNG timing total=627ms success=true
+ 3833 06:24:39.670 [LargeDirectBuffer] D/Allocated gainmap alpha readback buffer with native allocator: 12582912 bytes
+ 3839 06:24:39.829 [PhotoManager] D/writeFinalJpeg took 102ms, size=3072x4096, gainmap=true, success=true
+ 3841 06:24:39.848 [LutImageProcessor] E/renderFinalEncodePass: glError 1281
+ 3843 06:24:39.896 [PhotoManager] D/prepareUltraHdrSource reused in-memory source for export: af1e697e-a320-4286-8bea-050bf1012388
+ 3845 06:24:39.898 [PhotoManager] D/processedBitmap = sRGB IEC61966-2.1, ultraHdrSource=RAW, gainmap=true
+ 3846 06:24:40.060 [PhotoManager] D/writeFinalJpeg took 158ms, size=3072x4096, gainmap=true, success=true
+ 3847 06:24:40.077 [ExifWriter] D/EXIF written to temp_export_75251002518912.jpg: ISO=293, Exposure=1/200s, Aperture=f/1.5, Focal=6.8mm
+ 3848 06:24:40.077 [PhotoManager] D/exportPhoto JPEG encode took 177ms, jpeg444=false, success=true
+ 3849 06:24:40.077 [PhotoManager] I/exportPhoto JPEG result: output=3072x4096(ARGB_8888, sRGB IEC61966-2.1), input=3072x4096, quality=95, jpeg444=false, bytes=5841055, encodeMs=177, success=true
+ 3850 06:24:40.161 [PhotoManager] D/Published photo export: uri=content://media/external/images/media/19939, mimeType=image/jpeg, bytes=5841055
+ 3851 06:24:40.180 [PhotoManager] D/Exported URI saved: content://media/external/images/media/19939 for photo af1e697e-a320-4286-8bea-050bf1012388
+ 3852 06:24:40.223 [CameraViewModel] D/Image saved: af1e697e-a320-4286-8bea-050bf1012388, LUT: profile:胶片人像, Frame: null
+ 3864 06:24:53.273 [LutRenderer] I/Preview stabilization useCase=OFF, strength=1.0, lookahead=7
+ 3867 06:24:53.298 [CameraViewModel] D/restorePreviewLutAfterResume: lutId=profile:胶片人像
+ 3868 06:24:53.298 [PROFILE] init skipped (registry cached: 8 profiles)
+ 3869 06:24:53.300 [PROFILE] public inbox absent: /storage/emulated/0/PhotographerCamera
+ 3870 06:24:53.304 [PROFILE] loaded 8: ACROS 100, CINEMA 80, CLASSIC 320, FRESH 200, MONO 400, VINTAGE 400, native, 胶片人像
+ 3871 06:24:53.304 [PROFILE] restored last preset '胶片人像'
+ 3872 06:24:53.320 [LutRenderer] D/onSurfaceCreated
+ 3873 06:24:53.334 [PROFILE] inject '胶片人像' -> lut=profile:胶片人像 grain=0.0 wb=(0.45,-0.17) ev=0.11
+ 3879 06:24:53.349 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=true, includePreLogFilmGrain=false,
+ 3885 06:24:53.358 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: RAW, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+ 3888 06:24:53.403 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+ 3986 06:24:54.955 [Camera2Controller] D/RAW 格式拍照: false
+ 3999 06:24:55.199 [Camera2Controller] D/拍照尺寸: 3840x2880, 预览尺寸: 1440x1080, 格式: YUV, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+ 4002 06:24:55.228 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false
+ 4009 06:24:57.492 [CameraViewModel] I/FACE_MASK stage=CAPTURE_LATCH available=false source=BLAZEFACE_VALIDATED_SOFT_FACE_ELLIPSE size=null ageMs=null sensorOrientation=null previewToCaptureRotation=null frontFacing=null cameraId=null
+ 4010 06:24:57.517 [Camera2Controller] I/开始拍照 - 闪光模式: 0, ISO模式: 自动
+ 4012 06:24:57.521 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=false, includePreLogFilmGrain=false
+ 4014 06:24:57.529 [Camera2Controller] D/直接拍照
+ 4016 06:24:57.531 [Camera2Controller] D/Multi-frame capture locked exposure=true ae=1 flash=0 iso=100 shutter=10000000 af=0 focus=1.80574 afState=2 lensState=0 focusSource=settled_continuous_af
+ 4017 06:24:57.531 [Camera2Controller] D/Capture request built and ready to send: aeMode=1, aeTrigger=0, aeLock=true, flashMode=0, iso=100, shutter=10000000
+ 4018 06:24:57.532 [Camera2Controller] I/JPGmax denoise burst plan: zeroEvFrames=5 hdr=false
+ 4019 06:24:57.628 [Camera2Controller] D/Burst capture started at frame 65
+ 4020 06:24:57.662 [Camera2Controller] D/Burst capture started at frame 66
+ 4021 06:24:57.697 [Camera2Controller] D/Burst capture started at frame 67
+ 4022 06:24:57.729 [Camera2Controller] D/Burst capture started at frame 68
+ 4024 06:24:57.745 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231487858419). Pending images: 0, Pending r
+ 4025 06:24:57.762 [Camera2Controller] D/Burst capture started at frame 69
+ 4027 06:24:57.808 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231521183419). Pending images: 0, Pending r
+ 4029 06:24:57.857 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231554508419). Pending images: 0, Pending r
+ 4031 06:24:57.911 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231587833419). Pending images: 0, Pending r
+ 4033 06:24:57.957 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231621158419). Pending images: 0, Pending r
+ 4037 06:24:57.961 [Camera2Controller] I/Multi-frame sequence end: requested=5 captured=5 failed=0
+ 4038 06:24:57.961 [SHOT] multi-frame sequence end requested=5 captured=5 failed=0
+ 4039 06:24:57.962 [Camera2Controller] I/Multi-frame focus state released: reason=capture sequence finished
+ 4041 06:24:58.003 [GlesYuvStacker] I/YUV input preferred=hardwarebuffer
+ 4042 06:24:58.004 [GlesSpatialGlobalAlignment] I/Spatial global alignment GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none group=[1024, 1024, 1024] invocations=1024 ssb
+ 4045 06:24:58.151 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram
+ 4046 06:24:58.164 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram
+ 4047 06:24:58.178 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram
+ 4048 06:24:58.213 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram
+ 4049 06:24:58.254 [LargeDirectBuffer] D/Allocated GLES YUV stack readback buffer with native allocator: 44236800 bytes
+ 4052 06:24:58.723 [HeicExportEncoder] D/HEIC export encode result=true, size=2880x3840, gainmap=false, exif=false, bytes=604140
+ 4053 06:24:58.724 [PhotoManager] D/saveYuvStackedPhoto internal original saved=original.heic
+ 4056 06:24:58.866 [PhotoManager] D/processedBitmap = sRGB IEC61966-2.1, ultraHdrSource=null, gainmap=false
+ 4057 06:24:59.010 [PhotoManager] D/writeFinalJpeg took 141ms, size=2880x3840, gainmap=false, success=true
+ 4058 06:24:59.018 [ExifWriter] D/EXIF written to temp_export_75269842178816.jpg: ISO=274, Exposure=1/200s, Aperture=f/1.5, Focal=6.8mm
+ 4059 06:24:59.018 [PhotoManager] D/exportPhoto JPEG encode took 149ms, jpeg444=false, success=true
+ 4060 06:24:59.019 [PhotoManager] I/exportPhoto JPEG result: output=2880x3840(ARGB_8888, sRGB IEC61966-2.1), input=2880x3840, quality=95, jpeg444=false, bytes=1985707, encodeMs=149, success=true
+ 4061 06:24:59.069 [PhotoManager] D/Published photo export: uri=content://media/external/images/media/19940, mimeType=image/jpeg, bytes=1985707
+ 4062 06:24:59.088 [PhotoManager] D/Exported URI saved: content://media/external/images/media/19940 for photo afcffcc5-45c8-4161-8da6-9e7fd552b264
+ 4063 06:24:59.105 [CameraViewModel] D/Image saved: afcffcc5-45c8-4161-8da6-9e7fd552b264, LUT: profile:胶片人像, Frame: null
+ 4064 06:24:59.963 [CameraViewModel] D/Multi-frame convergence skipped: processing already dispatched (requested=5 captured=5 failed=0)
+ 4078 06:25:59.551 [LutRenderer] I/Preview stabilization useCase=OFF, strength=1.0, lookahead=7
+ 4081 06:25:59.577 [CameraViewModel] D/restorePreviewLutAfterResume: lutId=profile:胶片人像
+ 4082 06:25:59.577 [PROFILE] init skipped (registry cached: 8 profiles)
+ 4083 06:25:59.578 [PROFILE] public inbox absent: /storage/emulated/0/PhotographerCamera
+ 4084 06:25:59.582 [PROFILE] loaded 8: ACROS 100, CINEMA 80, CLASSIC 320, FRESH 200, MONO 400, VINTAGE 400, native, 胶片人像
+ 4085 06:25:59.582 [PROFILE] restored last preset '胶片人像'
+ 4086 06:25:59.596 [LutRenderer] D/onSurfaceCreated
+ 4087 06:25:59.602 [PROFILE] inject '胶片人像' -> lut=profile:胶片人像 grain=0.0 wb=(0.45,-0.17) ev=0.11
+ 4091 06:25:59.625 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=true, includePreLogFilmGrain=false,
+ 4102 06:25:59.644 [Camera2Controller] D/拍照尺寸: 3840x2880, 预览尺寸: 1440x1080, 格式: YUV, stream=2, isP3Supported: false, imageReaderMaxImages: 7
+ 4132 06:25:59.685 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false

@@ -1,0 +1,400 @@
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.200 [Camera2Controller] D/Opening camera: open=2, selected=2"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.228 [Camera2Controller] D/Camera opened: 2"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.228 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.229 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.230 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.303 [METER] region applied mode=HIGHLIGHT_PRIORITY rect=Rect(1721, 1209 - 2375, 1863)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:55.307 [Camera2Controller] D/Preview started"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.487 [SHOT] shutter pressed (zoom=1.0, focal=23.378553)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.492 [Camera2Controller] D/setLocation: null, null"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.492 [CameraViewModel] I/FACE_MASK stage=CAPTURE_LATCH available=false source=BLAZEFACE_VALIDATED_SOFT_FACE_ELLIPSE size=null ageMs=null sensorOrientation=null previewToCaptureRotation=null frontFacing=null cameraId=null"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.517 [Camera2Controller] I/开始拍照 - 闪光模式: 0, ISO模式: 自动"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.519 [VibrationHelper] D/Vibration triggered"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.521 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=false, includePreLogFilmGrain=false, includeLutMask=false, includeJpegInputToneCurve=false, includeSpatialRecipeEffects=false)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.528 [Camera2Controller] I/Multi-frame focus froze settled continuous AF without retrigger: previousMode=4 fixedMode=0 afState=2 lensState=0 focus=1.80574"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.529 [Camera2Controller] D/直接拍照"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.530 [Camera2Controller] I/RAW_CROP_TRACE stage=CAMERA2_REQUEST isRaw=false selectedCamera=2 openCamera=2 physicalOutput=null stateZoom=1.0 requestZoom=1.0 requestScalerCrop=Rect(0, 0 - 4096, 3072) requestDistortion=null"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.531 [Camera2Controller] D/Multi-frame capture locked exposure=true ae=1 flash=0 iso=100 shutter=10000000 af=0 focus=1.80574 afState=2 lensState=0 focusSource=settled_continuous_af"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.531 [Camera2Controller] D/Capture request built and ready to send: aeMode=1, aeTrigger=0, aeLock=true, flashMode=0, iso=100, shutter=10000000"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.532 [Camera2Controller] I/JPGmax denoise burst plan: zeroEvFrames=5 hdr=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.628 [Camera2Controller] D/Burst capture started at frame 65"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.662 [Camera2Controller] D/Burst capture started at frame 66"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.697 [Camera2Controller] D/Burst capture started at frame 67"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.729 [Camera2Controller] D/Burst capture started at frame 68"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.743 [CameraViewModel] D/Burst frame received: 1/5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.745 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231487858419). Pending images: 0, Pending results: 20"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.762 [Camera2Controller] D/Burst capture started at frame 69"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.806 [CameraViewModel] D/Burst frame received: 2/5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.808 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231521183419). Pending images: 0, Pending results: 20"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.856 [CameraViewModel] D/Burst frame received: 3/5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.857 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231554508419). Pending images: 0, Pending results: 20"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.907 [CameraViewModel] D/Burst frame received: 4/5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.911 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231587833419). Pending images: 0, Pending results: 20"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.956 [CameraViewModel] D/Burst frame received: 5/5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.957 [Camera2Controller] D/Capture completed role=BASE aeMode=1 aeState=3 flashState=2 ISO=274 shutter=4995741, afMode=0 afState=0 focus=1.80574 lensState=0, result buffered (timestamp: 181231621158419). Pending images: 0, Pending results: 20"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.958 [CameraViewModel] I/RAW burst plan: referenceSource=chronological, reference=0, accepted=5, normal=5, short=0, long=0, exposureRejected=, geometry=GLES_TEMPORAL_GRAPH, costMs=1"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.958 [Camera2Controller] D/Burst sequence completed"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.958 [CameraViewModel] D/processStacking started - image size 5"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.961 [Camera2Controller] I/Multi-frame sequence end: requested=5 captured=5 failed=0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.961 [SHOT] multi-frame sequence end requested=5 captured=5 failed=0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.962 [Camera2Controller] I/Multi-frame focus state released: reason=capture sequence finished"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:57.988 [MultiFrameStacker] I/Starting GLES streaming stacking process for 5 frames (3840 x 2880). SR=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.003 [GlesYuvStacker] I/YUV input preferred=hardwarebuffer"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.004 [GlesSpatialGlobalAlignment] I/Spatial global alignment GL vendor=ARM renderer=Mali-G1-Ultra MC12 version=OpenGL ES 3.2 v1.r54p1-11eac0.de48eaa.d66d1d5ec15c63b7cede1928bfff931d.none group=[1024, 1024, 1024] invocations=1024 ssboBindings=70 imageUnits=21 ssboBlock=2147483648"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.113 [GlesYuvStacker] D/GLES stack format=YUV_420_888 internal=R8/RG8 spatialGuide=1920x1440 flowGrid=240x180 sr=false srScale=1.00"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.113 [YuvHardwareBuffer] I/HardwareBuffer format=35 size=3840x2880 usage=0x20033 imageFormat=35"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.151 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.164 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.178 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.213 [GlesYuvStacker] D/YUV Spatial alignment guide=1920x1440 flowGrid=240x180 global=gpu-histogram"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.254 [LargeDirectBuffer] D/Allocated GLES YUV stack readback buffer with native allocator: 44236800 bytes"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.436 [GlesYuvStacker] I/GLES YUV stacking completed in 447ms"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.453 [GlesYuvStacker] I/YUV input completed hardwareFrames=5 planeFrames=0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.723 [HeicExportEncoder] D/HEIC export encode result=true, size=2880x3840, gainmap=false, exif=false, bytes=604140"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.724 [PhotoManager] D/saveYuvStackedPhoto internal original saved=original.heic"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.734 [PhotoManager] D/prepareUltraHdrSource took 0ms"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.736 [PhotoManager] D/gainmapProducer.build took 0ms, enabled=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:58.866 [PhotoManager] D/processedBitmap = sRGB IEC61966-2.1, ultraHdrSource=null, gainmap=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.010 [PhotoManager] D/writeFinalJpeg took 141ms, size=2880x3840, gainmap=false, success=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.018 [ExifWriter] D/EXIF written to temp_export_75269842178816.jpg: ISO=274, Exposure=1/200s, Aperture=f/1.5, Focal=6.8mm"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.018 [PhotoManager] D/exportPhoto JPEG encode took 149ms, jpeg444=false, success=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.019 [PhotoManager] I/exportPhoto JPEG result: output=2880x3840(ARGB_8888, sRGB IEC61966-2.1), input=2880x3840, quality=95, jpeg444=false, bytes=1985707, encodeMs=149, success=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.069 [PhotoManager] D/Published photo export: uri=content://media/external/images/media/19940, mimeType=image/jpeg, bytes=1985707"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.088 [PhotoManager] D/Exported URI saved: content://media/external/images/media/19940 for photo afcffcc5-45c8-4161-8da6-9e7fd552b264"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.105 [CameraViewModel] D/Image saved: afcffcc5-45c8-4161-8da6-9e7fd552b264, LUT: profile:胶片人像, Frame: null"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:24:59.963 [CameraViewModel] D/Multi-frame convergence skipped: processing already dispatched (requested=5 captured=5 failed=0)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:03.051 [CameraGLSurfaceView] D/onPause"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:03.876 [CameraGLSurfaceView] D/onDetachedFromWindow"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:03.881 [Camera2Controller] D/ImageReader closed immediately"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:03.882 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:03.882 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:04.038 [Camera2Controller] D/Camera close requested: lifecycle=CLOSING"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:04.040 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:04.041 [Camera2Controller] D/Camera close requested: lifecycle=CLOSING"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:04.041 [Camera2Controller] D/Camera device closed: 2"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:04.044 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:05.249 [LIFECYCLE] app background (onStop)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:58.990 [LIFECYCLE] app foreground (onStart)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.550 [CameraGLSurfaceView] D/CameraGLSurfaceView initialized"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.551 [LutRenderer] I/Preview stabilization useCase=OFF, strength=1.0, lookahead=7"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.576 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.576 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.577 [CameraViewModel] D/restorePreviewLutAfterResume: lutId=profile:胶片人像"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.577 [PROFILE] init skipped (registry cached: 8 profiles)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.578 [PROFILE] public inbox absent: /storage/emulated/0/PhotographerCamera"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.582 [PROFILE] loaded 8: ACROS 100, CINEMA 80, CLASSIC 320, FRESH 200, MONO 400, VINTAGE 400, native, 胶片人像"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.582 [PROFILE] restored last preset '胶片人像'"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.596 [LutRenderer] D/onSurfaceCreated"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.602 [PROFILE] inject '胶片人像' -> lut=profile:胶片人像 grain=0.0 wb=(0.45,-0.17) ev=0.11"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.611 [CameraPreviewGL] D/onSurfaceReady called"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.611 [CameraPreviewGL] D/onSurfaceReady: notifiedST=null, newST=android.graphics.SurfaceTexture@5e200ab"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.615 [CameraPreviewGL] D/shouldNotifySurfaceTexture is true, calling onSurfaceTextureReady"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.625 [PreviewColorProgram] D/Compiled preview color shader variant: PreviewColorShaderVariant(textureSource=EXTERNAL_OES, includeExtendedLutCurves=false, includeOklchDensity=false, includeLchMixer=true, includePreLogFilmGrain=false, includeLutMask=false, includeJpegInputToneCurve=false, includeSpatialRecipeEffects=false)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.626 [CameraViewModel] D/openCamera"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.627 [Camera2Controller] I/打开相机: selected=2, open=2, targetZoom=1.0, physicalOutput=null, 模式: PHOTO, ver=1.3.4(60)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.629 [RealtimeStabilization] I/MGC camera calibration: camera=2, active=Rect(0, 0 - 4096, 3072), physical=9.994x7.495, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.630 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.631 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.631 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.641 [Camera2Controller] I/Camera characteristics cached - selected=2, open=2, capability=2, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorrection modes: 0, 1, 2, CCT range: null"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.642 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.643 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.643 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.644 [Camera2Controller] D/拍照尺寸: 3840x2880, 预览尺寸: 1440x1080, 格式: YUV, stream=2, isP3Supported: false, imageReaderMaxImages: 7"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.644 [Camera2Controller] D/Opening camera: open=2, selected=2"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.646 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.646 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.648 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.649 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.649 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.649 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.649 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.651 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.652 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.659 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.684 [Camera2Controller] D/Camera opened: 2"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.685 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.686 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.687 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.693 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.694 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.695 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.698 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.698 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.698 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.699 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.699 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.699 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.699 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.701 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.702 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.707 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.724 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.726 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.726 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.728 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.729 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.729 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.729 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.729 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.730 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.730 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.731 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.732 [Camera2Controller] I/选择默认摄像头: 2, 类型: BACK_MAIN"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.761 [METER] region applied mode=HIGHLIGHT_PRIORITY rect=Rect(1721, 1209 - 2375, 1863)"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:25:59.764 [Camera2Controller] D/Preview started"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:26:00.281 [CameraViewModel] D/openCamera"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:26:00.282 [CameraViewModel] D/openCamera skipped: same SurfaceTexture active=true, inFlight=false"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:26:00.282 [CameraGLSurfaceView] D/onResume"}
+
+data: {"ts": 1788906362762, "seq": 0, "text": "06:26:00.296 [CameraPreviewGL] D/shouldNotifySurfaceTexture is true, calling onSurfaceTextureReady"}
+

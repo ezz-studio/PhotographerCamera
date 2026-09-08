@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
-from dataset_loader import discover_images  # noqa: E402
+from dataset_loader import discover_images, read_image  # noqa: E402
 import style_analyzer  # noqa: E402
 import ai_profile_generator  # noqa: E402
 import profile_optimizer  # noqa: E402
@@ -76,8 +76,7 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
         _vpaths = discover_images(validation_root)
         if _vpaths:
             print(f"  验证集：使用独立「未调色普通照片」目录 -> {validation_root}（{len(_vpaths)} 张）")
-            test = [np.asarray(Image.open(p).convert("RGB"), dtype=np.float32) / 255.0
-                    for p in _vpaths]
+            test = [read_image(p) for p in _vpaths]
             val_mode = "ungraded-photos"
         else:
             print("  普通照片目录为空，回退到旧逻辑（从参考片随机留出）")
@@ -88,7 +87,12 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
               "已调色图作验证对象会把风格二次叠加，偏差被放大）")
         test = [imgs[i] for i in split["test"]]
         val_mode = "legacy-split"
-    print(f"  对照集（留出，不参与拟合）: {len(test)} 张（模式={val_mode}）")
+    # NOTE: "验证集" and "对照集（留出）" are the SAME list — two logs, one
+    # variable (`test`). The second line only re-reports the count, which read
+    # like a second, separate set. State the source explicitly instead.
+    _src = ("独立未调色目录" if val_mode == "ungraded-photos"
+            else "参考片随机留出（旧逻辑）")
+    print(f"  对照集（= 上方{_src}的 {len(test)} 张，不参与拟合）: 模式={val_mode}")
     prof_final, opt_report = profile_optimizer.optimize(prof_v1, train_val)
     with open(os.path.join(out_dir, "optimization_report.json"), "w", encoding="utf-8") as f:
         json.dump(opt_report, f, indent=2, ensure_ascii=False)

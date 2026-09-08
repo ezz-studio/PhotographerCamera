@@ -25,6 +25,7 @@ import android.util.Size
 import android.view.Surface
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
+import com.photographercamera.core.util.AppForeground
 import com.photographercamera.photon.raw.ColorSpace as RawColorSpace
 import com.photographercamera.photon.raw.DngSdkColorSpec
 import com.photographercamera.photon.utils.PLog
@@ -1891,6 +1892,14 @@ class Camera2Controller(private val context: Context) {
                 cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING
             ) {
                 PLog.d(TAG, "Camera recovery skipped: device already $cameraDeviceLifecycle")
+                return@postDelayed
+            }
+            // 1.3.6：后台绝不主动拉起相机。切后台后 ColorOS 以 error=3（系统策略
+            // 禁用）关闭相机；旧逻辑在后台照常 open camera → 再次被拒（error=4）
+            // 形成恢复循环，且每次 open 都给 OIS 防抖马达上电（用户可闻咔哒声）。
+            // 回前台后 CameraScreen 的 ON_RESUME → pvm.openCamera（幂等）负责恢复。
+            if (!AppForeground.isForeground) {
+                PLog.d(TAG, "Camera recovery deferred: app in background")
                 return@postDelayed
             }
             PLog.w(TAG, "Recovering camera after error=$error")

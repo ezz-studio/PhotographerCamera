@@ -1,0 +1,400 @@
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.671 [Camera2Controller] I/打开相机: selected=0, open=0, targetZoom=2.5819697, physicalOutput=null, 模式: PHOTO"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.675 [RealtimeStabilization] I/MGC camera calibration: camera=0, active=Rect(0, 0 - 4096, 3072), physical=9.64x7.23, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.679 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.680 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.690 [Camera2Controller] I/Camera characteristics cached - selected=0, open=0, capability=0, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.693 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: YUV, stream=0, isP3Supported: false, imageReaderMaxImages: 7"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.694 [Camera2Controller] D/Opening camera: open=0, selected=0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.757 [Camera2Controller] D/Camera opened: 0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.758 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.759 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.760 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.776 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.779 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.780 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.783 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.783 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.784 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.785 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.785 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.785 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.786 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.787 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.788 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.789 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.790 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.790 [Camera2Controller] I/选择默认摄像头: 0, 类型: BACK_TELEPHOTO"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.844 [Camera2Controller] D/Preview started"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.845 [Camera2Controller] E/Camera error: 0, error=4 - 相机设备遇到严重错误"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:42.846 [Camera2Controller] D/ImageReader closed immediately"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.162 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 0: 4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.163 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.163 [Camera2Controller] W/Scheduling camera recovery in 800ms after error=4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.164 [CameraViewModel] D/onCameraError: code=4, message=相机设备遇到严重错误, canRetry=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.164 [Camera2Controller] D/Camera device closed: 0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.165 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.966 [Camera2Controller] W/Recovering camera after error=4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.968 [Camera2Controller] I/打开相机: selected=0, open=0, targetZoom=2.5819697, physicalOutput=null, 模式: PHOTO"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.969 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.973 [RealtimeStabilization] I/MGC camera calibration: camera=0, active=Rect(0, 0 - 4096, 3072), physical=9.64x7.23, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.977 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.977 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.984 [Camera2Controller] I/Camera characteristics cached - selected=0, open=0, capability=0, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.987 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: YUV, stream=0, isP3Supported: false, imageReaderMaxImages: 7"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:43.988 [Camera2Controller] D/Opening camera: open=0, selected=0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.055 [Camera2Controller] D/Camera opened: 0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.057 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.061 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.063 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.063 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.065 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.066 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.069 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.070 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.071 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.072 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.072 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.073 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.074 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.076 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.076 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.077 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.077 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.077 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.078 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.078 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.078 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.078 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.079 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.079 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.079 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.080 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.080 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.080 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.081 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.081 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.081 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.081 [Camera2Controller] I/选择默认摄像头: 0, 类型: BACK_TELEPHOTO"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.149 [Camera2Controller] E/Camera error: 0, error=4 - 相机设备遇到严重错误"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.150 [Camera2Controller] D/ImageReader closed immediately"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.149 [Camera2Controller] D/Preview started"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.458 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 0: 4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.459 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.459 [Camera2Controller] W/Scheduling camera recovery in 800ms after error=4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.459 [CameraViewModel] D/onCameraError: code=4, message=相机设备遇到严重错误, canRetry=true"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.460 [Camera2Controller] D/Camera device closed: 0"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:44.459 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:49.850 [Camera2Controller] W/Recovering camera after error=4"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:49.851 [Camera2Controller] I/打开相机: selected=0, open=0, targetZoom=2.5819697, physicalOutput=null, 模式: PHOTO"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:49.852 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788850789853, "seq": 361, "text": "14:59:49.852 [RealtimeStabilization] I/MGC camera calibration: camera=0, active=Rect(0, 0 - 4096, 3072), physical=9.64x7.23, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:49.853 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:49.853 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:49.855 [Camera2Controller] I/Camera characteristics cached - selected=0, open=0, capability=0, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:49.856 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: YUV, stream=0, isP3Supported: false, imageReaderMaxImages: 7"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:49.857 [Camera2Controller] D/Opening camera: open=0, selected=0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.164 [Camera2Controller] E/Camera open failed for 0: 相机打开失败 | CameraAccessException: CAMERA_DISABLED (1): validateClientPermissionsLocked:1872: Caller \"com.photographercamera\" (PID 22765, UID 10485) cannot open camera \"0\" from background (calling UID 10485 proc state 12) @ ExceptionUtils.java:75 <- CameraManager.java:1237 <- CameraManager.java:1606"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.165 [Camera2Controller] D/ImageReader closed immediately"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.165 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.165 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.165 [CameraViewModel] D/onCameraError: code=1001, message=相机打开失败, canRetry=true"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.166 [Camera2Controller] D/Camera device closed: 0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.178 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.180 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.181 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.185 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.186 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.187 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.187 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.188 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.189 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.189 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.191 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.191 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.192 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.192 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.193 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.193 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.193 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.194 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.194 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.194 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.195 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.195 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.195 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.195 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.196 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.196 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.196 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.197 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.197 [Camera2Controller] I/选择默认摄像头: 0, 类型: BACK_TELEPHOTO"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.969 [LIFECYCLE] app foreground (onStart)"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.995 [CameraViewModel] D/openCamera"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.996 [Camera2Controller] I/打开相机: selected=0, open=0, targetZoom=2.5819697, physicalOutput=null, 模式: PHOTO"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.997 [CameraGLSurfaceView] D/onResume"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:50.998 [RealtimeStabilization] I/MGC camera calibration: camera=0, active=Rect(0, 0 - 4096, 3072), physical=9.64x7.23, orientation=90, facing=1, timestampSource=1, oisSamples=false, lensIntrinsicsSamples=true, externalMagnification=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.002 [Camera2Controller] I/Flash capabilities: available=true, aeModes=0, 1, 2, 3, alwaysFlash=true, aeOn=true, aeOff=true"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.003 [Camera2Controller] I/Face detection: available=0, 1, maxFaces=15, selected=SIMPLE"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.011 [Camera2Controller] I/Camera characteristics cached - selected=0, open=0, capability=0, Level: LEVEL_3, ManualSensor: true, ManualPost: true, RAW: true, P010: true, StreamUseCase: true [0, 1, 2, 3, 4, 5, 576460752303489024, 576460752303554560, 576460752303685632, 576460752303947776], MaxRegions(AF/AE/AWB): 1/1/0, AF modes: 0, 1, 2, 3, 4, AWB modes: 0, 1, 2, 3, 4, 5, 6, 7, 8, ColorCorr…"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.012 [Camera2Controller] D/拍照尺寸: 4096x3072, 预览尺寸: 1440x1080, 格式: YUV, stream=0, isP3Supported: false, imageReaderMaxImages: 7"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.013 [Camera2Controller] D/Opening camera: open=0, selected=0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.043 [CameraPreviewGL] D/shouldNotifySurfaceTexture is true, calling onSurfaceTextureReady"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.044 [Camera2Controller] I/刷新摄像头列表"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.050 [Camera2Controller] D/Camera opened: 0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.052 [Camera2Controller] I/Creating repeating request: template=PREVIEW, captureMode=PHOTO, enhancedStabilization=false"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.054 [Camera2Controller] I/Creating preview session: readerFormat=YUV_420_888, isP010Supported=true"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.056 [Camera2Controller] D/Initial session parameters applied: standard=true, vendorKeys=[], customVendorKeys=[]"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.072 [CameraDiscovery] D/System camera IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.074 [CameraDiscovery] V/Probe camera 5 failed: CAMERA_ERROR (3): getCameraCharacteristics:1373: Unable to retrieve cameracharacteristics for system only device 5: "}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.074 [CameraDiscovery] D/After probing: [0, 1, 2, 3, 4] (probed: [])"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.079 [CameraDiscovery] D/Logical multi-camera auto discovery disabled"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.079 [CameraDiscovery] D/Camera2 discovered IDs: [0, 1, 2, 3, 4]"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.080 [CameraDiscovery] D/Camera2: 0: facing=1, intrinsicZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.080 [CameraDiscovery] D/Camera2: 1: facing=0, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.080 [CameraDiscovery] D/Camera2: 2: facing=1, intrinsicZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.080 [CameraDiscovery] D/Camera2: 3: facing=1, intrinsicZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.080 [CameraDiscovery] D/Camera2: 4: facing=1, intrinsicZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.086 [CameraDiscovery] D/Camera2 final list:"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.086 [CameraDiscovery] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.086 [CameraDiscovery] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.086 [CameraDiscovery] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [CameraDiscovery] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [CameraDiscovery] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/Discovered 5 cameras:"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/发现 5 个摄像头"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/  - 3: BACK_ULTRA_WIDE, intrinsicZoom=0.6523298, displayZoom=0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/摄像头: 3, 类型: BACK_ULTRA_WIDE, 变焦: 0.6523298, 提交倍率基准: 0.6523298"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/  - 2: BACK_MAIN, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/摄像头: 2, 类型: BACK_MAIN, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/  - 0: BACK_TELEPHOTO, intrinsicZoom=1.036697, displayZoom=1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/摄像头: 0, 类型: BACK_TELEPHOTO, 变焦: 1.036697, 提交倍率基准: 1.036697"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/  - 4: BACK_TELEPHOTO, intrinsicZoom=2.9875011, displayZoom=2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.087 [Camera2Controller] D/摄像头: 4, 类型: BACK_TELEPHOTO, 变焦: 2.9875011, 提交倍率基准: 2.9875011"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.088 [Camera2Controller] D/  - 1: FRONT, intrinsicZoom=1.0, displayZoom=1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.088 [Camera2Controller] D/摄像头: 1, 类型: FRONT, 变焦: 1.0, 提交倍率基准: 1.0"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.088 [Camera2Controller] I/选择默认摄像头: 0, 类型: BACK_TELEPHOTO"}
+
+data: {"ts": 1788850792149, "seq": 362, "text": "14:59:51.147 [Camera2Controller] D/Preview started"}
+
+data: {"ts": 1788850793309, "seq": 363, "text": "14:59:52.623 [CameraGLSurfaceView] D/onPause"}
+
+data: {"ts": 1788850793309, "seq": 363, "text": "14:59:53.220 [LIFECYCLE] app background (onStop)"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.169 [Camera2Controller] E/Camera error: 0, error=3 - 相机被系统策略禁用"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.172 [Camera2Controller] D/ImageReader closed immediately"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.277 [LivePhotoRecorder] W/Live Photo capture aborted: camera device unavailable: camera error 0: 3"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.277 [LivePhotoRecorder] D/Live Photo recording stopped"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.277 [LivePhotoRecorder] D/Live Photo hardware resources released"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.277 [Camera2Controller] W/Scheduling camera recovery in 1200ms after error=3"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.278 [CameraViewModel] D/onCameraError: code=3, message=相机被系统策略禁用, canRetry=true"}
+
+data: {"ts": 1788850798414, "seq": 364, "text": "14:59:58.278 [Camera2Controller] D/Camera device closed: 0"}
+

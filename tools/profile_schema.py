@@ -139,6 +139,78 @@ def default_profile(name: str = "Photographer A") -> dict:
     }
 
 
+# --------------------------------------------------------------------------- safe bands
+def _nget(d, path):
+    cur = d
+    for k in path.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+    return cur
+
+
+def _nset(d, path, v):
+    cur = d
+    parts = path.split(".")
+    for k in parts[:-1]:
+        if not isinstance(cur.get(k), dict):
+            cur[k] = {}
+        cur = cur[k]
+    cur[parts[-1]] = v
+
+
+# Safe operating bands — tighter than the schema's absolute *validity* limits.
+# The empirical generation stages (tone curve baked from a luminance CDF,
+# color-matrix off-diagonals from channel correlation, film_curve.shadow_floor
+# from shadow statistics) are NOT bounded by the optimiser, so they can
+# over-reach and re-expose 8-bit read/JPEG noise (see 1.3.3 noise/banding
+# diagnosis). These bands keep creative headroom without the artifacts and are
+# enforced at generator output, Studio load/save/export, and the sliders.
+SAFE_RANGES = {
+    "film_curve.shadow_floor": (0.0, 16.0),   # was allowed up to 64; 25.5 caused noise
+    "shadow.black_point": (0.0, 0.1),          # was 0.2
+}
+
+
+def matrix_cell_range(r: int, c: int):
+    """Safe (min, max) for color_matrix cell (r, c).
+
+    Diagonal = per-channel gain, kept modest; off-diagonal = cross-talk, kept
+    small. Prevents a single channel boost / heavy cross-mix from re-exposing
+    low-light read noise the way the 1.3.3 diagnosis traced.
+    """
+    if r == c:
+        return (0.8, 1.2)
+    return (-0.2, 0.2)
+
+
+def safe_clamp(profile: dict) -> dict:
+    """Pull a profile's over-reaching parameters into the safe band.
+
+    Mutates *profile* in place and returns it. Scalars outside the band and
+    color-matrix cells outside their band are clamped; everything else is left
+    untouched so already-safe profiles pass through unchanged.
+    """
+    if not isinstance(profile, dict):
+        return profile
+    for path, (lo, hi) in SAFE_RANGES.items():
+        v = _nget(profile, path)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            _nset(profile, path, min(hi, max(lo, float(v))))
+    M = _nget(profile, "color_matrix.matrix_3x3")
+    if isinstance(M, list) and len(M) == 3:
+        for r in range(3):
+            row = M[r]
+            if not isinstance(row, list) or len(row) != 3:
+                continue
+            for c in range(3):
+                v = row[c]
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    lo, hi = matrix_cell_range(r, c)
+                    row[c] = min(hi, max(lo, float(v)))
+    return profile
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="PhotographerProfile validator / default generator")
     sub = p.add_subparsers(dest="cmd", required=True)

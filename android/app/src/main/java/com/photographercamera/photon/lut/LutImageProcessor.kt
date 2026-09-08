@@ -2178,6 +2178,16 @@ class LutImageProcessor(context: Context? = null) {
                 FINAL_ENCODE_DITHER_SHADER,
                 "FinalEncodeDither",
             )
+            // 1.3.6：首次程序构建可能残留驱动一次性错误（PLG110/Mali-G1-Ultra
+            // 实证首次执行 glError 1281，重试跳过分配路径后必成功）。程序创建
+            // 与 FBO 分配阶段的错误与本 pass 绘制成败无关，立即清场隔离。
+            val programNoise = drainGlErrors()
+            if (programNoise > 0) {
+                PLog.d(
+                    TAG,
+                    "renderFinalEncodePass: drained $programNoise GL error(s) after program create"
+                )
+            }
         }
         if (finalEncodeProgram == 0) return false
         if (finalEncodeFboId == 0 || finalEncodeWidth != width || finalEncodeHeight != height) {
@@ -2210,6 +2220,17 @@ class LutImageProcessor(context: Context? = null) {
             }
             finalEncodeWidth = width
             finalEncodeHeight = height
+        }
+
+        // 1.3.6：绘制校验前清场——首次执行的 FBO 分配（glTexImage2D 大块 8-bit
+        // 纹理分配等）在部分驱动上会残留一次性 INVALID_VALUE，与绘制成败无关；
+        // 非首次执行时此 drain 为 no-op。保证尾部检查只反映本 pass 绘制本身。
+        val allocNoise = drainGlErrors()
+        if (allocNoise > 0) {
+            PLog.d(
+                TAG,
+                "renderFinalEncodePass: drained $allocNoise GL error(s) after final encode FBO alloc"
+            )
         }
 
         val identityMatrix = FloatArray(16)

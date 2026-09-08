@@ -213,3 +213,22 @@ button:disabled{opacity:.45; cursor:not-allowed}
 .icon-preview{display:flex;align-items:center;gap:8px;margin:6px 0 2px}
 .icon-preview img{width:42px;height:42px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--panel-2)}
 .icon-preview span{font-size:11px;color:var(--txt-dim);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ───────── tone curve editor ───────── */
+.tone-editor{margin-bottom:6px}
+.tone-svg{
+  display:block; width:100%; height:auto; background:#0d0d0f;
+  border:1px solid var(--line); border-radius:6px; touch-action:none;
+}
+.tone-grid{stroke:#232327; stroke-width:1}
+.tone-identity{stroke:#3a3a42; stroke-width:1; stroke-dasharray:4 4}
+.tone-curve{fill:none; stroke:var(--accent); stroke-width:1.8; stroke-linejoin:round}
+.tone-dot{
+  fill:var(--accent); stroke:#141416; stroke-width:2; cursor:grab;
+  transition:fill .1s;
+}
+.tone-dot:hover{fill:var(--accent-2)}
+.tone-dot:active{cursor:grabbing}
+.tone-btns{display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap}
+.tone-btn{padding:3px 9px; font-size:11px; border-radius:5px}
+.tone-hint{font-size:11px; color:var(--txt-faint); margin-left:2px}

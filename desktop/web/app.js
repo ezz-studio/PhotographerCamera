@@ -16,7 +16,7 @@ const state = {
   rendUrl: null,
   origUrl: null,
   jobId: null,
-  icon: null,        // {ext: "png"|"jpg"|"webp", dataUrl: "data:image/..;base64,.."} — saved next to the profile JSON under the SAME file name
+  icon: null,        // {ext: "png"|"jpg"|"webp", data: "data:image/..;base64,.."} — saved next to the profile JSON under the SAME file name
 };
 
 const GROUP_LABEL = {
@@ -25,7 +25,7 @@ const GROUP_LABEL = {
   hsl: "HSL 分色", sharpen: "锐化", bloom: "柔光溢出 Bloom",
   halation: "光晕 Halation", grain: "颗粒 Grain", noise: "噪点 Noise",
   vignette: "暗角 Vignette", saturation: "饱和度", contrast: "对比度",
-  detail: "细节", film: "胶片", look: "整体影调",
+  detail: "细节", film: "胶片", look: "整体影调", film_curve: "胶片曲线",
 };
 
 const PARAM_LABEL = {
@@ -290,6 +290,12 @@ function renderControls() {
     items.forEach((c) => {
       const cur = getPath(state.profile, c.path);
       if (cur === undefined) return;                 // not present in this profile
+
+      if (c.type === "tone_curve") {
+        renderToneCurve(body, c);
+        return;
+      }
+
       const row = document.createElement("div");
       row.className = "slider";
       const segs = c.path.split(".");
@@ -346,6 +352,148 @@ function renderControls() {
     wrap.querySelector(".group-head").onclick = () => wrap.classList.toggle("collapsed");
     box.appendChild(wrap);
   });
+}
+
+/* ─────────────────────────── tone curve editor ─────────────────────────── */
+
+// Draggable curve editor for tone_curve.points (the generator bakes N=17
+// points from a luminance CDF). Endpoints keep x=0 / x=1; interior points are
+// clamped between their neighbours so x stays monotonic (the renderer's LUT
+// interpolates over sorted x). Dragging rewrites the points and refreshes the
+// live preview, exactly like a slider would.
+function renderToneCurve(body, control) {
+  const tc = state.profile.tone_curve;
+  if (!tc || !Array.isArray(tc.points) || tc.points.length < 2) return;
+
+  const W = 260, H = 190, PAD = 18, EPS = 0.005;
+  const X = (u) => PAD + u * (W - 2 * PAD);
+  const Y = (v) => H - PAD - v * (H - 2 * PAD);
+
+  const wrap = document.createElement("div");
+  wrap.className = "tone-editor";
+  body.appendChild(wrap);
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "tone-svg");
+  wrap.appendChild(svg);
+
+  // static grid + identity reference
+  const mk = (tag, attrs) => {
+    const el = document.createElementNS(svgNS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  };
+  for (let i = 0; i <= 4; i++) {
+    const t = i / 4;
+    svg.appendChild(mk("line", { x1: X(t), y1: Y(0), x2: X(t), y2: Y(1), class: "tone-grid" }));
+    svg.appendChild(mk("line", { x1: X(0), y1: Y(t), x2: X(1), y2: Y(t), class: "tone-grid" }));
+  }
+  svg.appendChild(mk("line", { x1: X(0), y1: Y(0), x2: X(1), y2: Y(1), class: "tone-identity" }));
+
+  const curve = mk("polyline", { class: "tone-curve" });
+  svg.appendChild(curve);
+  const dots = mk("g", {});
+  svg.appendChild(dots);
+
+  // linear interpolation across the (sorted) control points — same math the
+  // CPU renderer / GPU LUT bakes uses
+  function sampleY(points, u) {
+    const idx = points.map((_, i) => i).sort((a, b) => points[a][0] - points[b][0]);
+    const xs = idx.map((i) => points[i][0]);
+    const ys = idx.map((i) => points[i][1]);
+    if (u <= xs[0]) return ys[0];
+    if (u >= xs[xs.length - 1]) return ys[ys.length - 1];
+    for (let i = 0; i < xs.length - 1; i++) {
+      if (u >= xs[i] && u <= xs[i + 1]) {
+        const t = (u - xs[i]) / Math.max(1e-6, xs[i + 1] - xs[i]);
+        return ys[i] + (ys[i + 1] - ys[i]) * t;
+      }
+    }
+    return ys[ys.length - 1];
+  }
+
+  function draw() {
+    const pts = tc.points;
+    const N = 96;
+    const line = [];
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;
+      line.push(`${X(u)},${Y(sampleY(pts, u))}`);
+    }
+    curve.setAttribute("points", line.join(" "));
+
+    // one dot per control point
+    while (dots.childNodes.length < pts.length) {
+      const c = mk("circle", { r: 5, class: "tone-dot" });
+      c.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        svg.setPointerCapture(e.pointerId);
+        c.dataset.active = "1";
+        onDrag(e);
+      });
+      c.addEventListener("pointermove", (e) => { if (c.dataset.active) onDrag(e); });
+      const end = (e) => {
+        if (c.dataset.active) { delete c.dataset.active; draw(); }
+      };
+      c.addEventListener("pointerup", end);
+      c.addEventListener("pointercancel", end);
+      dots.appendChild(c);
+    }
+    while (dots.childNodes.length > pts.length) dots.removeChild(dots.lastChild);
+
+    pts.forEach((p, i) => {
+      const c = dots.childNodes[i];
+      c.setAttribute("cx", X(p[0]));
+      c.setAttribute("cy", Y(p[1]));
+      c.dataset.idx = i;
+    });
+  }
+
+  function onDrag(e) {
+    const active = dots.querySelector('[data-active="1"]');
+    if (!active) return;
+    const i = +active.dataset.idx;
+    const r = svg.getBoundingClientRect();
+    const u = Math.max(0, Math.min(1, ((e.clientX - r.left) / r.width * W - PAD) / (W - 2 * PAD)));
+    const v = Math.max(0, Math.min(1, 1 - ((e.clientY - r.top) / r.height * H - PAD) / (H - 2 * PAD)));
+    const pts = tc.points;
+    // endpoints stay pinned to x=0 / x=1; interior points stay between neighbours
+    const minX = i === 0 ? 0 : Math.min(1 - EPS, pts[i - 1][0] + EPS);
+    const maxX = i === pts.length - 1 ? 1 : Math.max(EPS, pts[i + 1][0] - EPS);
+    pts[i] = [Math.max(minX, Math.min(maxX, u)), v];
+    draw();
+    schedulePreview();
+  }
+
+  const bar = document.createElement("div");
+  bar.className = "tone-btns";
+  bar.innerHTML =
+    `<button class="tone-btn" data-act="linear">重置为线性</button>` +
+    `<button class="tone-btn" data-act="resample">均匀 17 点</button>` +
+    `<span class="tone-hint">${tc.points.length} 点 · 拖拽控制点调整</span>`;
+  wrap.appendChild(bar);
+
+  bar.querySelector('[data-act="linear"]').onclick = () => {
+    tc.points = [[0, 0], [1, 1]];
+    bar.querySelector(".tone-hint").textContent = "2 点 · 拖拽控制点调整";
+    draw();
+    schedulePreview();
+  };
+  bar.querySelector('[data-act="resample"]').onclick = () => {
+    const src = tc.points.map((p) => [p[0], p[1]]);
+    tc.points = [];
+    for (let i = 0; i < 17; i++) {
+      const u = i / 16;
+      tc.points.push([u, sampleY(src, u)]);
+    }
+    bar.querySelector(".tone-hint").textContent = "17 点 · 拖拽控制点调整";
+    draw();
+    schedulePreview();
+  };
+
+  draw();
 }
 
 /* ─────────────────────────── report ─────────────────────────── */
@@ -526,10 +674,11 @@ function pickIcon(file) {
   if (!["png", "jpg", "jpeg", "webp"].includes(ext)) return setStatus("图标仅支持 png/jpg/webp", "err");
   const rd = new FileReader();
   rd.onload = () => {
-    state.icon = { ext: ext === "jpeg" ? "jpg" : ext, dataUrl: String(rd.result) };
+    // key MUST be "data": server._save_icon() reads icon["data"]
+    state.icon = { ext: ext === "jpeg" ? "jpg" : ext, data: String(rd.result) };
     const box = $("#iconPreview");
     box.hidden = false;
-    box.querySelector("img").src = state.icon.dataUrl;
+    box.querySelector("img").src = state.icon.data;
     $("#iconMeta").textContent = file.name;
   };
   rd.readAsDataURL(file);
@@ -584,7 +733,10 @@ async function saveProfile() {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setStatus("已保存 " + r.path + (r.icon_path ? " + 同名图标" : "（未选图标）"), "ok");
+    const iconMsg = r.icon_path
+      ? " + 同名图标 " + r.icon_path
+      : (state.icon ? "（图标写入失败，请重试）" : "（未选图标）");
+    setStatus("已保存 " + r.path + iconMsg, r.icon_path || !state.icon ? "ok" : "err");
   } catch (e) {
     setStatus("保存失败: " + e.message, "err");
   }

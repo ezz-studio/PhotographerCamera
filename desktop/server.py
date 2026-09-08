@@ -55,9 +55,12 @@ from PIL import Image  # noqa: E402
 import build_profile as B  # noqa: E402
 import profile_renderer as R  # noqa: E402
 import profile_schema as S  # noqa: E402
-from dataset_loader import discover_images  # noqa: E402
+from dataset_loader import discover_images, SUPPORTED_EXT  # noqa: E402
 
-IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+# Single source of truth: desktop/server.py and tools/dataset_loader.py must
+# agree, otherwise the UI lists files the pipeline silently drops (PNG/TIFF
+# used to be browsable but were filtered out at generation time).
+IMAGE_EXT = set(SUPPORTED_EXT)
 
 STATE = {
     "session": os.path.join(WORK, "studio_session"),
@@ -89,7 +92,17 @@ def _img_to_jpeg(arr_u8: np.ndarray, quality: int = 92) -> bytes:
 def _load_rgb(path: str, max_side: int = 0) -> np.ndarray:
     """Decode to float32 in [0,1]; optionally downscale the longest side."""
     img = Image.open(path)
-    img = img.convert("RGB")
+    if img.mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+        # scale by the real sample range; converting straight to 8-bit would
+        # truncate a 16-bit PNG to a near-black image
+        a = np.asarray(img, dtype=np.float32)
+        a = a / 65535.0 if img.mode != "F" else a
+        a = np.clip(a, 0.0, 1.0)
+        if a.ndim == 2:
+            a = np.stack([a] * 3, axis=-1)
+        img = Image.fromarray((a * 255.0 + 0.5).astype(np.uint8), "RGB")
+    else:
+        img = img.convert("RGB")
     if max_side:
         w, h = img.size
         m = max(w, h)
@@ -150,14 +163,39 @@ def build_controls() -> list:
     schema = S.load_schema()
     out: list = []
     _walk_controls(schema, schema, "", out)
-    # Arrays (tone curve points, HSL tables, 3x3 matrix) are authored by the
-    # generator/optimiser, not by sliders. Top-level scalars (version, schema_version)
-    # are metadata, not style knobs.
+    # Tone-curve points and the 3x3 matrix are exposed as DEDICATED widgets
+    # below (a draggable curve editor / 9 matrix sliders), not generic scalars.
+    # Top-level scalars (version, schema_version) are metadata, not style knobs.
     out = [
         c for c in out
         if "." in c["path"]
-        and not re.search(r"(points|matrix_3x3)\b", c["path"])
+        and "points" not in c["path"]
     ]
+    # Scalar sliders clamp to the safe operating bands (tighter than the
+    # schema's validity limits — see 1.3.3 noise/banding diagnosis).
+    for c in out:
+        if c["path"] in S.SAFE_RANGES:
+            lo, hi = S.SAFE_RANGES[c["path"]]
+            c["min"] = float(lo)
+            c["max"] = float(hi)
+    # Tone curve: one draggable editor row instead of N numeric sliders.
+    out.append({"path": "tone_curve.points", "label": "色调曲线",
+                "type": "tone_curve"})
+    # 3x3 color matrix: 9 sliders (row→col), both diagonal gains and
+    # off-diagonal cross-talk clamped to their safe bands.
+    _ROW = ("R", "G", "B")
+    _COL = ("R", "G", "B")
+    for r in range(3):
+        for c in range(3):
+            lo, hi = S.matrix_cell_range(r, c)
+            out.append({
+                "path": f"color_matrix.matrix_3x3.{r}.{c}",
+                "label": f"{_ROW[r]}→{_COL[c]}",
+                "type": "number",
+                "min": float(lo),
+                "max": float(hi),
+                "step": 0.005,
+            })
     return out
 
 
@@ -184,6 +222,10 @@ def _run_generate(job: dict, images_root: str, name: str, out_dir: str,
         os.makedirs(out_dir, exist_ok=True)
         with contextlib.redirect_stdout(_LogSink(job)):
             profile = B.build(images_root, name, out_dir, validation_root=validation_root)
+        # The optimiser bounds some scalars, but the empirical stages (tone
+        # curve CDF, matrix off-diagonals, film shadow floor) are unbounded —
+        # pull the assembled profile into the safe band before it reaches the UI.
+        profile = S.safe_clamp(profile)
         job["log"] += f"\n[{time.strftime('%H:%M:%S')}] build() returned\n"
         reports = {}
         for fn in ("validation_report.json", "optimization_report.json",
@@ -295,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "image/jpeg")
 
             if p == "/api/profiles":
-                base = os.path.join(WORK, "profiles")
+                base = _profiles_root()
                 items = []
                 for dirpath, _dirs, files in os.walk(base):
                     for fn in files:
@@ -315,6 +357,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": f"no such profile: {rel}"}, 404)
                 with open(fp, encoding="utf-8") as f:
                     prof = json.load(f)
+                # enforce the safe band on load too (e.g. an old profile with
+                # shadow_floor 25.5 shows up already clamped to 16)
+                prof = S.safe_clamp(prof)
                 with _LOCK:
                     STATE["profile"] = prof
                     STATE["profile_path"] = fp
@@ -421,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                 prof = body.get("profile")
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
+                prof = S.safe_clamp(prof)
                 rel = str(body.get("path") or "profiles/studio/profile_final.json")
                 fp = rel if os.path.isabs(rel) else os.path.join(WORK, rel)
                 os.makedirs(os.path.dirname(fp), exist_ok=True)
@@ -436,10 +482,11 @@ class Handler(BaseHTTPRequestHandler):
                 prof = body.get("profile")
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
+                prof = S.safe_clamp(prof)
                 # keep CJK in profile names (App preset name = file name);
                 # strip only Windows-illegal filename characters
                 name = re.sub(r"[\\/:*?\"<>|]+", "_", str(body.get("name") or "studio")) + ".json"
-                dest = os.path.join(WORK, "android", "app", "src", "main", "assets", "profiles", name)
+                dest = os.path.join(_android_assets_dir(), name)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "w", encoding="utf-8") as f:
                     json.dump(prof, f, indent=2, ensure_ascii=False)
@@ -453,6 +500,7 @@ class Handler(BaseHTTPRequestHandler):
                         prof = STATE["profile"]
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
+                prof = S.safe_clamp(prof)
                 name = re.sub(r'[\\/:*?\"<>|]+', "_", str(body.get("name") or "photographer_look"))
                 out_rel = f"studio_session/luts/{name}_{time.strftime('%Y%m%d_%H%M%S')}.cube"
                 out_path = out_rel if os.path.isabs(out_rel) else os.path.join(WORK, out_rel)
@@ -519,23 +567,72 @@ def _profile_color_lut_cube(profile: dict, n: int = 33) -> str:
 def _save_icon(base_no_ext: str, icon) -> str | None:
     """Write an icon image next to a profile JSON under the SAME name (only the
     extension differs) — the Android preset list pairs <id>.json with <id>.<ext>.
-    icon = {"ext": "png|jpg|webp", "data": "data:image/...;base64,..."}. """
+    icon = {"ext": "png|jpg|webp", "data": "data:image/...;base64,..."}
+    (older builds sent "dataUrl" — both keys are accepted)."""
     if not isinstance(icon, dict):
         return None
     ext = str(icon.get("ext", "png")).lower()
     if ext not in ("png", "jpg", "webp"):
         return None
-    m = re.match(r"^data:image/\w+;base64,(.+)$", str(icon.get("data", "")), re.S)
-    if not m:
+    # accept several historical key spellings
+    payload = ""
+    for k in ("data", "dataUrl", "dataURL", "data_url", "src"):
+        v = icon.get(k)
+        if isinstance(v, str) and v:
+            payload = v
+            break
+    if not payload:
         return None
+    m = re.match(r"^data:image/[\w.+-]+(?:;[\w-]+=[\w-]+)*;base64,(.+)$", payload, re.S)
+    raw_b64 = m.group(1) if m else payload  # tolerate a bare base64 payload too
     try:
-        raw = base64.b64decode(m.group(1))
+        raw = base64.b64decode(raw_b64, validate=False)
     except Exception:
+        return None
+    if not raw:
         return None
     out = f"{base_no_ext}.{ext}"
     with open(out, "wb") as f:
         f.write(raw)
     return out
+
+
+def _fallback_base() -> str | None:
+    """Parent of WORK — the real repo root when running the frozen exe from dist/."""
+    parent = os.path.dirname(WORK)
+    return parent if parent and parent != WORK else None
+
+
+def _profiles_root() -> str:
+    """profiles/ under WORK, falling back to the repo root when WORK's is empty.
+
+    A frozen exe runs from dist/, where profiles/ does not exist yet — without
+    the fallback the Studio would show an empty preset list even though the
+    user already has profiles one level up.
+    """
+    p = os.path.join(WORK, "profiles")
+    if not os.path.isdir(p):
+        parent = _fallback_base()
+        if parent:
+            up = os.path.join(parent, "profiles")
+            if os.path.isdir(up):
+                return up
+    return p
+
+
+def _android_assets_dir() -> str:
+    """Where "export to Android" writes preset JSON + icon.
+
+    Prefer the real android/ source tree (repo root, one level up from dist/)
+    over creating a bogus android/ tree next to the exe.
+    """
+    rel = os.path.join("android", "app", "src", "main", "assets", "profiles")
+    parent = _fallback_base()
+    if parent and os.path.isdir(os.path.join(parent, "android", "app", "src", "main")):
+        return os.path.join(parent, rel)
+    if os.path.isdir(os.path.join(WORK, "android", "app", "src", "main")):
+        return os.path.join(WORK, rel)
+    return os.path.join(WORK, rel)
 
 
 def _mime(name: str) -> str:

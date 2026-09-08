@@ -138,10 +138,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // 1.3.6：维护全局前后台标记（相机恢复循环据此决定是否在后台拉起相机）
+        com.photographercamera.core.util.AppForeground.onForeground()
         com.photographercamera.core.debug.DebugLog.log("LIFECYCLE", "app foreground (onStart)")
     }
 
     override fun onStop() {
+        com.photographercamera.core.util.AppForeground.onBackground()
         com.photographercamera.core.debug.DebugLog.log("LIFECYCLE", "app background (onStop)")
         super.onStop()
     }

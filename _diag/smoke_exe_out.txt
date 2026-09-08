@@ -1,0 +1,9 @@
+exe: C:\Users\70898\WorkBuddy\workspace_transfer_2026-09-05\PhotographerCamera\dist\PhotographerStudio.exe  (106.9 MB)
+[health] 200 frozen=True root=C:\Users\70898\WorkBuddy\workspace_transfer_2026-09-05\PhotographerCamera\dist
+[controls] 200 count=56 sample=exposure.bias
+[default_profile] 200 bytes=1201
+[thumb] 200 bytes=21021
+[preview] 200 jpeg_bytes=70713
+
+RESULT: PASS
+exit=0
