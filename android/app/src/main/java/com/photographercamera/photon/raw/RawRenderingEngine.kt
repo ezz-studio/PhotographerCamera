@@ -66,9 +66,8 @@ enum class RawRenderingEngine(
     companion object {
         fun fromPersistedName(
             value: String?,
-            // 0.9.9：渲染引擎默认 AgX（用户指令）；AgX 曲线参数沿用上游默认
-            // （black -10 / white 6.5 / toe 1.5 / shoulder 3.3）。
-            fallback: RawRenderingEngine = AgX
+            // 0.9.14：走A，未存值时回退 AdobeCurve（上游中性基线）
+            fallback: RawRenderingEngine = AdobeCurve
         ): RawRenderingEngine {
             return entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: fallback
         }

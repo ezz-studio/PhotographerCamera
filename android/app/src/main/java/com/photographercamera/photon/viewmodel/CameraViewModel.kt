@@ -1054,8 +1054,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun resolveCaptureRawRenderingEngine(userPrefs: UserPreferences?): RawRenderingEngine {
-        // 0.9.9：渲染引擎默认 AgX（用户指令）
-        return userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AgX
+        // 0.9.14：走A，捕获默认 AdobeCurve（上游中性基线，profile LUT 仍于 JPEG 前叠加）
+        val engine = userPrefs?.rawRenderingEngine ?: RawRenderingEngine.AdobeCurve
+        // 0.9.9 曾把 AgX 设为默认（自研电影感）；用户已确认走A，把遗留 AgX 统一归一到上游中性 AdobeCurve。
+        // 其他创意档（Spektrafilm/Filmic/Hncs 等）保留用户显式选择。
+        return if (engine == RawRenderingEngine.AgX) RawRenderingEngine.AdobeCurve else engine
     }
 
     private fun resolveCaptureRawToneMappingParameters(

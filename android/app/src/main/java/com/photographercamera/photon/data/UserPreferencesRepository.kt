@@ -114,7 +114,7 @@ data class UserPreferences(
     val rawHncsProfileId: String? = null,
     val rawHncsRenderIntent: HncsRenderIntent = HncsRenderIntent.Standard,
     val rawHncsFilmCurveMode: HncsFilmCurveMode = HncsFilmCurveMode.Standard,
-    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AgX, // 0.9.9：默认 AgX
+    val rawRenderingEngine: RawRenderingEngine = RawRenderingEngine.AdobeCurve, // 0.9.14：走A，默认 AdobeCurve（上游中性基线，profile LUT 于 JPEG 前叠加）
     val rawToneMappingParameters: RawToneMappingParameters = RawToneMappingParameters.DEFAULT,
     val rawExposureCompensation: Float = 0f,
     val rawAutoExposure: Boolean = false,
