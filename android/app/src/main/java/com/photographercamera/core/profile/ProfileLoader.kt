@@ -28,6 +28,9 @@ import java.io.File
 class ProfileValidationException(message: String) : Exception(message)
 
 object ProfileLoader {
+    /** 原生滤镜（assets/profiles/native.json）：不可删除的兜底滤镜。 */
+    const val NATIVE_PROFILE_ID = "native"
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = false
@@ -168,7 +171,7 @@ object ProfileLoader {
                 "image/webp" -> "webp"
                 else -> "jpg"
             }
-            runCatching {
+            val ok = runCatching {
                 val dest = File(profilesCacheDir(context), "$id.$ext")
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it) }
@@ -176,6 +179,9 @@ object ProfileLoader {
                 DebugLog.log("PROFILE", "icon imported for '$id' -> ${dest.name}")
                 true
             }.getOrDefault(false)
+            // RC2 fix: declare the icon in the profile JSON so iconPath() can resolve it.
+            if (ok) persistIconDecl(context, id, ext)
+            ok
         }
 
     // ---- Public inbox import / delete ---------------------------------------
@@ -202,6 +208,7 @@ object ProfileLoader {
         }
         val dest = profilesCacheDir(context)
         val imported = mutableListOf<String>()
+        val iconUpdates = mutableListOf<Pair<String, String>>()
         inbox.listFiles { f -> f.isFile && f.extension.equals("json", ignoreCase = true) }
             ?.forEach { f ->
                 val id = f.nameWithoutExtension
@@ -209,10 +216,12 @@ object ProfileLoader {
                     val text = f.readText()
                     loadFromText(text, id) // validates BEFORE anything is copied
                     f.copyTo(File(dest, "$id.json"), overwrite = true)
-                    copyInboxIcon(f, id, dest)
+                    copyInboxIcon(f, id, dest)?.let { iconUpdates += id to it }
                     imported += id
                 }.onFailure { e -> DebugLog.logError("PROFILE", "inbox import '${f.name}' failed", e) }
             }
+        // RC2 fix: declare imported icons in their profile JSONs so iconPath() resolves them.
+        for ((id, ext) in iconUpdates) persistIconDecl(context, id, ext)
         DebugLog.log(
             "PROFILE",
             "public inbox: ${imported.size} imported ${imported} (scan=${inbox.path})",
@@ -220,17 +229,42 @@ object ProfileLoader {
         imported
     }
 
-    /** Copy `<id>.<iconExt>` declared in the profile's display.icon (probe common exts). */
-    private fun copyInboxIcon(jsonFile: File, id: String, dest: File) {
+    /**
+     * Copy `<id>.<iconExt>` (same-name sibling of the profile JSON) into the
+     * private profiles dir. Probes the extension declared in display.icon first,
+     * then png/jpg/jpeg/webp. Returns the copied extension, or null if no icon
+     * file was found.
+     */
+    private fun copyInboxIcon(jsonFile: File, id: String, dest: File): String? {
         val declared = registry[id]?.display?.icon?.takeIf { it.isNotBlank() }
         val exts = listOfNotNull(declared, "png", "jpg", "jpeg", "webp").distinct()
         for (ext in exts) {
             val icon = File(jsonFile.parentFile, "$id.$ext")
             if (icon.isFile) {
                 icon.copyTo(File(dest, "$id.$ext"), overwrite = true)
-                return
+                return ext
             }
         }
+        return null
+    }
+
+    /**
+     * RC2 fix: persist `display.icon = ext` onto the in-memory profile and rewrite
+     * its cached JSON. Without this, [iconPath] (which reads display.icon) can never
+     * resolve an imported icon — the image file sits on disk but the profile JSON
+     * doesn't declare it, so the preset list shows no icon. Also removes stale
+     * sibling icons of other extensions.
+     */
+    private suspend fun persistIconDecl(context: Context, id: String, ext: String) {
+        val current = registry[id] ?: return
+        val dir = profilesCacheDir(context)
+        listOf("png", "jpg", "jpeg", "webp").forEach { e ->
+            if (e != ext) File(dir, "$id.$e").takeIf { it.isFile }?.delete()
+        }
+        val updated = current.copy(display = (current.display ?: Display()).copy(icon = ext))
+        registry[id] = updated
+        runCatching { exportToCache(context, updated, id) }
+            .onFailure { e -> DebugLog.logError("PROFILE", "persist icon decl for '$id' failed", e) }
     }
 
     /** True when the profile is bundled in assets (bundled ones cannot be deleted). */
@@ -245,6 +279,11 @@ object ProfileLoader {
      * filtered from the registry on every init — the user sees them gone.
      */
     suspend fun deleteProfile(context: Context, id: String): Boolean = withContext(Dispatchers.IO) {
+        // 原生滤镜锁死：任何路径（UI/未来批量清理）都不可删除
+        if (id == NATIVE_PROFILE_ID) {
+            DebugLog.log("PROFILE", "delete '$id' refused (native is locked)")
+            return@withContext false
+        }
         if (isBundled(id, context)) {
             deletedBundledPrefs(context).edit()
                 .putStringSet("deleted_bundled_presets", deletedBundledSet(context) + id)

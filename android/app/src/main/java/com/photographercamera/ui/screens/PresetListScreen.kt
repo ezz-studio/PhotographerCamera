@@ -228,11 +228,12 @@ fun PresetListScreen(
                         subtitle = subtitle,
                         selected = isSelected,
                         editing = editing,
-                        deletable = true,
+                        // 原生滤镜锁死：编辑模式下不出现删除角标、点击也不弹删除框
+                        deletable = id != ProfileLoader.NATIVE_PROFILE_ID,
                         onClick = {
-                            if (editing) {
+                            if (editing && id != ProfileLoader.NATIVE_PROFILE_ID) {
                                 deleteTarget = id
-                            } else {
+                            } else if (!editing) {
                                 selected = id
                                 navController.previousBackStackEntry
                                     ?.savedStateHandle
@@ -276,7 +277,7 @@ fun PresetListScreen(
 
             if (editing) {
                 Text(
-                    "点击滤镜可删除 · 导入含配置与图标两步",
+                    "点击滤镜可删除（原生滤镜不可删）· 导入含配置与图标两步",
                     color = TextSecondary,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -310,8 +311,27 @@ fun PresetListScreen(
                             deleteTarget = null
                             val removed = runBlocking { ProfileLoader.deleteProfile(context, target) }
                             if (removed) {
-                                if (selected == target) selected = ""
                                 profiles.clear(); profiles.addAll(ProfileLoader.listProfiles())
+                                // 删除的是当前选中滤镜（或选中项已不存在）→ 默认回退到
+                                // 原生滤镜（锁定不可删、恒存在）；同时同步相机端高亮
+                                // （savedStateHandle）与冷启动恢复（last_preset）。
+                                if (selected == target || !profiles.contains(selected)) {
+                                    val fallback =
+                                        if (profiles.contains(ProfileLoader.NATIVE_PROFILE_ID)) {
+                                            ProfileLoader.NATIVE_PROFILE_ID
+                                        } else {
+                                            profiles.firstOrNull() ?: ""
+                                        }
+                                    selected = fallback
+                                    navController.previousBackStackEntry
+                                        ?.savedStateHandle
+                                        ?.set("selected_preset", fallback)
+                                    context
+                                        .getSharedPreferences("pc_settings", android.content.Context.MODE_PRIVATE)
+                                        .edit()
+                                        .putString("last_preset", fallback)
+                                        .apply()
+                                }
                             }
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),

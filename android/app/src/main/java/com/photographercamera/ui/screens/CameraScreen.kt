@@ -1745,11 +1745,12 @@ private fun BottomPanel(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Preset selector (left)
-            PresetShortcut(
-                name = selected.ifEmpty { "预设" },
-                onClick = onPresetClick,
-            )
+        // Preset selector (left)
+        PresetShortcut(
+            presetId = selected,
+            name = selected.ifEmpty { "预设" },
+            onClick = onPresetClick,
+        )
 
             // Shutter (center)
             ShutterButton(onClick = onShutter, scale = shutterScale, isProcessing = isProcessing)
@@ -1869,7 +1870,26 @@ private fun QuickButton(
 }
 
 @Composable
-private fun PresetShortcut(name: String, onClick: () -> Unit) {
+private fun PresetShortcut(presetId: String, name: String, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // 主界面预设卡同步显示滤镜图标（与滤镜列表 PresetItem 同一加载链路）；
+    // 无图标（原生滤镜等）时保持默认相机图标 + 名称布局。
+    var iconBitmap by remember(presetId) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(presetId) {
+        if (presetId.isEmpty()) return@LaunchedEffect
+        val loc = ProfileLoader.iconPath(presetId, context) ?: return@LaunchedEffect
+        val bmp = withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = if (loc.startsWith("assets://")) {
+                    context.assets.open("profiles/" + loc.removePrefix("assets://")).use { it.readBytes() }
+                } else {
+                    java.io.File(loc).readBytes()
+                }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }.getOrNull()
+        }
+        if (bmp != null) iconBitmap = bmp
+    }
     Box(
         modifier = Modifier
             .size(58.dp)
@@ -1878,19 +1898,28 @@ private fun PresetShortcut(name: String, onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = Icons.Default.PhotoCamera,
-                contentDescription = "预设",
-                tint = AccentOrange,
-                modifier = Modifier.size(22.dp),
+        if (iconBitmap != null) {
+            Image(
+                bitmap = iconBitmap!!.asImageBitmap(),
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
-            Text(
-                text = name.uppercase().takeIf { it.length <= 8 } ?: name.uppercase().take(7) + "…",
-                color = TextPrimary,
-                fontSize = 8.sp,
-                maxLines = 1,
-            )
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.PhotoCamera,
+                    contentDescription = "预设",
+                    tint = AccentOrange,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = name.uppercase().takeIf { it.length <= 8 } ?: name.uppercase().take(7) + "…",
+                    color = TextPrimary,
+                    fontSize = 8.sp,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
