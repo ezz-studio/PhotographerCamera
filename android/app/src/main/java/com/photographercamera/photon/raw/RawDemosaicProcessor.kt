@@ -1640,6 +1640,8 @@ class RawDemosaicProcessor {
         val outputSourceBounds: Rect,
         val rotation: Int,
         val includeHdrReference: Boolean,
+        // Ultra HDR (upstream 0e3d2241): scene exposure gain carried into the tile renderer.
+        val hdrReferenceSceneExposureGain: Float,
         val chromaDenoiseValue: Float?,
         val denoiseValue: Float?,
         val sharpeningValue: Float,
@@ -3375,6 +3377,11 @@ class RawDemosaicProcessor {
                 return@withContext null
             }
 
+            // Ultra HDR (upstream 0e3d2241): carry the captured long-exposure gain so the HDR
+            // reference pass can rebuild the scene exposure without re-running HDRNet.
+            var hdrNetSceneExposureGain = RawHdrReferenceMath.hdrNetSceneExposureGain(
+                photonHdrRatio, photonSourceToShortGain, photonHdrNetPostExposureEv,
+            )
             if (regeneratePhotonPgtm) {
                 val persistedHdrRatio = photonHdrRatio?.takeIf { it.isFinite() && it >= 1f }
                 val persistedSourceToShortGain = photonSourceToShortGain
@@ -3490,6 +3497,11 @@ class RawDemosaicProcessor {
                     profileGainTableMap = regeneratedPhotonPgtm.map,
                 )
                 hasProfileGainTableMap = true
+                hdrNetSceneExposureGain = RawHdrReferenceMath.hdrNetSceneExposureGain(
+                    regeneratedPhotonPgtm.hdrRatio,
+                    regeneratedPhotonPgtm.sourceToShortGain,
+                    regeneratedPhotonPgtm.hdrNetPostExposureEv,
+                )
                 PLog.i(
                     TAG,
                     "HDRNet PGTM regenerated for RAW refresh: " +
@@ -3525,6 +3537,14 @@ class RawDemosaicProcessor {
                 applyDngBaselineExposure = applyProfileDngBaselineExposure,
                 useRamp = useProfileExposureRamp
             )
+            // Ultra HDR (upstream 0e3d2241): HDRNet's PGTM includes short -> long fusion and
+            // post exposure, while its lookup weights encode only the short coordinate.
+            // BaselineExposure cannot recover that scene reference. Carry the captured long
+            // gain separately and apply edit EV once.
+            val hdrReferenceSceneExposureGain = hdrNetSceneExposureGain
+                ?.takeIf { photonHdrRequested && hasProfileGainTableMap }
+                ?.let { it * 2f.pow(profileExposureCompensation) }
+                ?: profileExposureUniforms.linearGain
             // 0.9.8：profile 高光/阴影在去马赛克阶段叠加（JPEG 生成前动态影响高光/阴影）
             val shadowsHighlightsParams = ShadowsHighlightsParams(
                 highlights = effectiveHighlightsAdjustment + rawToneMappingParameters.profileHighlights,
@@ -3567,6 +3587,7 @@ class RawDemosaicProcessor {
                         outputSourceBounds = outputSourceBounds,
                         rotation = actualRotation,
                         includeHdrReference = includeHdrReference,
+                        hdrReferenceSceneExposureGain = hdrReferenceSceneExposureGain,
                         chromaDenoiseValue = chromaDenoiseValue,
                         denoiseValue = denoiseValue,
                         sharpeningValue = sharpeningValue,
@@ -3754,7 +3775,7 @@ class RawDemosaicProcessor {
                         renderHdrReferencePass(
                             metadata = actualMetadata,
                             inputTextureId = combinedInputTexture,
-                            sdrLinearTextureId = output.linearSdrTextureId,
+                            sceneExposureGain = hdrReferenceSceneExposureGain,
                             dcpRenderPlan = activeDcpRenderPlan,
                             spectralFilmLut = spektrafilmLut,
                             hncsRenderPlan = hncsRenderPlan,
@@ -3882,7 +3903,7 @@ class RawDemosaicProcessor {
                         renderHdrReferencePass(
                             metadata = actualMetadata,
                             inputTextureId = demosaicTextureId,
-                            sdrLinearTextureId = combinedOutput.linearSdrTextureId,
+                            sceneExposureGain = hdrReferenceSceneExposureGain,
                             dcpRenderPlan = activeDcpRenderPlan,
                             spectralFilmLut = spektrafilmLut,
                             hncsRenderPlan = hncsRenderPlan,
@@ -4230,7 +4251,7 @@ class RawDemosaicProcessor {
                     renderHdrReferencePass(
                         metadata = config.metadata,
                         inputTextureId = demosaicTextureId,
-                        sdrLinearTextureId = combinedOutput.linearSdrTextureId,
+                        sceneExposureGain = config.hdrReferenceSceneExposureGain,
                         dcpRenderPlan = config.activeDcpRenderPlan,
                         spectralFilmLut = config.spectralFilmLut,
                         hncsRenderPlan = config.hncsRenderPlan,
@@ -7260,7 +7281,7 @@ class RawDemosaicProcessor {
     private fun renderHdrReferencePass(
         metadata: RawMetadata,
         inputTextureId: Int,
-        sdrLinearTextureId: Int,
+        sceneExposureGain: Float,
         dcpRenderPlan: DcpRenderPlan?,
         spectralFilmLut: SpectralFilmLut?,
         hncsRenderPlan: HncsRenderPlan?,
@@ -7315,7 +7336,7 @@ class RawDemosaicProcessor {
                             )
                         },
                     ),
-                    sdrLinearTextureId = sdrLinearTextureId,
+                    sceneExposureGain = sceneExposureGain,
                     coordinateInput = coordinateInput,
                 ),
             ),
