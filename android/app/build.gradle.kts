@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // APK file name (PhotographerCamera-<version>.apk) both derive from this.
 // Bump on every feature round: minor = feature batch, patch = fix-only round.
 val APP_VERSION_NAME = "1.3.6"
-val APP_VERSION_CODE = 62
+val APP_VERSION_CODE = 63
 
 plugins {
     id("com.android.application")

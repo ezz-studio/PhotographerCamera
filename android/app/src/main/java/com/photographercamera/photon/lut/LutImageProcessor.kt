@@ -2179,9 +2179,8 @@ class LutImageProcessor(context: Context? = null) {
                 FINAL_ENCODE_DITHER_SHADER,
                 "FinalEncodeDither",
             )
-            // 1.3.6：首次程序构建可能残留驱动一次性错误（PLG110/Mali-G1-Ultra
-            // 实证首次执行 glError 1281，重试跳过分配路径后必成功）。程序创建
-            // 与 FBO 分配阶段的错误与本 pass 绘制成败无关，立即清场隔离。
+            // 程序创建段的错误与本 pass 绘制成败无关，立即清场隔离
+            // （1.3.6 真机实证恒为 0 条，保留为防御性清场）。
             val programNoise = drainGlErrors()
             if (programNoise > 0) {
                 // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
@@ -2193,7 +2192,14 @@ class LutImageProcessor(context: Context? = null) {
         }
         if (finalEncodeProgram == 0) return false
         if (finalEncodeFboId == 0 || finalEncodeWidth != width || finalEncodeHeight != height) {
-            releaseFinalEncodeResources()
+            // 1.3.6 关键修复：此处只重建 FBO/纹理，绝不能删 program。
+            // 旧代码走 releaseFinalEncodeResources() 会把 finalEncodeProgram
+            // 一并删除置 0，随后绘制段 glGetUniformLocation(0, ...) 产生
+            // GL_INVALID_VALUE(1281) 且本次绘制无效 → 必然失败进重试（重试
+            // 在函数入口重建 program 后才成功）。1.3.5 真机 ×2、1.3.6 真机
+            // ×4 的"每次分配块进入必报 1281"即此根因（程序创建段/FBO 分配段
+            // 的 drain 全为 0 条，证明噪声不在分配调用本身）。
+            releaseFinalEncodeTargets()
             val textures = IntArray(1)
             GLES30.glGenTextures(1, textures, 0)
             finalEncodeTextureId = textures[0]
@@ -2217,16 +2223,16 @@ class LutImageProcessor(context: Context? = null) {
             )
             if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
                 PLog.e(TAG, "Final encode FBO incomplete")
-                releaseFinalEncodeResources()
+                releaseFinalEncodeTargets()
                 return false
             }
             finalEncodeWidth = width
             finalEncodeHeight = height
         }
 
-        // 1.3.6：绘制校验前清场——首次执行的 FBO 分配（glTexImage2D 大块 8-bit
-        // 纹理分配等）在部分驱动上会残留一次性 INVALID_VALUE，与绘制成败无关；
-        // 非首次执行时此 drain 为 no-op。保证尾部检查只反映本 pass 绘制本身。
+        // 绘制校验前清场：把分配/重建路径可能残留的任何上游陈旧错误隔离在
+        // 检查点之外（1.3.6 真机实证此 drain 恒为 0 条——1281 的真正根因是
+        // 分配路径误删 program，已在本函数上方修复；此处保留为防御性清场）。
         val allocNoise = drainGlErrors()
         if (allocNoise > 0) {
             // 观察点必须用 PLog.i：PLog.d 不落盘到日志文件（1.3.5 教训）
@@ -2261,11 +2267,13 @@ class LutImageProcessor(context: Context? = null) {
         return true
     }
 
-    private fun releaseFinalEncodeResources() {
-        if (finalEncodeProgram != 0) {
-            GLES30.glDeleteProgram(finalEncodeProgram)
-            finalEncodeProgram = 0
-        }
+    /**
+     * 1.3.6：只释放终点编码的渲染目标（FBO + 纹理），保留 program。
+     * 供尺寸变化/首次分配的重建路径使用——program 与目标尺寸无关，
+     * 删掉它会导致当次绘制以 program=0 运行（glGetUniformLocation(0)
+     * → GL_INVALID_VALUE）而必然失败进重试。
+     */
+    private fun releaseFinalEncodeTargets() {
         if (finalEncodeFboId != 0) {
             GLES30.glDeleteFramebuffers(1, intArrayOf(finalEncodeFboId), 0)
             finalEncodeFboId = 0
@@ -2276,6 +2284,14 @@ class LutImageProcessor(context: Context? = null) {
         }
         finalEncodeWidth = 0
         finalEncodeHeight = 0
+    }
+
+    private fun releaseFinalEncodeResources() {
+        if (finalEncodeProgram != 0) {
+            GLES30.glDeleteProgram(finalEncodeProgram)
+            finalEncodeProgram = 0
+        }
+        releaseFinalEncodeTargets()
     }
 
     /**
