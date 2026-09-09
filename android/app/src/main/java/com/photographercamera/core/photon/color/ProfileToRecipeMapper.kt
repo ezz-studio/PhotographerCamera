@@ -12,8 +12,14 @@
 package com.photographercamera.core.photon.color
 
 import com.photographercamera.core.photon.lens.LensParams
+import com.photographercamera.core.profile.ColorMatrix
+import com.photographercamera.core.profile.Exposure
+import com.photographercamera.core.profile.HighlightRolloff
 import com.photographercamera.core.profile.Hsl
 import com.photographercamera.core.profile.PhotographerProfile
+import com.photographercamera.core.profile.Shadow
+import com.photographercamera.core.profile.ToneCurve
+import com.photographercamera.core.profile.WhiteBalance
 
 /** ColorRecipeParams 覆盖不了的参数，由我方保留 pass / shader 扩展 uniform 消费。 */
 data class ResidualParams(
@@ -46,74 +52,99 @@ data class RecipeMapping(val recipe: ColorRecipeParams, val residual: ResidualPa
 object ProfileToRecipeMapper {
 
     /**
+     * stylefit v3 判定：profile 自带 3D 风格 LUT（color_layer=="lut" 且 payload 有数据）。
+     * 语义与桌面 tools/profile_renderer.py render() 一致——3D LUT 是唯一风格色阶段，
+     * 存在时必须旁路整条参数化色链（exposure/wb/matrix/highlight/shadow/tone_curve/hsl），
+     * 否则双重加风格（LUT+参数链叠加）导致严重过调/偏色。
+     */
+    fun isLutProfile(p: PhotographerProfile): Boolean =
+        p.colorLayer == "lut" && !p.colorLut?.data.isNullOrBlank()
+
+    /**
+     * LUT 分支用的"色链中性化"副本：参数化色层全部回 schema 默认（=identity），
+     * 空间层（grain/bloom/halation/vignette/sharpen/lens/film_curve）原样保留，
+     * map() 主体无需感知该分支。
+     */
+    private fun neutralizeColorLayers(p: PhotographerProfile): PhotographerProfile = p.copy(
+        exposure = Exposure(),
+        whiteBalance = WhiteBalance(),
+        colorMatrix = ColorMatrix(),
+        highlightRolloff = HighlightRolloff(),
+        shadow = Shadow(),
+        toneCurve = ToneCurve(),
+        hsl = Hsl(),
+    )
+
+    /**
      * PhotographerProfile → ColorRecipeParams(+ResidualParams)。
      * 每个字段的单位换算见行内注释；默认值对默认值，identity 对 identity。
      */
     fun map(p: PhotographerProfile): RecipeMapping {
+        val effective = if (isLutProfile(p)) neutralizeColorLayers(p) else p
         // ColorRecipeParams 是全 val data class：用 copy 链逐步覆盖（不可变风格）。
         var r = ColorRecipeParams()
 
         r = r.copy(
             // EV 直接对应（双方都是 -2..+2 EV）
-            exposure = p.exposure.bias,
+            exposure = effective.exposure.bias,
             // 双方都为 ±1 归一化，正=暖 / 正=品红（schema description 已确认）
-            temperature = p.whiteBalance.temperatureBias,
-            tint = p.whiteBalance.tintBias,
-            highlights = p.highlightRolloff.strength, // 0..1 → -1..+1 区间的正向压缩
-            shadows = p.shadow.compression,           // 0..1 压暗方向
+            temperature = effective.whiteBalance.temperatureBias,
+            tint = effective.whiteBalance.tintBias,
+            highlights = effective.highlightRolloff.strength, // 0..1 → -1..+1 区间的正向压缩
+            shadows = effective.shadow.compression,           // 0..1 压暗方向
             // 影调：black_point(0..0.2) 提升黑位 → toe 负方向（提黑）; 用 /0.2 归一
-            toneToe = -p.shadow.blackPoint / 0.2f,
+            toneToe = -effective.shadow.blackPoint / 0.2f,
             // 高光滚降 threshold(0..1) 越低越早起肩 → shoulder 正向塑形
-            toneShoulder = p.highlightRolloff.strength * (1f - p.highlightRolloff.threshold),
+            toneShoulder = effective.highlightRolloff.strength * (1f - effective.highlightRolloff.threshold),
             // 中间调反差：shadow.contrast (1=中性) → pivot 轻度联动（保守 1/10）
-            tonePivot = (p.shadow.contrast - 1f) * 0.1f,
+            tonePivot = (effective.shadow.contrast - 1f) * 0.1f,
             contrast = 1f, // 我方 contrast 语义在 shadow.contrast/toneCurve 中，recipe contrast 保持中性
             // lens.vignette（光学暗角）与 style vignette.amount 独立（HANDOFF_android_lens）：
             // 光学暗角走 LensStage（Stage 0，色彩链之前），此处只保留风格化暗角。
-            vignette = p.vignette.amount,
-            chromaticAberration = p.lens.chromaticAberration,
+            vignette = effective.vignette.amount,
+            chromaticAberration = effective.lens.chromaticAberration,
             // 颗粒（银盐质感）走原生 applyDensityFilmGrain 通路（simplex 银盐颗粒，
             // 与原生滤镜同一套），保持 1:1 接线上游。下方 noise 才是「刺眼噪点」元凶。
-            filmGrain = p.grain.amount,
+            filmGrain = effective.grain.amount,
             // 0.10.x 修复（用户指令：去掉 profile 里面的噪点）：profile 不再驱动独立的
             // uNoise 纯随机通道。该通道每帧重随机、带彩色、观感刺眼，且原生滤镜的
             // noise 恒为 0 —— 收敛到原生行为后，profile 与原生滤镜一致只有银盐颗粒，
             // 不再叠加传感器式噪点 / 色彩断层。profile 自身的 noise.luma/chroma 仅用于
             // 桌面端分析参考，不再下发到实时渲染通道。
             noise = 0f,
-            halation = p.halation.amount,
-            bloom = p.bloom.amount,
-            sharpness = p.sharpen.amount,
+            halation = effective.halation.amount,
+            bloom = effective.bloom.amount,
+            sharpness = effective.sharpen.amount,
         )
 
-        r = mapHsl(p.hsl, r)
-        r = mapShadowTint(p, r)
-        r = r.copy(masterCurvePoints = flattenCurve(p.toneCurve.points))
+        r = mapHsl(effective.hsl, r)
+        r = mapShadowTint(effective, r)
+        r = r.copy(masterCurvePoints = flattenCurve(effective.toneCurve.points))
 
         val residual = ResidualParams(
-            colorMatrix3x3 = p.colorMatrix.matrix3x3,
-            grainSize = p.grain.size,
-            grainDensity = p.grain.density,
-            halationRadius = p.halation.radius,
-            halationThreshold = p.halation.threshold,
-            halationWarmth = p.halation.warmth,
-            vignetteRadius = p.vignette.radius,
-            vignetteFeather = p.vignette.feather,
-            vignetteCenter = p.vignette.center,
-            sharpenRadius = p.sharpen.radius,
-            bloomRadius = p.bloom.radius,
-            bloomThreshold = p.bloom.threshold,
-            shadowTint = p.shadow.tint,
+            colorMatrix3x3 = effective.colorMatrix.matrix3x3,
+            grainSize = effective.grain.size,
+            grainDensity = effective.grain.density,
+            halationRadius = effective.halation.radius,
+            halationThreshold = effective.halation.threshold,
+            halationWarmth = effective.halation.warmth,
+            vignetteRadius = effective.vignette.radius,
+            vignetteFeather = effective.vignette.feather,
+            vignetteCenter = effective.vignette.center,
+            sharpenRadius = effective.sharpen.radius,
+            bloomRadius = effective.bloom.radius,
+            bloomThreshold = effective.bloom.threshold,
+            shadowTint = effective.shadow.tint,
             // 0.10.x / 1.3.1 修复（用户指令：胶片人像等「抬黑」profile 显形噪点）：
             // shadow_floor 把 0..N 区间整体抬到 N 的「黑位抬升」，会把传感器读出噪声
             // 暴露在暗部（尤其 RAW_MAX）。原生 identity profile 此值为 0（noise 埋在纯黑），
             // 故对超过引擎中性基准 8 的值做硬上限 10，压制过度抬黑带来的显形噪点，
             // 同时保留轻微胶片抬黑感。recipe 的 shadow.blackPoint 抬黑由 toneToe 单独处理。
-            filmCurveShadowFloor = minOf(p.filmCurve.shadowFloor, 10f),
-            filmCurveHighlightCeiling = p.filmCurve.highlightCeiling,
-            halationAmount = p.halation.amount,
-            shadowSaturation = p.shadow.saturation,
-            lens = LensParams.fromProfile(p.lens),
+            filmCurveShadowFloor = minOf(effective.filmCurve.shadowFloor, 10f),
+            filmCurveHighlightCeiling = effective.filmCurve.highlightCeiling,
+            halationAmount = effective.halation.amount,
+            shadowSaturation = effective.shadow.saturation,
+            lens = LensParams.fromProfile(effective.lens),
         )
 
         return RecipeMapping(
@@ -194,8 +225,9 @@ object ProfileToRecipeMapper {
         return arr
     }
 
-    /** Profile 全默认（identity）→ 可跳过调色链直接输出。 */
+    /** Profile 全默认（identity）→ 可跳过调色链直接输出。自带 3D LUT 的 profile 永非 identity。 */
     fun isIdentity(p: PhotographerProfile): Boolean {
+        if (isLutProfile(p)) return false
         val m = map(p)
         return m.recipe.isDefault() && isIdentityCurve(m.recipe.masterCurvePoints) &&
             m.residual == identityResidual()

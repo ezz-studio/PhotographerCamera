@@ -1,6 +1,7 @@
 package com.photographercamera.photon.lut
 
 import android.content.Context
+import android.util.Base64
 import android.util.LruCache
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -8,6 +9,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.photographercamera.core.profile.ProfileLoader
 import com.photographercamera.photon.data.CustomImportManager
 import com.photographercamera.photon.mgc.PhotonLookContract
 import com.photographercamera.photon.model.ColorRecipeParams
@@ -15,6 +17,8 @@ import com.photographercamera.photon.utils.PLog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * DataStore 扩展属性
@@ -33,6 +37,9 @@ class LutManager(private val context: Context) {
 
         // LUT 缓存大小（最多缓存 5 个 LUT）
         private const val CACHE_SIZE = 5
+
+        // stylefit profile 自带 LUT 的 lutId 前缀（CameraScreen 注入配方时写入）
+        private const val PROFILE_LUT_PREFIX = "profile:"
 
         // 内置 LUT 目录
         private const val BUILT_IN_LUT_FOLDER = "luts"
@@ -152,6 +159,9 @@ class LutManager(private val context: Context) {
     // LUT 缓存
     private val lutCache = LruCache<String, LutConfig>(CACHE_SIZE)
 
+    // profile 自带 LUT 的数据指纹（同 lutId 重新导入时检测变化、重建纹理配置）
+    private val profileLutFingerprints = mutableMapOf<String, Int>()
+
     // LUT 色彩倾向缓存 (ID -> [R, G, B])
     private val tendencyCache = mutableMapOf<String, FloatArray>()
 
@@ -221,6 +231,15 @@ class LutManager(private val context: Context) {
      * @return LUT 配置，如果加载失败返回 null
      */
     fun loadLut(id: String): LutConfig? {
+        // stylefit profile 自带的 3D 风格 LUT（lutId = "profile:<名字>"）：
+        // 从 profile JSON 的 color_lut payload 构建，复用整条创意 LUT 采样管线
+        // （shader 在 sRGB 编码值上采样 + 整数栅格约定，与桌面 lut3d.sample 逐像素等价）。
+        // 必须放在通用缓存命中之前：profile 重导入（同 lutId、LUT 数据变化）时
+        // 需要经指纹校验决定是否重建，不能无条件吃旧缓存。
+        if (id.startsWith(PROFILE_LUT_PREFIX)) {
+            return loadProfileLut(id)
+        }
+
         // 先从缓存查找
         lutCache.get(id)?.let {
             //PLog.d(TAG, "LUT loaded from cache: $id")
@@ -268,6 +287,77 @@ class LutManager(private val context: Context) {
      */
     fun evictLut(id: String) {
         lutCache.remove(id)
+        profileLutFingerprints.remove(id)
+    }
+
+    /**
+     * 构建 stylefit profile 自带的 3D LUT（"profile:<名字>"）。
+     * payload 约定（tools/stylefit/lut3d.py to_payload）：base64 → uint8 → /scale，
+     * R 最快平铺——与 GL RGB8 texImage3D 的内存布局完全一致，无需重排。
+     * 采样语义走 LutConfig 默认（curve=SRGB/colorSpace=SRGB）：shader 端
+     * linearToSrgb 后采样 = 桌面 lut3d.sample(lut, srgb) 的整数栅格约定。
+     * 指纹缓存：同名 profile 重新导入（LUT 数据变化）时自动重建纹理配置。
+     */
+    private fun loadProfileLut(id: String): LutConfig? {
+        val name = id.removePrefix(PROFILE_LUT_PREFIX)
+        val profile = ProfileLoader.getProfile(name)
+        val payload = profile?.colorLut
+        if (payload == null || profile?.colorLayer != "lut" || payload.data.isBlank()) {
+            PLog.w(TAG, "profile LUT unavailable: '$name' (colorLayer=${profile?.colorLayer})")
+            return null
+        }
+        val fingerprint = payload.data.hashCode()
+        lutCache.get(id)?.let { cached ->
+            if (profileLutFingerprints[id] == fingerprint) return cached
+        }
+        val config = runCatching { buildProfileLutConfig(payload) }
+            .onFailure { PLog.e(TAG, "profile LUT decode failed for '$name'", it) }
+            .getOrNull()
+        if (config == null) return null
+        profileLutFingerprints[id] = fingerprint
+        lutCache.put(id, config)
+        PLog.i(TAG, "profile LUT built: '$name' size=${config.size} bytes=${config.toByteBuffer().capacity()}")
+        return config
+    }
+
+    private fun buildProfileLutConfig(payload: com.photographercamera.core.profile.ColorLutPayload): LutConfig? {
+        if (payload.dtype != "uint8") {
+            PLog.e(TAG, "unsupported color_lut dtype: ${payload.dtype}")
+            return null
+        }
+        val n = payload.size
+        if (n < 2 || n > 65) {
+            PLog.e(TAG, "unsupported color_lut size: $n")
+            return null
+        }
+        val raw = Base64.decode(payload.data, Base64.NO_WRAP or Base64.NO_PADDING)
+        val expected = n * n * n * 3
+        if (raw.size != expected) {
+            PLog.e(TAG, "color_lut size mismatch: got ${raw.size}, expected $expected")
+            return null
+        }
+        val buffer = ByteBuffer.allocateDirect(raw.size).order(ByteOrder.nativeOrder())
+        buffer.put(raw)
+        buffer.position(0)
+        val scale = if (payload.scale > 0f) payload.scale else 255f
+        // scale 允许非 255 的量化基准；uint8 路径 glTexImage3D 直接按 0-255 归一，
+        // scale != 255 时需预除到 0-255 域（当前 stylefit 恒为 255，防御性处理）。
+        val normalized = if (kotlin.math.abs(scale - 255f) > 0.5f) {
+            val out = ByteBuffer.allocateDirect(raw.size).order(ByteOrder.nativeOrder())
+            for (b in raw) {
+                out.put(((b.toInt() and 0xFF) * (255f / scale) + 0.5f).toInt().coerceIn(0, 255).toByte())
+            }
+            out.position(0)
+            out
+        } else {
+            buffer
+        }
+        return LutConfig(
+            size = n,
+            byteBuffer = normalized,
+            title = "stylefit",
+            configDataType = LutConfig.CONFIG_DATA_TYPE_UINT8,
+        )
     }
 
     /**

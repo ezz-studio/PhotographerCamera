@@ -152,6 +152,23 @@ data class Display(
     @SerialName("icon") val icon: String = "",
 )
 
+/**
+ * color_lut payload — stylefit v3 烘焙的 33³ uint8 3D LUT（base64 内嵌）。
+ * 编码约定见 tools/stylefit/lut3d.py to_payload/from_payload：
+ *   base64 → uint8 → /scale → reshape(n,n,n,3)，索引 lut[iz,iy,ix]（R 最快），
+ *   与 GL texImage3D 的 x(R) 最快布局一致。source/strength 仅作元数据。
+ */
+@Serializable
+data class ColorLutPayload(
+    @SerialName("size") val size: Int = 33,
+    @SerialName("dtype") val dtype: String = "uint8",
+    @SerialName("scale") val scale: Float = 255f,
+    @SerialName("order") val order: String = "r_fastest",
+    @SerialName("data") val data: String = "",
+    @SerialName("source") val source: String = "",
+    @SerialName("strength") val strength: Float = 1.0f,
+)
+
 @Serializable
 data class PhotographerProfile(
     @SerialName("version") val version: Int = 1,
@@ -180,6 +197,11 @@ data class PhotographerProfile(
     @SerialName("vignette") val vignette: Vignette = Vignette(),
     @SerialName("sharpen") val sharpen: Sharpen = Sharpen(),
     @SerialName("film_curve") val filmCurve: FilmCurve = FilmCurve(),
+    // stylefit v3：color_layer=="lut" 时 color_lut 是唯一风格色阶段（桌面
+    // profile_renderer.render 同款语义——LUT 存在时旁路整条参数化色链）。
+    @SerialName("color_layer") val colorLayer: String? = null,
+    @SerialName("color_adaptive") val colorAdaptive: Boolean? = null,
+    @SerialName("color_lut") val colorLut: ColorLutPayload? = null,
 ) {
     companion object {
         val IDENTITY = PhotographerProfile()
