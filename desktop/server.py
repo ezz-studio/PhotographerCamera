@@ -109,10 +109,14 @@ def _purge_old_uploads(max_age_hours: int = 24) -> int:
 
 
 def _schedule_upload_gc(interval_hours: int = 24, max_age_hours: int = 24) -> None:
-    """启动守护线程，每 interval_hours 重复清理一次上传预览图。"""
+    """启动守护线程，每 interval_hours 重复清理一次上传预览图（无需停服）。"""
     def _tick() -> None:
-        _purge_old_uploads(max_age_hours)
-        threading.Timer(interval_hours * 3600, _tick).start()
+        try:
+            _purge_old_uploads(max_age_hours)
+        except Exception as exc:  # 单次异常不应打断后续定时清理
+            print(f"[gc] purge error (ignored): {exc}")
+        finally:
+            threading.Timer(interval_hours * 3600, _tick).start()
 
     t = threading.Timer(interval_hours * 3600, _tick)
     t.daemon = True
