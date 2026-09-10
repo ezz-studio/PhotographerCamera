@@ -83,6 +83,42 @@ def _safe_join(base: str, rel: str) -> str:
     return target
 
 
+def _purge_old_uploads(max_age_hours: int = 24) -> int:
+    """删除 studio_session/uploads 中超过 N 小时的预览/参考图。
+
+    这些图是用户编辑/预览 profile 时通过 /api/upload 上传的临时预览图，
+    属于易失数据；每天清理可避免公网部署时用户照片长期滞留服务器。
+    不影响用户导入的 JSON（imports/）与已保存 profile（profiles/studio）。
+    """
+    base = os.path.join(STATE["session"], "uploads")
+    if not os.path.isdir(base):
+        return 0
+    cutoff = time.time() - max_age_hours * 3600
+    n = 0
+    for fn in os.listdir(base):
+        fp = os.path.join(base, fn)
+        try:
+            if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                os.remove(fp)
+                n += 1
+        except OSError:
+            pass
+    if n:
+        print(f"[gc] purged {n} upload image(s) older than {max_age_hours}h")
+    return n
+
+
+def _schedule_upload_gc(interval_hours: int = 24, max_age_hours: int = 24) -> None:
+    """启动守护线程，每 interval_hours 重复清理一次上传预览图。"""
+    def _tick() -> None:
+        _purge_old_uploads(max_age_hours)
+        threading.Timer(interval_hours * 3600, _tick).start()
+
+    t = threading.Timer(interval_hours * 3600, _tick)
+    t.daemon = True
+    t.start()
+
+
 def _img_to_jpeg(arr_u8: np.ndarray, quality: int = 92) -> bytes:
     buf = io.BytesIO()
     Image.fromarray(arr_u8, "RGB").save(buf, format="JPEG", quality=quality)
@@ -694,6 +730,9 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     os.makedirs(STATE["session"], exist_ok=True)
+    # 启动即清理一次过期上传预览图，并启动每日定时清理（保护公网部署隐私）
+    _purge_old_uploads(24)
+    _schedule_upload_gc(24, 24)
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"
     print(f"PhotographerCamera Studio running at {url}")
