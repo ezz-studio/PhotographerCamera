@@ -24,6 +24,64 @@ def _clip(a):
     return np.clip(a, 0.0, 1.0)
 
 
+# ---------------------------------------------------------------- 3D LUT layer
+_LUT_CACHE: dict = {}
+
+
+def _decode_lut(payload):
+    """Decode an embedded colour LUT payload (cached — base64 is not free)."""
+    if not isinstance(payload, dict) or not payload.get("data"):
+        return None
+    key = (payload.get("size"), payload.get("dtype"),
+           len(payload.get("data", "")), payload.get("data", "")[:96])
+    hit = _LUT_CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        from stylefit import lut3d
+        lut = lut3d.from_payload(payload)
+    except Exception:
+        return None
+    if len(_LUT_CACHE) > 8:
+        _LUT_CACHE.clear()
+    _LUT_CACHE[key] = lut
+    return lut
+
+
+def profile_lut(profile, rgb=None):
+    """Resolve the colour LUT for a profile (adaptive bank when present).
+
+    Returns None when the profile carries no LUT — the caller then falls back
+    to the parametric colour chain.
+    """
+    prof = profile or {}
+    if prof.get("color_layer") != "lut":
+        return None
+    bank = prof.get("color_lut_bank")
+    router = prof.get("color_lut_router")
+    avg = _decode_lut(prof.get("color_lut"))
+    if bank and router and rgb is not None:
+        try:
+            from stylefit import adaptive as A
+            luts = [x for x in (_decode_lut(b) for b in bank) if x is not None]
+            if len(luts) == len(bank) and len(luts) > 1:
+                lut, _w = A.resolve_lut(rgb, luts, router.get("centers", []),
+                                        router.get("sigma", 0.35),
+                                        router.get("prior", 0.15),
+                                        average_lut=avg)
+                return lut
+        except Exception:
+            pass
+    return avg
+
+
+def apply_color_lut(rgb, lut):
+    if lut is None:
+        return rgb
+    from stylefit import lut3d
+    return lut3d.sample(lut, rgb)
+
+
 TONE_LUT_SIZE = 1024  # canonical 1D LUT width shared by CPU / GLSL / Kotlin loader
 
 
@@ -429,19 +487,28 @@ def render(rgb: np.ndarray, profile: dict, seed: int | None = 0) -> np.ndarray:
     p = profile or {}
     # -- Stage 0: optical lens simulation (before any stylization) --
     rgb = apply_lens(rgb, p.get("lens", {}))
-    rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
-    wb = p.get("white_balance", {})
-    rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
-    rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
-    hr = p.get("highlight_rolloff", {})
-    rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
-    sh = p.get("shadow", {})
-    rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
-                       sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
-    fc = p.get("film_curve", {})
-    rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
-    rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
-    rgb = apply_hsl(rgb, p.get("hsl", {}))
+    # -- Colour layer: a learned 3D LUT replaces the whole parametric chain.
+    # The parametric chain is kept as the fallback for profiles (and App
+    # builds) that carry no LUT; using both would double-grade the image.
+    lut = profile_lut(p, rgb)
+    if lut is not None:
+        rgb = apply_color_lut(rgb, lut)
+        fc = p.get("film_curve", {})
+        rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    else:
+        rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
+        wb = p.get("white_balance", {})
+        rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
+        rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
+        hr = p.get("highlight_rolloff", {})
+        rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
+        sh = p.get("shadow", {})
+        rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
+                           sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+        fc = p.get("film_curve", {})
+        rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+        rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
+        rgb = apply_hsl(rgb, p.get("hsl", {}))
     vg = p.get("vignette", {})
     rgb = apply_vignette(rgb, vg.get("amount", 0.0), vg.get("radius", 1.0), vg.get("feather", 0.5), vg.get("center", [0.5, 0.5]))
     bl = p.get("bloom", {})

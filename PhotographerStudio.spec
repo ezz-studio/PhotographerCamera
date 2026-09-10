@@ -13,6 +13,10 @@ _hidden = [
 ]
 _hidden += collect_submodules('scipy.ndimage')
 _hidden += collect_submodules('scipy.optimize')
+# stylefit v3 由 build_profile 在函数内懒加载（from stylefit import fit），
+# 静态图抓不到，必须显式收集，否则冻结 exe 跑 generate 时 ModuleNotFoundError。
+_hidden += ['stylefit']
+_hidden += collect_submodules('stylefit')
 
 a = Analysis(
     ['desktop/server.py'],

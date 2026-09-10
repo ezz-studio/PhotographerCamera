@@ -54,11 +54,112 @@ def load_images(root, limit=None, size=256):
 
 
 def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: str = "dataset/analysis",
-          validation_root: str | None = None) -> dict:
-    os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(analysis_dir, exist_ok=True)
+          validation_root: str | None = None, strength: float = 0.8,
+          progress=None) -> dict:
+    """Fit a profile with the stylefit v3 (unpaired distribution-transfer) pipeline.
 
-    print("[1/5] Style analysis (Phase 3-13) ...")
+    Roles (per the project brief):
+        images_root     = 已调色参考片（风格目标分布 T —— 摄影师交付的成片）
+        validation_root = 同一相机/未调色的普通照片（输入分布 S —— 算法的基准侧）
+
+    风格 = T ÷ S。缺少未调色这一侧就只剩一个分布，只能用假设去猜，
+    与「算法禁止猜测」的原则冲突，因此未提供普通照片目录时直接报错。
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    def say(msg):
+        (progress or (lambda m: print(m, flush=True)))(msg)
+
+    say("[1/4] 扫描参考片 …")
+    from stylefit import fit as sfit
+    from dataset_loader import discover_images as _disc
+
+    refs = _disc(images_root)
+    if len(refs) < 3:
+        raise ValueError(f"参考片不足 3 张（在 {images_root} 只找到 {len(refs)} 张）")
+    plains = None
+    if validation_root and os.path.isdir(validation_root):
+        plains = _disc(validation_root)
+        say(f"  参考片 {len(refs)} 张 | 未调色普通照片 {len(plains)} 张（输入分布基准 + 验证）")
+    else:
+        raise ValueError(
+            "未提供「未调色普通照片」目录（validation_root）。\n"
+            "风格 = 已调色分布 ÷ 未调色分布：未调色这一侧是测量的基准，不是可选项。\n"
+            "请在 Studio 中填写「普通照片目录（验证集·未调色）」，或在命令行传入 validation_root。")
+
+    say("[2/4] 学习分布迁移 3D LUT（CIELAB：亮度分位 + 色度最优传输 + 分色相/亮度残差）…")
+    # sfit 是 `from stylefit import fit` 导入的函数（不是模块），直接调用
+    profile, report = sfit(refs, name=name, plain_paths=plains,
+                           strength=strength, progress=lambda m: say("  " + m))
+
+    say("[3/4] 写入结果 …")
+    with open(os.path.join(out_dir, "profile_final.json"), "w", encoding="utf-8") as f:
+        json.dump(profile, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(out_dir, "stylefit_report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    # ---- compatibility view: the Studio report panel and the regression
+    # baseline read these keys from validation_report.json
+    cf = report.get("content_fidelity") or {}
+    hold = report.get("holdout") or {}
+    cv = report.get("cv") or {}
+    status = "validated" if cf.get("verdict", "ok") == "ok" else "pending"
+    profile["validation_status"] = status
+
+    # ---- intuitive style metrics (honest K-fold when available) ----
+    sd_after = cv.get("style_distance_after", report.get("style_distance"))
+    sd_before = cv.get("style_distance_before", report.get("style_distance_before"))
+    improvement = cv.get("style_improvement", report.get("style_improvement"))
+    similarity = cv.get("style_similarity")
+    if similarity is None and sd_after is not None:
+        similarity = round(max(0.0, 100.0 - float(sd_after)), 2)
+    gap_reduction = None
+    if sd_before and sd_after is not None and sd_before > 0:
+        gap_reduction = round((1.0 - float(sd_after) / float(sd_before)) * 100.0, 1)
+
+    val_report = {
+        "schema": "validation_report/v2",
+        "validation_mode": "stylefit",
+        "validation_status": status,
+        "honest_cv": bool(cv),
+        # content fidelity — how much of the ORIGINAL photo survives grading
+        "overall_test_loss": cf.get("deltaE_mean", hold.get("deltaE_mean")),
+        "n_test": cf.get("n_images", hold.get("n_images", 0)),
+        "loss_threshold": 30.0,
+        # ---- intuitive style-transfer metrics ----
+        # 与源数据集的风格近似度（%）：应用风格后，色彩分布与摄影师成片的接近程度
+        "style_similarity": similarity,
+        # 与源数据集的差距：style_distance 即"归一化平均 |Δ|"，越小越接近源
+        "style_distance_after": sd_after,
+        "style_distance_before": sd_before,
+        "style_improvement": improvement,           # 应用前差距 / 应用后差距
+        "style_gap_reduction_pct": gap_reduction,  # 相比未调色，差距缩小 %
+        "components": {k: v for k, v in (report.get("style_match") or {}).items()},
+        # 3-column per-key table: 输入分布 S / 应用后 / 目标 T
+        "plain_stats": report.get("plain_stats"),
+        "rendered_stats": report.get("rendered_stats"),
+        "reference_stats": report.get("reference_stats", {}),
+        "dataset": report.get("dataset", {}),
+        "content_fidelity": cf,
+        "holdout": hold,
+        "cv": cv,
+        "lut": report.get("lut", {}),
+    }
+    with open(os.path.join(out_dir, "validation_report.json"), "w", encoding="utf-8") as f:
+        json.dump(val_report, f, indent=2, ensure_ascii=False)
+    with open(os.path.join(out_dir, "regression_baseline.json"), "w", encoding="utf-8") as f:
+        json.dump({"overall_test_loss": val_report["overall_test_loss"],
+                   "components": val_report["components"]}, f, indent=2, ensure_ascii=False)
+
+    say("[4/4] 完成")
+    say(f"  ΔE(应用到普通照片) = {cf.get('deltaE_mean')} | 判定 {cf.get('verdict')}")
+    say(f"  留出集重建 ΔE = {hold.get('deltaE_mean')}")
+    say(f"  输出目录: {out_dir}")
+    return profile
+
+
+def build_legacy(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: str = "dataset/analysis",
+                 validation_root: str | None = None) -> dict:
     style_analyzer.run(images_root, out_dir=analysis_dir)
 
     print("[2/5] AI profile generation (Phase 15) ...")
