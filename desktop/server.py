@@ -478,6 +478,46 @@ class Handler(BaseHTTPRequestHandler):
                 icon_path = _save_icon(os.path.splitext(fp)[0], body.get("icon"))
                 return self._json({"path": fp, "icon_path": icon_path})
 
+            if p == "/api/import_profile":
+                # Import a previously exported profile JSON (selected via the
+                # browser file picker). The browser cannot reveal the original
+                # file's absolute path, so we persist a copy under
+                # studio_session/imports/<name>.json and point STATE at it — that
+                # way "保存 Profile" writes back to the same imported file, letting
+                # the user genuinely edit an exported profile end-to-end.
+                raw = body.get("json")
+                prof = body.get("profile")
+                if isinstance(raw, str):
+                    try:
+                        prof = json.loads(raw)
+                    except Exception as exc:
+                        return self._json({"error": f"JSON 解析失败: {exc}"}, 400)
+                # Fallback: the whole POST body may itself be the profile object
+                # (e.g. a bare exported profile posted directly, no envelope).
+                if prof is None and isinstance(body, dict):
+                    prof = body
+                if not isinstance(prof, dict):
+                    return self._json({"error": "无效的 profile JSON（顶层应为对象）"}, 400)
+                ok, errors = S.validate_profile(prof)
+                prof = S.safe_clamp(prof)
+                src_name = str(body.get("name") or
+                               os.path.splitext(str(prof.get("name") or "imported"))[0] or
+                               "imported")
+                safe = re.sub(r"[\\/:*?\"<>|]+", "_", src_name) or "imported"
+                import_dir = _safe_join(STATE["session"], "imports")
+                os.makedirs(import_dir, exist_ok=True)
+                fp = os.path.join(import_dir, f"{safe}.json")
+                with open(fp, "w", encoding="utf-8") as f:
+                    json.dump(prof, f, indent=2, ensure_ascii=False)
+                with _LOCK:
+                    STATE["profile"] = prof
+                    STATE["profile_path"] = fp
+                return self._json({
+                    "profile": prof,
+                    "path": fp,
+                    "warnings": errors if not ok else [],
+                })
+
             if p == "/api/export_android":
                 prof = body.get("profile")
                 if not prof:

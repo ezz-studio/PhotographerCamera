@@ -109,9 +109,15 @@
 
   <!-- ───────────────────────── right: controls ───────────────────────── -->
   <aside class="panel right">
+    <div class="import-box">
+      <button id="btnImport" class="ghost wide">导入 Profile (JSON)</button>
+      <input id="importInput" type="file" accept=".json,application/json" hidden>
+      <div class="hint">选择一个已导出的 profile .json，载入后即可微调参数并重新保存。</div>
+    </div>
+
     <h2>风格参数</h2>
     <div id="ctrlBox" class="ctrl-box">
-      <div class="hint">尚未载入风格。可先生成，或从工程载入已有 profile。</div>
+      <div class="hint">尚未载入风格。可先生成，或点击上方「导入 Profile」载入已导出的文件。</div>
     </div>
 
     <h2>验证与导出</h2>

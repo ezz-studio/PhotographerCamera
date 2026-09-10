@@ -8,6 +8,7 @@ const state = {
   current: null,
   profile: null,
   baseline: null,    // as-generated profile, for "reset"
+  importedPath: null, // when set, saveProfile writes back to the imported file
   controls: [],
   report: null,
   mode: "wipe",
@@ -507,34 +508,87 @@ function renderReport() {
   }
   const status = v.validation_status || (state.profile?.validation_status) || "unknown";
   const badgeCls = status === "validated" ? "ok" : status === "pending" ? "pend" : "err";
-  const loss = v.overall_test_loss;
   const ds = v.dataset || {};
+  const cf = v.content_fidelity || {};
+
+  // validation-mode label — was lumping the new stylefit path into the OLD
+  // biased "reference-holdout" bucket; give it its own honest label.
+  const modeLabel = v.validation_mode === "ungraded-photos"
+    ? "未调色普通照片（正确）"
+    : v.validation_mode === "stylefit"
+      ? (v.honest_cv ? "风格分布迁移 · 未调色 K 折留出验证" : "风格分布迁移（同集验证）")
+      : "参考片留出（旧·偏差偏大）";
+
+  // ---- intuitive style metrics ----
+  const sim = (typeof v.style_similarity === "number") ? v.style_similarity : null;
+  const sdBefore = v.style_distance_before;
+  const sdAfter = v.style_distance_after;
+  const imp = v.style_improvement;
+  const gapRed = v.style_gap_reduction_pct;
+  const simCls = sim == null ? "" : (sim >= 70 ? "ok" : "warn");
+
   let html =
     `<div class="rep-row"><span class="k">验证状态</span>` +
     `<span class="badge ${badgeCls}">${status}</span></div>` +
+    `<div class="rep-row"><span class="k">验证模式</span><span class="v">${modeLabel}</span></div>` +
     `<div class="rep-row"><span class="k">载入照片</span><span class="v">` +
     `${ds.loaded ?? "-"}${ds.discovered != null ? " / 发现 " + ds.discovered : ""}</span></div>` +
     `<div class="rep-row"><span class="k">训练照片（参与优化）</span>` +
-    `<span class="v">${ds.optimize_images ?? "-"}</span></div>` +
+    `<span class="v">${ds.optimize_images ?? ds.plain_fit_used ?? "-"}</span></div>` +
     `<div class="rep-row"><span class="k">对照集（留出，不参与拟合）</span>` +
-    `<span class="v">${v.n_test ?? ds.test ?? "-"}</span></div>` +
-    `<div class="rep-row"><span class="k">验证模式</span>` +
-    `<span class="v">${v.validation_mode === "ungraded-photos" ? "未调色普通照片（正确）" : "参考片留出（旧·偏差偏大）"}</span></div>` +
-    `<div class="rep-row"><span class="k">总体损失</span><span class="v">` +
-    `${typeof loss === "number" ? loss.toFixed(5) : "-"}</span></div>` +
-    `<div class="rep-row"><span class="k">阈值</span><span class="v">${v.loss_threshold ?? 1.0}</span></div>`;
+    `<span class="v">${v.n_test ?? ds.test ?? ds.plain_eval ?? "-"}</span></div>`;
 
-  const comps = v.components || {};
-  const entries = Object.entries(comps);
-  if (entries.length) {
-    const max = Math.max(...entries.map(([, x]) => Math.abs(x) || 0), 1e-6);
-    html += '<div class="comp">';
-    entries.forEach(([k, x]) => {
-      html +=
-        `<div class="comp-row"><span>${k}</span><span>${(+x).toFixed(4)}</span></div>` +
-        `<div class="bar"><i style="width:${Math.min(100, (Math.abs(x) / max) * 100)}%"></i></div>`;
+  // ---- headline metric cards ----
+  html += '<div class="metric-cards">';
+  html +=
+    `<div class="metric"><div class="metric-val ${simCls}">${sim == null ? "-" : sim.toFixed(1) + "%"}</div>` +
+    `<div class="metric-label">与源数据集的风格近似度</div>` +
+    `<div class="metric-sub">应用风格后与摄影师成片的色彩分布相似度</div></div>`;
+  const dei = (typeof cf.deltaE_mean === "number") ? cf.deltaE_mean.toFixed(2) : "-";
+  const struct = (typeof cf.structure_correlation === "number") ? cf.structure_correlation.toFixed(3) : "-";
+  html +=
+    `<div class="metric"><div class="metric-val ${simCls}">${dei}</div>` +
+    `<div class="metric-label">内容保真 ΔE</div>` +
+    `<div class="metric-sub">结构相关 ${struct} · ${cf.verdict ?? "-"}</div></div>`;
+  html += "</div>";
+
+  // ---- gap-to-source line ----
+  if (sdBefore != null || sdAfter != null) {
+    const bStr = (typeof sdBefore === "number") ? sdBefore.toFixed(2) : "-";
+    const aStr = (typeof sdAfter === "number") ? sdAfter.toFixed(2) : "-";
+    let delta = "";
+    if (gapRed != null) {
+      const up = gapRed >= 0;
+      delta = `<span class="g-delta ${up ? "up" : "down"}">${up ? "↓ 差距缩小 " : "↑ 差距扩大 "}${Math.abs(gapRed).toFixed(1)}%</span>`;
+    } else if (imp != null) {
+      delta = `<span class="g-delta up">改善 ${imp.toFixed(2)}×</span>`;
+    }
+    html +=
+      `<div class="gap-line"><span class="g-k">与源数据集的差距</span>` +
+      `<span class="g-before">${bStr}</span>` +
+      `<span class="g-arrow">→</span>` +
+      `<span class="g-after">${aStr}</span>${delta}</div>` +
+      `<div class="hint">差距 = 归一化平均 |Δ|（0=完全一致，越小越接近源）。图中 ${v.honest_cv ? "K 折留出" : "同集"} 验证口径。</div>`;
+  }
+
+  // ---- collapsible per-key table: 输入 / 应用后 / 目标 ----
+  const ref = v.reference_stats || {};
+  const before = v.plain_stats || {};
+  const after = v.rendered_stats || {};
+  const keys = Object.keys(ref);
+  if (keys.length) {
+    html += `<div class="section-title" onclick="this.classList.toggle('open');` +
+            `document.getElementById('statTbl').style.display=` +
+            `(this.classList.contains('open')?'table':'none')">逐统计量对照（输入 / 应用后 / 目标）</div>`;
+    html += '<table class="stat-table" id="statTbl" style="display:none"><thead><tr>' +
+            '<th>统计量</th><th>输入(未调色)</th><th>应用后</th><th>目标(源)</th></tr></thead><tbody>';
+    keys.forEach((k) => {
+      const b = before[k], a = after[k], r = ref[k];
+      const f = (x) => (typeof x === "number" ? x.toFixed(3) : "-");
+      html += `<tr><td class="k">${k}</td><td class="before">${f(b)}</td>` +
+              `<td class="after">${f(a)}</td><td class="target">${f(r)}</td></tr>`;
     });
-    html += "</div>";
+    html += "</tbody></table>";
   }
   box.innerHTML = html;
 }
@@ -653,6 +707,46 @@ async function tryResumeJob() {
   }
 }
 
+/* ─────────────────────────── import ─────────────────────────── */
+
+// Load a previously exported profile JSON back into the editor for editing.
+// The browser cannot expose the original file's absolute path, so we ship the
+// raw text to /api/import_profile; the server stores a copy under
+// studio_session/imports/ and remembers that path (state.importedPath) so a
+// later "保存 Profile" overwrites the imported file instead of a fresh default.
+async function importProfile(file) {
+  if (!file) return;
+  setStatus("读取 JSON…", "busy");
+  const text = await file.text();
+  const name = file.name.replace(/\.json$/i, "");
+  setStatus("导入 Profile…", "busy");
+  try {
+    const r = await api("/api/import_profile", {
+      method: "POST",
+      body: JSON.stringify({ json: text, name }),
+    });
+    state.profile = r.profile;
+    state.baseline = JSON.parse(JSON.stringify(r.profile));
+    state.report = null;
+    state.importedPath = r.path;
+    const d = r.profile.display || {};
+    $("#profileName").value = d.name || r.profile.name || name || "My Look";
+    $("#profileIntro").value = d.intro || "";
+    renderControls();
+    renderReport();
+    setStep(3);
+    if (r.warnings && r.warnings.length) {
+      console.warn("profile 校验告警:", r.warnings);
+      setStatus(`已导入（${r.warnings.length} 项告警，已自动校正）`, "warn");
+    } else {
+      setStatus("已导入 " + (r.path || ""), "ok");
+    }
+    if (state.current) refreshPreview();
+  } catch (e) {
+    setStatus("导入失败: " + e.message, "err");
+  }
+}
+
 /* ─────────────────────────── export ─────────────────────────── */
 
 // Style name as entered by the user. Keep CJK characters (the App shows the
@@ -722,7 +816,9 @@ async function saveProfile() {
   const name = safeName();
   const payload = {
     profile: { ...state.profile },
-    path: `profiles/studio/${name}.json`,
+    // When the profile was imported from a file, write back to that same file
+    // (the user's stated goal: edit an already-exported JSON in place).
+    path: state.importedPath || `profiles/studio/${name}.json`,
   };
   const d = collectDisplay();
   if (d) payload.profile.display = d;
@@ -795,6 +891,13 @@ async function init() {
   $("#btnPickIcon").onclick = () => $("#iconInput").click();
   $("#iconInput").onchange = (e) => {
     pickIcon(e.target.files && e.target.files[0]);
+    e.target.value = "";
+  };
+
+  $("#btnImport").onclick = () => $("#importInput").click();
+  $("#importInput").onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    importProfile(f);
     e.target.value = "";
   };
 
