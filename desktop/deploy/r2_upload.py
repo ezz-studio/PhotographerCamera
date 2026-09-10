@@ -38,7 +38,7 @@ def _hmac(key: bytes, msg: str) -> bytes:
 
 
 def presign(endpoint, ak, sk, bucket, method, key, expires):
-    """返回 method 对应对象的预签名 URL（S3 query auth）。"""
+    """返回 method 对应对象的预签名 URL（S3 query auth，host-only 签名）。"""
     host = urllib.parse.urlparse(endpoint).netloc
     region, service = "auto", "s3"
     now = datetime.now(timezone.utc)
@@ -86,22 +86,36 @@ def main():
     ap.add_argument("--file", required=True, help="本地待上传文件")
     ap.add_argument("--key", required=True, help="R2 对象键，例如 studio/foo.tar.gz")
     ap.add_argument("--get-expires", type=int, default=GET_EXPIRES)
+    ap.add_argument("--public", action="store_true",
+                    help="设为公开可读（PUT 加 x-amz-acl: public-read，返回无签名的公开 URL；"
+                         "需 bucket 已开启 public access）")
     args = ap.parse_args()
 
     if not os.path.isfile(args.file):
         raise SystemExit(f"file not found: {args.file}")
     endpoint, ak, sk, bucket = load_creds()
 
+    # 公开读依赖 R2 bucket 级 public access（控制台对 studio/ 前缀开启），
+    # PUT 与普通上传完全相同，无需 per-object ACL header（R2 预签名 PUT 设 ACL 会 SignDoesNotMatch）。
     put_url = presign(endpoint, ak, sk, bucket, "PUT", args.key, PUT_EXPIRES)
-    print(f"==> PUT {args.key} -> {endpoint}/{bucket}/{args.key}", file=sys.stderr)
+    put_args = ["curl", "-sS", "-T", args.file, "-H", "Expect:"]
+    print(f"==> PUT {args.key} -> {endpoint}/{bucket}/{args.key}"
+          + (" (bucket public mode)" if args.public else ""), file=sys.stderr)
     # 不加 -H "Expect:" 会在 100-continue 下只传几 MB 假成功
-    subprocess.run(["curl", "-sS", "-T", args.file, "-H", "Expect:", put_url], check=True)
+    subprocess.run(put_args + [put_url], check=True)
 
-    get_url = presign(endpoint, ak, sk, bucket, "GET", args.key, args.get_expires)
-    sha = sha256_file(args.file)
-    print(f"sha256={sha}", file=sys.stderr)
-    # 仅把 GET URL 打到 stdout，方便被 deploy.sh $(...) 捕获
-    print(get_url)
+    if args.public:
+        # 公开可读：返回无签名的公开 URL（前提：bucket 已开启 public access）
+        public_url = f"{endpoint}/{bucket}/{args.key}"
+        sha = sha256_file(args.file)
+        print(f"sha256={sha}", file=sys.stderr)
+        print(public_url)
+    else:
+        get_url = presign(endpoint, ak, sk, bucket, "GET", args.key, args.get_expires)
+        sha = sha256_file(args.file)
+        print(f"sha256={sha}", file=sys.stderr)
+        # 仅把 GET URL 打到 stdout，方便被 deploy.sh $(...) 捕获
+        print(get_url)
 
 
 if __name__ == "__main__":
