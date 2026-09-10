@@ -19,10 +19,14 @@ REMOTE_DIR="/home/admin/photographer-studio"
 PORT="${PORT:-8765}"
 # =========================================
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"       # 仓库根 = PhotographerCamera/
+# 仓库根（POSIX）。bash 自身能理解 /c/...，但原生 Windows python.exe 不能，
+# 因此凡是要传给 python.exe 的文件路径，统一用 wpath() 转成 C:/... 形式。
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 DEPLOY="$REPO/desktop/deploy"
 
-# python 探测（Windows 开发机优先用 venv 里的）
+wpath() { cygpath -w "$1"; }
+
+# python 探测（Windows 开发机优先用 venv 里的原生 python.exe）
 if [ -x "$REPO/.venv/Scripts/python.exe" ]; then PY="$REPO/.venv/Scripts/python.exe"
 elif command -v python3 >/dev/null 2>&1; then PY=python3
 else PY=python; fi
@@ -40,7 +44,7 @@ echo "    size=$(du -h "$TARBALL" | cut -f1)  sha256=$SHA"
 
 # 2) 上传部署包（公开可读，长期固定地址）
 BUNDLE_KEY="studio/photographer-studio-$TAG.tar.gz"
-"$PY" "$DEPLOY/r2_upload.py" --file "$TARBALL" --key "$BUNDLE_KEY" --public >/dev/null
+"$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$TARBALL")" --key "$BUNDLE_KEY" --public >/dev/null
 BUNDLE_URL="$R2_PUBLIC_BASE/$BUNDLE_KEY"
 
 # 3) 生成版本清单并上传（公开，充当发布开关）
@@ -54,11 +58,11 @@ cat > "$VERSION_JSON" <<EOF
   "notes": "studio deploy $TAG"
 }
 EOF
-"$PY" "$DEPLOY/r2_upload.py" --file "$VERSION_JSON" --key "studio/studio_version.json" --public >/dev/null
+"$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$VERSION_JSON")" --key "studio/studio_version.json" --public >/dev/null
 VER_URL="$R2_PUBLIC_BASE/studio/studio_version.json"
 
 # 4) 上传安装脚本（公开，固定地址 install.sh）
-"$PY" "$DEPLOY/r2_upload.py" --file "$DEPLOY/server_install.sh" --key "studio/install.sh" --public >/dev/null
+"$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$DEPLOY/server_install.sh")" --key "studio/install.sh" --public >/dev/null
 INSTALL_URL="$R2_PUBLIC_BASE/studio/install.sh"
 
 rm -f "$TARBALL" "$VERSION_JSON"
