@@ -13,6 +13,9 @@ pillow-heif>=0.15
 opencv-python-headless>=4.8
 scikit-image>=0.21
 
+# P1 — stylefit v3 分布迁移（build_profile/profile_renderer 函数内懒加载，必显式列出）
+scipy>=1.10
+
 # P2 — optional AI Profile Generator
 # torch>=2.0
 # (LLM API access configured at runtime, no package needed)

@@ -1,0 +1,16 @@
+[Unit]
+Description=PhotographerCamera Studio (JSON profile editor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/photographer-studio
+ExecStart=/home/admin/photographer-studio/venv/bin/python /home/admin/photographer-studio/desktop/server.py --host 127.0.0.1 --port 8765 --no-browser
+Restart=on-failure
+RestartSec=3
+User=admin
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

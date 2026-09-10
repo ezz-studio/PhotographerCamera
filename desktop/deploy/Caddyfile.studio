@@ -1,0 +1,27 @@
+# PhotographerCamera Studio 反向代理配置 —— 仅用于 json.tybtool.top
+# 与 app.tybtool.top（Cloudflare R2 静态桶，托管 APK）完全独立，互不影响。
+#
+# 用法：
+#   1) 安装 Caddy：  sudo apt install -y caddy   （或 https://caddyserver.com/docs/install）
+#   2) 生成访问密码哈希：  caddy hash-password '你的密码'   → 把输出填到下面的 <HASH>
+#   3) 准备 Cloudflare Origin CA 证书（CF 后台 → SSL/TLS → 源服务器证书，下载 origin.pem + origin.key）
+#      放到 /etc/caddy/origin.pem 与 /etc/caddy/origin.key
+#   4) 把本文件内容写入 /etc/caddy/Caddyfile（或 include 进来），然后： sudo systemctl reload caddy
+#
+# Cloudflare 侧：json.tybtool.top 设 A 记录指向服务器 IP，橙色云（代理）开启，
+#   SSL/TLS 模式选 "Full"（因为源站用 Origin CA 证书）。
+
+json.tybtool.top {
+    # 源站 TLS：Cloudflare Origin CA 证书（公开可信任，Cloudflare 到源站之间加密）
+    tls /etc/caddy/origin.pem /etc/caddy/origin.key
+
+    # 单用户访问控制：浏览器会弹密码框，避免公网裸奔被他人滥用
+    basicauth {
+        studio <HASH>   # 用 `caddy hash-password` 生成后替换
+    }
+
+    encode gzip
+
+    # 反代到本机回环的 Studio（setup_remote.sh 已起好）
+    reverse_proxy 127.0.0.1:8765
+}
