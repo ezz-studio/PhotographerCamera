@@ -403,12 +403,6 @@ class Handler(BaseHTTPRequestHandler):
                 # enforce the safe band on load too (e.g. an old profile with
                 # shadow_floor 25.5 shows up already clamped to 16)
                 prof = S.safe_clamp(prof)
-                # LUT profiles: stale params were dead weight under the bypass
-                # semantic — neutralize so old profiles look unchanged and new
-                # tuning starts clean (params now apply AFTER the LUT).
-                _norm = R.neutralize_lut_params(prof)
-                if _norm is not None:
-                    prof = _norm
                 with _LOCK:
                     STATE["profile"] = prof
                     STATE["profile_path"] = fp
@@ -518,13 +512,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
-                # LUT profile: bake tuned params (post-LUT semantic) into the
-                # colour LUT and reset them to identity, so engines that
-                # bypass params for LUT profiles (Android sampler3D) render
-                # exactly what the Studio preview showed.
-                _baked = R.bake_params_into_lut(prof)
-                if _baked is not None:
-                    prof = _baked
                 rel = str(body.get("path") or "profiles/studio/profile_final.json")
                 fp = rel if os.path.isabs(rel) else os.path.join(WORK, rel)
                 os.makedirs(os.path.dirname(fp), exist_ok=True)
@@ -558,9 +545,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "无效的 profile JSON（顶层应为对象）"}, 400)
                 ok, errors = S.validate_profile(prof)
                 prof = S.safe_clamp(prof)
-                _norm = R.neutralize_lut_params(prof)  # see /api/load_profile note
-                if _norm is not None:
-                    prof = _norm
                 src_name = str(body.get("name") or
                                os.path.splitext(str(prof.get("name") or "imported"))[0] or
                                "imported")
@@ -584,9 +568,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
-                _baked = R.bake_params_into_lut(prof)  # keep Android consistent — see /api/save
-                if _baked is not None:
-                    prof = _baked
                 # keep CJK in profile names (App preset name = file name);
                 # strip only Windows-illegal filename characters
                 name = re.sub(r"[\\/:*?\"<>|]+", "_", str(body.get("name") or "studio")) + ".json"
@@ -605,9 +586,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
-                _baked = R.bake_params_into_lut(prof)  # tuned params must land in the .cube too
-                if _baked is not None:
-                    prof = _baked
                 name = re.sub(r'[\\/:*?\"<>|]+', "_", str(body.get("name") or "photographer_look"))
                 out_rel = f"studio_session/luts/{name}_{time.strftime('%Y%m%d_%H%M%S')}.cube"
                 out_path = out_rel if os.path.isabs(out_rel) else os.path.join(WORK, out_rel)
