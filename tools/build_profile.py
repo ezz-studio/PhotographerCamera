@@ -55,6 +55,7 @@ def load_images(root, limit=None, size=256):
 
 def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: str = "dataset/analysis",
           validation_root: str | None = None, strength: float = 0.8,
+          rounds: int | None = None,
           progress=None) -> dict:
     """Fit a profile with the stylefit v3 (unpaired distribution-transfer) pipeline.
 
@@ -89,8 +90,13 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
 
     say("[2/4] 学习分布迁移 3D LUT（CIELAB：亮度分位 + 色度最优传输 + 分色相/亮度残差）…")
     # sfit 是 `from stylefit import fit` 导入的函数（不是模块），直接调用
+    _kw = {} if rounds is None else {"rounds": int(rounds)}
     profile, report = sfit(refs, name=name, plain_paths=plains,
-                           strength=strength, progress=lambda m: say("  " + m))
+                           strength=strength, progress=lambda m: say("  " + m), **_kw)
+    if report.get("iterative"):
+        it = report["iterative"]
+        say(f"  迭代训练：请求 {it.get('rounds_requested')} 轮 / 接受 "
+            f"{it.get('accepted_rounds')} 轮（门控={it.get('gate')}）")
 
     say("[3/4] 写入结果 …")
     with open(os.path.join(out_dir, "profile_final.json"), "w", encoding="utf-8") as f:
@@ -143,6 +149,7 @@ def build(images_root: str, name: str, out_dir: str = "profiles", analysis_dir: 
         "content_fidelity": cf,
         "holdout": hold,
         "cv": cv,
+        "iterative": report.get("iterative"),
         "lut": report.get("lut", {}),
     }
     with open(os.path.join(out_dir, "validation_report.json"), "w", encoding="utf-8") as f:
