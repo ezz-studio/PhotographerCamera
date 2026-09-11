@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="GoknPVjSD6msR2jB4kr93C">
+<head data-page-node-id="Q75KOp14yLzWOLVHeLtFIG">
+<meta charset="utf-8" data-page-node-id="mFuKzBgzg2J9CbqwDkgCY0">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="LdGdPVOv9JqHpeFShGXSRG">
+<title>PhotographerCamera Studio — 本地 JSON 调色台</title>
+<link rel="stylesheet" href="/static/styles.css" data-page-node-id="y6ZmYw2lRc9zT2GrD4BqkA">
+</head>
+<body data-page-node-id="snhwfdSUtC5BSQNg3Nv5Sr">
+
+<header class="topbar" data-page-node-id="WcpYJRglUVpuWLMvpECfp8">
+  <div class="brand" data-page-node-id="3dAQdBDSYICp8ce6iNDcG7">
+    <span class="dot" data-page-node-id="DNGEgixJAQs1GrKrjM5SwA"></span>
+    <b data-page-node-id="Y9i5r7V4BhEpDbZKY7PFHE">PhotographerCamera</b> <span class="sub" data-page-node-id="2gVmXHitqSctQ2O3W67rTk">Studio</span>
+    <span class="mode-tag" data-page-node-id="suochrJ0okYKFzT0UywRNt">本地模式 · 算力与图片均在浏览器内</span>
+  </div>
+  <div class="top-actions" data-page-node-id="KwLA3oxlnV6rXJcLhXHtW9">
+    <span id="status" class="status" data-page-node-id="XLX9r9oEu4hpQT2Xsiuepr">就绪</span>
+  </div>
+</header>
+
+<main class="layout" data-page-node-id="gau7DHH7APoGCjBqpok2c3">
+
+  <!-- ────────────────────────── left: local photos ────────────────────────── -->
+  <aside class="panel left" data-page-node-id="AbgyLCpyNhTQMCo8qMzK67">
+    <h2 data-page-node-id="lbFYrCoJVcRzft5sGTEXPQ">本地照片</h2>
+
+    <div class="field" data-page-node-id="8v90Nm08OfKDaC9VRHPAGg">
+      <div class="row" data-page-node-id="BQgzjnA4By1Bjnt4YGm7dx">
+        <button id="btnPickFolder" class="primary" data-page-node-id="xOZ3nbQAYjn1P72eLIivqq">选择文件夹…</button>
+        <button id="btnPickFiles" class="ghost" data-page-node-id="HaaJbGZtmUGPhIoZ9a6gHG">选择文件…</button>
+      </div>
+      <input id="dirInput" type="file" webkitdirectory directory multiple hidden data-page-node-id="3CWdG7FChdB36e6fCrPojL">
+      <input id="fileInput" type="file" accept="image/*" multiple hidden data-page-node-id="jMBeLD7CLibz4lZJV1a4Kg">
+      <div class="hint" data-page-node-id="QNN0S8fAm9DaJuWJGkoA49">照片仅载入浏览器内存，不上传任何服务器。支持 Mac / Windows 文件夹选择。</div>
+    </div>
+
+    <div id="dropzone" class="dropzone" data-page-node-id="mIU56mPzca3MhILRpAMoVN">
+      <strong data-page-node-id="GsCzB0NtWvsUwaTSi6HeJK">拖拽照片到这里</strong>
+      <span data-page-node-id="5jhaXGivgGziiA2P2K1KVL">或点上方按钮选择</span>
+    </div>
+
+    <div class="list-head" data-page-node-id="XMkYNsysbrZ7i5VhOvPhEz">
+      <span id="imgCount" data-page-node-id="O6EZ5vOwQyelBn2zL8Cgyb">0 张</span>
+      <label class="chk" data-page-node-id="tDT83ger2Ze6YXcdi3g4UR"><input id="selectAll" type="checkbox" checked data-page-node-id="2SzuFGesGvUSCZW12sQppt"> 全选（用于批量渲染）</label>
+    </div>
+
+    <div id="thumbs" class="thumbs" data-page-node-id="ddwQk4TADJkXafd6GtlGlU"></div>
+  </aside>
+
+  <!-- ───────────────────────── center: compare ───────────────────────── -->
+  <section class="panel center" data-page-node-id="SejE7uXFQFLE9TTVKDICEY">
+    <div class="view-head" data-page-node-id="VPV6ERcgjz8ZQRTVgVL0b0">
+      <div class="seg" data-page-node-id="6N0BA1tIEDwLD8cBm37mgC">
+        <button class="seg-btn active" data-mode="wipe" data-page-node-id="QxSaQ2t8OFo6xNmgkGl8jf">对比滑块</button>
+        <button class="seg-btn" data-mode="orig" data-page-node-id="MJi9xu9wCardJn1pjK18h5">原图</button>
+        <button class="seg-btn" data-mode="rend" data-page-node-id="8esZE4JHKHOBBnCLF8OzxX">渲染后</button>
+      </div>
+      <div id="viewName" class="view-name" data-page-node-id="MkHVajSSVG5HisubjDFGpc">—</div>
+    </div>
+
+    <div id="stage" class="stage" data-page-node-id="Hss9AeZC7R9ejLiJEQRVzS">
+      <canvas id="cvsOrig" class="stage-canvas" data-page-node-id="4egk56xHxGUJwBeVBRpAvD"></canvas>
+      <div id="rendWrap" class="rend-wrap" data-page-node-id="78Dkvqhgd03jiEDMQRMOKZ">
+        <canvas id="cvsRend" class="stage-canvas" data-page-node-id="pYsXMBNnrIKQxk0GOPCyBr"></canvas>
+      </div>
+      <div id="wipe" class="wipe" data-page-node-id="uDTgjVjg5kScNBFXbUCNN4"><span class="wipe-knob" data-page-node-id="XkWs766LP4aSVmlDsqTZrL"></span></div>
+      <div class="tag tag-l" data-page-node-id="VzvDDrkSRjsHEgJq0qJHdX">原图</div>
+      <div class="tag tag-r" data-page-node-id="iC8frTYNJWQ5E1QEU8xEnC">渲染后</div>
+      <div id="spinner" class="spinner" hidden data-page-node-id="8p7QKKEokJonzEs3uW4ykD"></div>
+      <div id="empty" class="empty" data-page-node-id="riJugP6LnfXiLxDJfx6Ulz">
+        导入本地照片并载入 Profile 后，这里会显示原图 / 渲染结果对比
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── right: controls ───────────────────────── -->
+  <aside class="panel right" data-page-node-id="GW10qAH7zAJmq1klzLLj6L">
+    <div class="import-box" data-page-node-id="wB2aj58Zz3SFKu1MjYnM4k">
+      <button id="btnImport" class="ghost wide" data-page-node-id="qMRlT2yb16E7aGAQ9VyJ1z">导入 Profile (JSON)</button>
+      <input id="importInput" type="file" accept=".json,application/json" hidden data-page-node-id="wMEJ0KRSnpGBocW3EI9I0z">
+      <div class="hint" data-page-node-id="R0AKb7ul3HkMtY2TNDrd40">选择一个已导出的 profile .json，载入后即可微调参数并重新保存。</div>
+    </div>
+
+    <div class="gen-box" data-page-node-id="A45IZ39YKLEtzHO2bRwFQH">
+      <label data-page-node-id="i9aFXH8QlPj00joM5WZvj1">风格名称（导出显示名）</label>
+      <input id="profileName" type="text" value="My Look" spellcheck="false" data-page-node-id="7CvdcWcaP6BGuSNCG9ybGv">
+      <label data-page-node-id="3JVuV3oRAT1VQuExc6oYAV">滤镜简介（可选）</label>
+      <textarea id="profileIntro" rows="2" spellcheck="false" placeholder="一句话介绍，如：胶片感 · 暖调 · 适合街拍人像"></textarea>
+      <button id="btnNew" class="primary wide" data-page-node-id="7oQzXRfU5ZLB1RQPiTQtde">新建空白 Profile</button>
+    </div>
+
+    <h2 data-page-node-id="CSDCjdG6mTgodx4UhGjcSD">风格参数</h2>
+    <div id="ctrlBox" class="ctrl-box" data-page-node-id="4w5ixXmzV9tWsecvpEJn2Z">
+      <div class="hint" data-page-node-id="XcoZxYEtJ7wdULlOGIRepS">尚未载入 Profile。点击上方「导入 Profile」或「新建空白 Profile」。</div>
+    </div>
+
+    <h2 data-page-node-id="OxYHwRsUPfzwZa11PsK8yo">导出</h2>
+    <div class="export-box" data-page-node-id="sIVXx0KSPvPFivh1Z8Dvo0">
+      <button id="btnSaveProfile" class="primary wide" data-page-node-id="csavDLHnJpCkIXFhgCKtq5">保存 Profile（.json 下载）</button>
+      <button id="btnSave" class="ghost wide" data-page-node-id="SRHmfSHHEgZYlC195fi53t">保存 LUT（.cube，颜色层）</button>
+      <button id="btnBatch" class="ghost wide" data-page-node-id="oHAuSVzbDzDG6dX7cZwain">批量渲染所选照片（PNG）</button>
+      <button id="btnReset" class="ghost wide danger" data-page-node-id="hMlrWqhm9LOTinro3TiS3R">重置为载入值</button>
+    </div>
+    <div class="hint" data-page-node-id="Sjs3oHh01CzbFbos5VQDQe">所有渲染在本地 GPU 完成；导出文件直接在浏览器下载，不经过服务器。</div>
+  </aside>
+</main>
+
+<script src="/static/lut3d.js"></script>
+<script src="/static/gl_lut.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
