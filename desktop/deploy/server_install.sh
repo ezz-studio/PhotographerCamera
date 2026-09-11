@@ -165,6 +165,23 @@ read_pem() {
   fi
 }
 
+# 确保主 Caddyfile 能加载本目录、且不抢占 :80（否则 TLS 站点的 :80 重定向会冲突导致 caddy 启动失败）
+ensure_caddy_import() {
+  local cf=/etc/caddy/Caddyfile
+  [ -f "$cf" ] || { echo "!! 未找到主 Caddyfile，跳过"; return 0; }
+  # Debian 默认欢迎站点块 http://{} 占住 :80，删除它（先备份）
+  if grep -qE '^[[:space:]]*http://[[:space:]]*\{' "$cf"; then
+    $SUDO cp "$cf" "${cf}.bak.$(date +%s)"
+    $SUDO sed -i '/^[[:space:]]*http:\/\/ {/,/^}/d' "$cf"
+    echo "    (已移除默认欢迎站点块，备份 ${cf}.bak.*)"
+  fi
+  # 确保加载本目录（Debian 默认仅认 *.caddyfile；我们写 studio.caddyfile 已匹配，这里兜底）
+  if ! grep -qE '^[[:space:]]*import[[:space:]]+/etc/caddy/Caddyfile\.d' "$cf"; then
+    echo 'import /etc/caddy/Caddyfile.d/*' | $SUDO tee -a "$cf" >/dev/null
+    echo "    (已追加 import /etc/caddy/Caddyfile.d/*)"
+  fi
+}
+
 setup_caddy() {
   if ! command -v caddy >/dev/null 2>&1; then
     echo "!! 未检测到 caddy，跳过公网反代配置。"
@@ -202,6 +219,8 @@ setup_caddy() {
   case "$mode" in 2) mode=2;; *) mode=1;; esac
 
   $SUDO mkdir -p /etc/caddy/Caddyfile.d
+  $SUDO rm -f /etc/caddy/Caddyfile.d/studio.conf   # 清理旧扩展名，避免重复加载
+  ensure_caddy_import
   local use_tls=0
   if [ "$mode" = "1" ]; then
     if read_pem "请输入 SSL 公钥 (origin_certificate.pem，可粘贴或输入文件路径):" \
@@ -217,7 +236,7 @@ setup_caddy() {
   [ "$use_tls" = "1" ] && tls_line="    tls /etc/caddy/origin.pem /etc/caddy/origin.key"
 
   local HASH="$(caddy hash-password "$CADDY_PASSWORD")"
-  $SUDO tee /etc/caddy/Caddyfile.d/studio.conf >/dev/null <<EOF
+  $SUDO tee /etc/caddy/Caddyfile.d/studio.caddyfile >/dev/null <<EOF
 $CF_HOST {
 $tls_line
     basicauth {
