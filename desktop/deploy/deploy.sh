@@ -61,8 +61,9 @@ EOF
 "$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$VERSION_JSON")" --key "studio/studio_version.json" --public >/dev/null
 VER_URL="$R2_PUBLIC_BASE/studio/studio_version.json"
 
-# 4) 上传安装脚本（公开，固定地址 install.sh）
-"$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$DEPLOY/server_install.sh")" --key "studio/install.sh" --public >/dev/null
+# 4) 上传安装脚本（公开，固定地址 install.sh）。no-cache：避免 Cloudflare 边缘缓存旧版，
+#    否则服务器重跑一句指令会装到陈旧 install.sh（曾导致 read_pem 的 path 未初始化报错）。
+"$PY" "$(wpath "$DEPLOY/r2_upload.py")" --file "$(wpath "$DEPLOY/server_install.sh")" --key "studio/install.sh" --public --cache-control "no-cache" >/dev/null
 INSTALL_URL="$R2_PUBLIC_BASE/studio/install.sh"
 
 rm -f "$TARBALL" "$VERSION_JSON"

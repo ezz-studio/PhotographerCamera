@@ -56,6 +56,8 @@ def presign(endpoint, ak, sk, bucket, method, key, expires):
         f"{k}={urllib.parse.quote(v, safe='~')}" for k, v in sorted(q.items())
     )
     canon_uri = f"/{bucket}/{urllib.parse.quote(key, safe='/~')}"
+    # 注意：R2/S3 的规范请求在 CanonicalHeaders 之后、HashedPayload 之前，
+    # 还需要一行 SignedHeaders（host），否则签名不匹配（与 tools/_r2put.py 对齐）。
     canonical_request = (
         method + "\n" + canon_uri + "\n" + canon_query + "\n"
         + f"host:{host}\n" + "\n"
@@ -89,6 +91,10 @@ def main():
     ap.add_argument("--public", action="store_true",
                     help="设为公开可读（PUT 加 x-amz-acl: public-read，返回无签名的公开 URL；"
                          "需 bucket 已开启 public access）")
+    ap.add_argument("--cache-control", default=None,
+                    help="为对象设置 Cache-Control 响应头（作为普通请求头随 PUT 发出，"
+                         "用于设置对象元数据，不参与 SigV4 签名）。例如 'no-cache'，"
+                         "用于 install.sh 等需每次拉取最新的文件，避免 Cloudflare 边缘缓存旧版。")
     args = ap.parse_args()
 
     if not os.path.isfile(args.file):
@@ -97,10 +103,15 @@ def main():
 
     # 公开读依赖 R2 bucket 级 public access（控制台对 studio/ 前缀开启），
     # PUT 与普通上传完全相同，无需 per-object ACL header（R2 预签名 PUT 设 ACL 会 SignDoesNotMatch）。
+    # Cache-Control 作为普通请求头设置对象元数据，不参与签名（host-only 签名保持与历史一致）。
     put_url = presign(endpoint, ak, sk, bucket, "PUT", args.key, PUT_EXPIRES)
     put_args = ["curl", "-sS", "-T", args.file, "-H", "Expect:"]
+    if args.cache_control:
+        put_args += ["-H", f"Cache-Control: {args.cache_control}"]
     print(f"==> PUT {args.key} -> {endpoint}/{bucket}/{args.key}"
-          + (" (bucket public mode)" if args.public else ""), file=sys.stderr)
+          + (" (bucket public mode)" if args.public else "")
+          + (f" [Cache-Control: {args.cache_control}]" if args.cache_control else ""),
+          file=sys.stderr)
     # 不加 -H "Expect:" 会在 100-continue 下只传几 MB 假成功
     subprocess.run(put_args + [put_url], check=True)
 

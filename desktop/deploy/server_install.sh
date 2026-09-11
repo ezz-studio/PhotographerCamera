@@ -136,7 +136,7 @@ done
 # 8) Caddy 反代 + basicauth（交互引导 SSL 证书输入）
 # 读取一个 PEM：支持 (a) 交互粘贴多行内容 (b) 输入 .pem 文件路径 (c) 通过 envval 提供（文件或内联）
 read_pem() {
-  local prompt="$1" outfile="$2" envval="${3:-}" line data path
+  local prompt="$1" outfile="$2" envval="${3:-}" line data path=""
   if [ -n "$envval" ]; then
     if [ -f "$envval" ]; then
       $SUDO cp "$envval" "$outfile"; echo "    (已从环境变量文件复制: $envval)"; return 0
@@ -156,7 +156,7 @@ read_pem() {
       data+="$line"$'\n'
     fi
   done
-  if [ -n "$path" ]; then
+  if [ -n "${path:-}" ]; then
     $SUDO cp "$path" "$outfile"; echo "    (已从文件复制: $path)"
   elif [ -n "$data" ]; then
     printf '%s' "$data" | $SUDO tee "$outfile" >/dev/null; echo "    (已写入 $outfile)"
