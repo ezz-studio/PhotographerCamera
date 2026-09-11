@@ -558,7 +558,7 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                progress: Optional[Callable[[str], None]] = None,
                seed: int = 20240917, max_ref_images: int = 260,
                px_per_ref: int = 8000, px_per_plain: int = 60000,
-               rounds: int = 1,
+               rounds: int = 3,
                **_ignored) -> tuple:
     """Learn the look from two corpora of images (already decoded, 0..1 float).
 
@@ -635,22 +635,22 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
     grain = estimate_grain(small)
     glow = estimate_glow(small)
 
-    # ------------------------------------------------- parametric fallback
-    say("  反解参数层（无 LUT 环境的等效近似）…")
+    # --------------------------------------- inverse-solved diagnostic params
+    # The 3D LUT is the ONLY colour stage of the profile. We still solve the
+    # classic parametric approximation below, but purely as a diagnostic
+    # written to the report — writing it into the profile used to invite
+    # engines that ignore the bypass rule into double-grading (the 2026-09-11
+    # web blowout). Identity params make every engine agree by construction.
+    say("  反解诊断参数（仅写入报告，不进 profile）…")
     curve = _tone_curve_from_model(curve_model)
     wb_t, wb_i = estimate_white_balance(lut)
     bias = estimate_exposure(lut)
     M = estimate_color_matrix(lut)
     hsl = estimate_hsl_from_lut(lut)
 
+    # profile keeps the schema-neutral (identity) parametric defaults from
+    # default_profile(); only spatial layers are estimated below.
     profile = default_profile(name)
-    profile["exposure"]["bias"] = bias
-    profile["white_balance"]["temperature_bias"] = wb_t
-    profile["white_balance"]["tint_bias"] = wb_i
-    profile["color_matrix"]["matrix_3x3"] = M
-    profile["tone_curve"]["points"] = curve
-    for k, v in hsl.items():
-        profile["hsl"][k] = v
     profile["vignette"]["amount"] = round(float(vig), 4)
     profile["grain"]["amount"] = round(float(grain), 4)
     profile["grain"]["size"] = 1.0
