@@ -515,28 +515,30 @@ def render(rgb: np.ndarray, profile: dict, seed: int | None = 0) -> np.ndarray:
     p = profile or {}
     # -- Stage 0: optical lens simulation (before any stylization) --
     rgb = apply_lens(rgb, p.get("lens", {}))
-    # -- Colour layer: a learned 3D LUT replaces the whole parametric chain.
-    # The parametric chain is kept as the fallback for profiles (and App
-    # builds) that carry no LUT; using both would double-grade the image.
+    # -- Colour layer: a learned 3D LUT carries the trained look; the
+    # parametric chain runs AFTER it as the post-LUT tuning layer (training
+    # writes identity params, so a fresh profile is exactly LUT -> film and
+    # the Studio sliders act as live fine-tuning). Profiles without a LUT
+    # fall back to the parametric chain alone.
     lut = profile_lut(p, rgb)
     if lut is not None:
         rgb = apply_color_lut(rgb, lut)
         fc = p.get("film_curve", {})
         rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
-    else:
-        rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
-        wb = p.get("white_balance", {})
-        rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
-        rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
-        hr = p.get("highlight_rolloff", {})
-        rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
-        sh = p.get("shadow", {})
-        rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
-                           sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+    rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
+    wb = p.get("white_balance", {})
+    rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
+    rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
+    hr = p.get("highlight_rolloff", {})
+    rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
+    sh = p.get("shadow", {})
+    rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
+                       sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+    if lut is None:
         fc = p.get("film_curve", {})
         rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
-        rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
-        rgb = apply_hsl(rgb, p.get("hsl", {}))
+    rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
+    rgb = apply_hsl(rgb, p.get("hsl", {}))
     vg = p.get("vignette", {})
     rgb = apply_vignette(rgb, vg.get("amount", 0.0), vg.get("radius", 1.0), vg.get("feather", 0.5), vg.get("center", [0.5, 0.5]))
     bl = p.get("bloom", {})
@@ -560,3 +562,162 @@ def render_file(in_path: str, profile: dict, out_path: str, seed: int | None = 0
     rgb = np.asarray(img, dtype=np.float32) / 255.0
     out = (render(rgb, profile, seed) * 255).astype(np.uint8)
     Image.fromarray(out, "RGB").save(out_path)
+
+
+# ----------------------------------------------------- LUT profile helpers
+_LUT_PARAM_KEYS = ("exposure", "white_balance", "color_matrix",
+                   "highlight_rolloff", "shadow", "tone_curve", "hsl")
+
+
+def _is_lut_profile(profile: dict) -> bool:
+    p = profile or {}
+    return (p.get("color_layer") == "lut"
+            and isinstance(p.get("color_lut"), dict)
+            and bool(p["color_lut"].get("data")))
+
+
+def neutralize_lut_params(profile: dict):
+    """Reset the parametric colour layer to identity for LUT profiles.
+
+    Profiles trained before the identity-params change carry an inverse-solved
+    approximation of the LUT in their params; under the post-LUT tuning
+    semantic those values would style the image a second time. Returns a NEW
+    profile dict, or None when there is nothing to neutralize.
+    """
+    import copy
+    from profile_schema import default_profile
+    if not isinstance(profile, dict) or not _is_lut_profile(profile):
+        return None
+    fresh = default_profile(profile.get("name", ""))
+    out = copy.deepcopy(profile)
+    for k in _LUT_PARAM_KEYS:
+        if k in out:
+            out[k] = copy.deepcopy(fresh.get(k, out[k]))
+    return out
+
+
+def _params_are_identity(profile: dict) -> bool:
+    p = profile or {}
+    if float(p.get("exposure", {}).get("bias", 0.0) or 0.0) != 0.0:
+        return False
+    wb = p.get("white_balance", {})
+    if float(wb.get("temperature_bias", 0.0) or 0.0) != 0.0: return False
+    if float(wb.get("tint_bias", 0.0) or 0.0) != 0.0: return False
+    M = p.get("color_matrix", {}).get("matrix_3x3") or [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    if [[float(v) for v in row] for row in M] != [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]:
+        return False
+    if float(p.get("highlight_rolloff", {}).get("strength", 0.0) or 0.0) != 0.0:
+        return False
+    sh = p.get("shadow", {})
+    if (float(sh.get("black_point", 0.0) or 0.0) != 0.0
+            or float(sh.get("compression", 0.0) or 0.0) != 0.0
+            or float(sh.get("contrast", 1.0) or 1.0) != 1.0
+            or list(sh.get("tint") or [0, 0, 0]) != [0, 0, 0]):
+        return False
+    pts = p.get("tone_curve", {}).get("points") or [[0, 0], [1, 1]]
+    if [[float(a), float(b)] for a, b in pts] not in ([[0.0, 0.0], [1.0, 1.0]], [[0, 0], [1, 1]]):
+        return False
+    for ch in (p.get("hsl") or {}).values():
+        if ch:
+            return False
+    return True
+
+
+def bake_params_into_lut(profile: dict):
+    """Fold film curve + tuned params into the 3D LUT; reset them to neutral.
+
+    After baking, the lattice holds P(film(LUT(v))) for each grid colour v and
+    film_curve is set to the identity window (0/255), so EVERY engine —
+    desktop GL/Python, server_web, Android sampler3D — renders exactly what
+    the Studio preview showed, regardless of whether it applies the
+    parametric chain. Returns a NEW profile dict, or None when there is
+    nothing to bake (no LUT / params already identity).
+    """
+    import copy
+    if not isinstance(profile, dict) or not _is_lut_profile(profile):
+        return None
+    if _params_are_identity(profile):
+        # film curve is part of the trained look for stylefit profiles — only
+        # fold it in when there are tuned params to bake alongside it
+        return None
+    lut3d = _load_lut3d()
+    if lut3d is None:
+        return None
+    payload = profile["color_lut"]
+    lut = _decode_lut(payload)
+    if lut is None:
+        return None
+    n = lut.shape[0]
+    # Hue rotation (HSL) is strongly nonlinear: baked into the native 33^3
+    # lattice it diverges from the true chain under trilinear interpolation
+    # (p99 error ~13/255). Android accepts up to 65, so re-grid to 65^3 when
+    # HSL carries tweaks — interpolation error then drops with grid density.
+    hsl_tweaked = any(ch for ch in (profile.get("hsl") or {}).values())
+    if hsl_tweaked and n < 65:
+        m = 65
+        axis = np.linspace(0.0, 1.0, m, dtype=np.float32)
+        b, g, r = np.meshgrid(axis, axis, axis, indexing="ij")
+        query = np.stack([r.ravel(), g.ravel(), b.ravel()], axis=1)
+        lut = lut3d.sample(lut, query).reshape(m, m, m, 3).astype(np.float32)
+        n = m
+    grid = lut.reshape(1, -1, 3).astype(np.float32)
+    fc = profile.get("film_curve", {})
+    grid = apply_film_curve(grid, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    grid = apply_exposure(grid, profile.get("exposure", {}).get("bias", 0.0))
+    wb = profile.get("white_balance", {})
+    grid = apply_white_balance(grid, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
+    grid = apply_color_matrix(grid, profile.get("color_matrix", {}).get("matrix_3x3"))
+    hr = profile.get("highlight_rolloff", {})
+    grid = apply_highlight_rolloff(grid, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
+    sh = profile.get("shadow", {})
+    grid = apply_shadow(grid, sh.get("black_point", 0.0), sh.get("compression", 0.0),
+                        sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+    grid = apply_tone_curve(grid, profile.get("tone_curve", {}).get("points", []))
+    grid = apply_hsl(grid, profile.get("hsl", {}))
+    grid = np.clip(grid, 0.0, 1.0).reshape(lut.shape)
+
+    out = copy.deepcopy(profile)
+    new_payload = lut3d.to_payload(np.ascontiguousarray(grid, dtype=np.float32))
+    new_payload["source"] = payload.get("source", "")
+    new_payload["strength"] = payload.get("strength", 1.0)
+    out["color_lut"] = new_payload
+    out["film_curve"] = {"shadow_floor": 0, "highlight_ceiling": 255}
+    fresh_params = neutralize_lut_params(profile)
+    for k in _LUT_PARAM_KEYS:
+        out[k] = fresh_params[k]
+    return out
+
+
+def color_pipeline_cube(profile: dict, n: int = 33) -> np.ndarray:
+    """Sample the profile's full COLOUR pipeline on an n^3 identity grid.
+
+    Returns (n**3, 3) float RGB in .cube row order (RED fastest). LUT
+    profiles: 3D LUT -> film -> post-LUT param chain — exactly render()'s
+    colour stages. Parametric profiles: the chain alone. Spatially-varying
+    layers (grain/vignette/bloom/halation/sharpen) are excluded — a .cube
+    cannot express them.
+    """
+    p = profile or {}
+    axes = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    b, g, r = np.meshgrid(axes, axes, axes, indexing="ij")  # r fastest
+    rgb = np.stack([r, g, b], axis=-1).reshape(1, -1, 3).astype(np.float32)
+    lut = profile_lut(p, rgb)
+    if lut is not None:
+        rgb = apply_color_lut(rgb, lut)
+        fc = p.get("film_curve", {})
+        rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    rgb = apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
+    wb = p.get("white_balance", {})
+    rgb = apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
+    rgb = apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
+    hr = p.get("highlight_rolloff", {})
+    rgb = apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
+    sh = p.get("shadow", {})
+    rgb = apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
+                       sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
+    if lut is None:
+        fc = p.get("film_curve", {})
+        rgb = apply_film_curve(rgb, fc.get("shadow_floor", 8.0), fc.get("highlight_ceiling", 248.0))
+    rgb = apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
+    rgb = apply_hsl(rgb, p.get("hsl", {}))
+    return np.clip(rgb, 0.0, 1.0).reshape(-1, 3)

@@ -17,15 +17,18 @@ const state = {
   rendUrl: null,
   origUrl: null,
   jobId: null,
+  glBmp: null,       // decoded bitmap of the current image for the WebGL preview
   icon: null,        // {ext: "png"|"jpg"|"webp", data: "data:image/..;base64,.."} — saved next to the profile JSON under the SAME file name
 };
+
+let renderer = null; // GLRender instance (null when WebGL2 is unavailable)
 
 const GROUP_LABEL = {
   exposure: "曝光", white_balance: "白平衡", color_matrix: "色彩矩阵",
   tone_curve: "色调曲线", highlight_rolloff: "高光滚降", shadow: "阴影",
-  hsl: "HSL 分色", sharpen: "锐化", bloom: "柔光溢出 Bloom",
-  halation: "光晕 Halation", grain: "颗粒 Grain", noise: "噪点 Noise",
-  vignette: "暗角 Vignette", saturation: "饱和度", contrast: "对比度",
+  hsl: "HSL 分色", sharpen: "锐化", bloom: "柔光溢出",
+  halation: "光晕", grain: "颗粒", noise: "噪点",
+  vignette: "暗角", saturation: "饱和度", contrast: "对比度",
   detail: "细节", film: "胶片", look: "整体影调", film_curve: "胶片曲线",
 };
 
@@ -135,6 +138,17 @@ async function setCurrent(img) {
     if (state.origUrl) URL.revokeObjectURL(state.origUrl);
     state.origUrl = URL.createObjectURL(blob);
     $("#imgOrig").src = state.origUrl;
+    // decode once for the GPU preview path — decode through a 2D canvas like
+    // the web deployment does (ImageBitmap uploads flip differently under
+    // UNPACK_FLIP_Y_WEBGL and rendered upside-down)
+    if (state.glBmp) state.glBmp.width = 0;
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext("2d").drawImage(bmp, 0, 0);
+    bmp.close?.();
+    state.glBmp = c;
+    if (renderer && renderer.ok) renderer.setImage(state.glBmp);
   } catch (e) {
     setStatus("原图载入失败: " + e.message, "err");
     return;
@@ -235,34 +249,58 @@ function initStage() {
 }
 
 /* ─────────────────────────── preview render ─────────────────────────── */
+/* Primary path: WebGL real-time preview (gl_lut.js) — sliders repaint on
+ * every input event with zero debounce. Fallback (no WebGL2): server-side
+ * Python render with a short debounce, drawn onto the same canvas. */
 
 let previewTimer = null;
 function schedulePreview() {
+  if (renderer && renderer.ok) {
+    requestAnimationFrame(refreshPreview);
+    return;
+  }
   clearTimeout(previewTimer);
   previewTimer = setTimeout(refreshPreview, 220);
 }
 
-async function refreshPreview() {
+let renderQueued = false;
+function refreshPreview() {
   if (!state.current || !state.profile) return;
+  // -- GPU path --
+  if (renderer && renderer.ok && state.glBmp) {
+    $("#spinner").hidden = false;
+    try {
+      renderer.render(state.profile);
+      $("#empty").hidden = true;
+      setStatus("实时预览", "");
+    } catch (e) {
+      setStatus("GPU 预览失败: " + e.message, "err");
+    } finally {
+      $("#spinner").hidden = true;
+    }
+    return;
+  }
+  // -- server fallback --
   const seq = ++state.reqSeq;
   $("#spinner").hidden = false;
   setStatus("渲染中…", "busy");
-  try {
-    const blob = await api("/api/preview", {
-      method: "POST",
-      body: JSON.stringify({ path: state.current.path, profile: state.profile, max: 1600 }),
-    });
+  api("/api/preview", {
+    method: "POST",
+    body: JSON.stringify({ path: state.current.path, profile: state.profile, max: 1600 }),
+  }).then(async (blob) => {
     if (seq !== state.reqSeq) return;      // a newer request won
-    if (state.rendUrl) URL.revokeObjectURL(state.rendUrl);
-    state.rendUrl = URL.createObjectURL(blob);
-    $("#imgRend").src = state.rendUrl;
+    const bmp = await createImageBitmap(blob);
+    const cv = $("#cvsRend");
+    cv.width = bmp.width; cv.height = bmp.height;
+    cv.getContext("2d").drawImage(bmp, 0, 0);
+    bmp.close?.();
     $("#empty").hidden = true;
     setStatus("渲染完成", "ok");
-  } catch (e) {
+  }).catch((e) => {
     if (seq === state.reqSeq) setStatus("渲染失败: " + e.message, "err");
-  } finally {
+  }).finally(() => {
     if (seq === state.reqSeq) $("#spinner").hidden = true;
-  }
+  });
 }
 
 /* ─────────────────────────── controls panel ─────────────────────────── */
@@ -601,7 +639,7 @@ async function generate() {
     setStatus("至少需要 3 张参考照片（建议 10 张以上）", "err");
     return;
   }
-  const name = $("#profileName").value.trim() || "My Look";
+  const name = $("#profileName").value.trim() || "我的风格";
   $("#btnGenerate").disabled = true;
   const logBox = $("#jobLog");
   logBox.hidden = false;
@@ -719,7 +757,7 @@ async function importProfile(file) {
   setStatus("读取 JSON…", "busy");
   const text = await file.text();
   const name = file.name.replace(/\.json$/i, "");
-  setStatus("导入 Profile…", "busy");
+  setStatus("导入风格…", "busy");
   try {
     const r = await api("/api/import_profile", {
       method: "POST",
@@ -730,7 +768,7 @@ async function importProfile(file) {
     state.report = null;
     state.importedPath = r.path;
     const d = r.profile.display || {};
-    $("#profileName").value = d.name || r.profile.name || name || "My Look";
+    $("#profileName").value = d.name || r.profile.name || name || "我的风格";
     $("#profileIntro").value = d.intro || "";
     renderControls();
     renderReport();
@@ -801,9 +839,9 @@ async function exportLut() {
       method: "POST",
       body: JSON.stringify({ profile: state.profile, name }),
     });
-    setStatus("已保存 LUT " + r.path, "ok");
+    setStatus("已导出 3D LUT " + r.path, "ok");
   } catch (e) {
-    setStatus("LUT 保存失败: " + e.message, "err");
+    setStatus("3D LUT 导出失败: " + e.message, "err");
   }
 }
 
@@ -823,7 +861,7 @@ async function saveProfile() {
   const d = collectDisplay();
   if (d) payload.profile.display = d;
   if (state.icon) payload.icon = state.icon;
-  setStatus("保存 Profile…", "busy");
+  setStatus("保存风格…", "busy");
   try {
     const r = await api("/api/save", {
       method: "POST",
@@ -858,6 +896,14 @@ async function batchRender() {
 async function init() {
   initStage();
   applyMode();
+
+  if (window.GLRender) {
+    renderer = GLRender.create($("#cvsRend"));
+    if (!renderer || !renderer.ok) {
+      renderer = null;
+      setStatus("WebGL2 不可用，改用服务器渲染", "warn");
+    }
+  }
 
   try {
     const r = await api("/api/controls");

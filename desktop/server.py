@@ -403,6 +403,12 @@ class Handler(BaseHTTPRequestHandler):
                 # enforce the safe band on load too (e.g. an old profile with
                 # shadow_floor 25.5 shows up already clamped to 16)
                 prof = S.safe_clamp(prof)
+                # LUT profiles: params are the POST-LUT tuning layer now.
+                # Old profiles carry a stale inverse-solved approximation of
+                # the LUT in their params — reset it so tuning starts clean.
+                _norm = R.neutralize_lut_params(prof)
+                if _norm is not None:
+                    prof = _norm
                 with _LOCK:
                     STATE["profile"] = prof
                     STATE["profile_path"] = fp
@@ -512,6 +518,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
+                # LUT profile: fold film+params into the 3D LUT and reset them
+                # to identity so engines that sample only the LUT (Android)
+                # render exactly what the Studio preview showed.
+                _baked = R.bake_params_into_lut(prof)
+                if _baked is not None:
+                    prof = _baked
                 rel = str(body.get("path") or "profiles/studio/profile_final.json")
                 fp = rel if os.path.isabs(rel) else os.path.join(WORK, rel)
                 os.makedirs(os.path.dirname(fp), exist_ok=True)
@@ -545,6 +557,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "无效的 profile JSON（顶层应为对象）"}, 400)
                 ok, errors = S.validate_profile(prof)
                 prof = S.safe_clamp(prof)
+                _norm = R.neutralize_lut_params(prof)  # see /api/load_profile note
+                if _norm is not None:
+                    prof = _norm
                 src_name = str(body.get("name") or
                                os.path.splitext(str(prof.get("name") or "imported"))[0] or
                                "imported")
@@ -568,6 +583,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
+                _baked = R.bake_params_into_lut(prof)  # keep Android consistent — see /api/save
+                if _baked is not None:
+                    prof = _baked
                 # keep CJK in profile names (App preset name = file name);
                 # strip only Windows-illegal filename characters
                 name = re.sub(r"[\\/:*?\"<>|]+", "_", str(body.get("name") or "studio")) + ".json"
@@ -586,6 +604,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not prof:
                     return self._json({"error": "no profile"}, 400)
                 prof = S.safe_clamp(prof)
+                _baked = R.bake_params_into_lut(prof)  # tuned params must land in the .cube too
+                if _baked is not None:
+                    prof = _baked
                 name = re.sub(r'[\\/:*?\"<>|]+', "_", str(body.get("name") or "photographer_look"))
                 out_rel = f"studio_session/luts/{name}_{time.strftime('%Y%m%d_%H%M%S')}.cube"
                 out_path = out_rel if os.path.isabs(out_rel) else os.path.join(WORK, out_rel)
@@ -618,27 +639,13 @@ class Handler(BaseHTTPRequestHandler):
 def _profile_color_lut_cube(profile: dict, n: int = 33) -> str:
     """Render the profile's PER-PIXEL color pipeline into an Adobe .cube 3D LUT.
 
-    Covered: exposure -> white balance -> color matrix -> tone curve ->
-    highlight rolloff -> shadow -> HSL. Spatially-varying layers (grain,
-    noise, vignette, bloom, halation, sharpen) are intentionally excluded —
-    a 3D LUT cannot express them; the Android App renders them live.
-    Row order follows the .cube spec: RED varies fastest."""
-    p = profile or {}
-    axes = np.linspace(0.0, 1.0, n, dtype=np.float32)
-    b, g, r = np.meshgrid(axes, axes, axes, indexing="ij")  # r fastest
-    rgb = np.stack([r, g, b], axis=-1).reshape(1, -1, 3)
-    rgb = R.apply_exposure(rgb, p.get("exposure", {}).get("bias", 0.0))
-    wb = p.get("white_balance", {})
-    rgb = R.apply_white_balance(rgb, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
-    rgb = R.apply_color_matrix(rgb, p.get("color_matrix", {}).get("matrix_3x3"))
-    rgb = R.apply_tone_curve(rgb, p.get("tone_curve", {}).get("points", []))
-    hr = p.get("highlight_rolloff", {})
-    rgb = R.apply_highlight_rolloff(rgb, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
-    sh = p.get("shadow", {})
-    rgb = R.apply_shadow(rgb, sh.get("black_point", 0.0), sh.get("compression", 0.0),
-                         sh.get("tint"), sh.get("saturation", 1.0), sh.get("contrast", 1.0))
-    rgb = R.apply_hsl(rgb, p.get("hsl", {}))
-    rgb = np.clip(rgb, 0.0, 1.0).reshape(-1, 3)
+    Uses R.color_pipeline_cube(): LUT profiles embed the learned 3D LUT
+    (plus film + post-LUT params), parametric profiles the chain alone.
+    Spatially-varying layers (grain, noise, vignette, bloom, halation,
+    sharpen) are intentionally excluded — a 3D LUT cannot express them; the
+    Android App renders them live. Row order follows the .cube spec: RED
+    varies fastest."""
+    rgb = R.color_pipeline_cube(profile, n)
     lines = [
         'TITLE "PhotographerCamera profile LUT"',
         "# color layers only; grain/vignette/bloom/halation are App-side live effects",
