@@ -12,6 +12,8 @@ Order (mirrors docs/rendering_pipeline.md):
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 try:
@@ -28,6 +30,31 @@ def _clip(a):
 _LUT_CACHE: dict = {}
 
 
+def _load_lut3d():
+    """Resolve the stylefit.lut3d module without dragging in the training stack.
+
+    Importing the stylefit package runs __init__ -> fit -> scipy/skimage, which
+    render-only deployments (server_web) may not have. lut3d.py itself only
+    needs numpy, so fall back to loading it straight from its file.
+    """
+    try:
+        from stylefit import lut3d
+        return lut3d
+    except Exception:
+        pass
+    import importlib.util
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stylefit", "lut3d.py")
+    if not os.path.exists(p):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_stylefit_lut3d", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
 def _decode_lut(payload):
     """Decode an embedded colour LUT payload (cached — base64 is not free)."""
     if not isinstance(payload, dict) or not payload.get("data"):
@@ -37,8 +64,10 @@ def _decode_lut(payload):
     hit = _LUT_CACHE.get(key)
     if hit is not None:
         return hit
+    lut3d = _load_lut3d()
+    if lut3d is None:
+        return None
     try:
-        from stylefit import lut3d
         lut = lut3d.from_payload(payload)
     except Exception:
         return None
@@ -78,8 +107,7 @@ def profile_lut(profile, rgb=None):
 def apply_color_lut(rgb, lut):
     if lut is None:
         return rgb
-    from stylefit import lut3d
-    return lut3d.sample(lut, rgb)
+    return _load_lut3d().sample(lut, rgb)
 
 
 TONE_LUT_SIZE = 1024  # canonical 1D LUT width shared by CPU / GLSL / Kotlin loader
