@@ -558,7 +558,7 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                progress: Optional[Callable[[str], None]] = None,
                seed: int = 20240917, max_ref_images: int = 260,
                px_per_ref: int = 8000, px_per_plain: int = 60000,
-               rounds: int = 3,
+               rounds: int = 1,
                **_ignored) -> tuple:
     """Learn the look from two corpora of images (already decoded, 0..1 float).
 
@@ -567,11 +567,9 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                     "before" side. Without it there is nothing to measure the
                     style against, so it is required, not optional.
     eval_images   : photos used only for validation (never for fitting).
-    rounds        : iterative residual refinement rounds (v3.1). 1 = the
-                    legacy single pass; each extra round re-fits the residual
-                    on the previous round's output, damped and gated by
-                    held-out validation so it can neither overfit nor
-                    collapse the colour. See stylefit/iterative.py.
+    rounds        : iterative residual refinement rounds (v3.1). DEFAULT 1 =
+                    the legacy single-pass v3 behaviour (2026-09-11 用户实测
+                    迭代轮在桌面端爆色，已回退默认；>1 时仍受门控保护).
     """
     def say(msg):
         (progress or (lambda m: print(m, flush=True)))(msg)
