@@ -54,7 +54,7 @@ RETRY_SHRINK = 0.4      # rejected round retries once with gamma * 0.4
 CAP_FLOOR = {"shape": 3.0, "resid": 1.0, "tint": 1.0, "mu": 0.5}
 TOTAL_GAIN_CAP = 2.2    # max singular value of the COMPOSED chroma matrix
 # ---- acceptance gate ------------------------------------------------------
-MIN_REL_IMPROVE = 0.02  # round must cut style_distance by >= 2% (relative)
+MIN_REL_IMPROVE = 0.005  # round must cut style_distance by >= 0.5% (relative)
 STRUCT_MIN = 0.90       # structure correlation hard floor
 STRUCT_TOL = 0.004      # structure corr may not drop more than this vs best
 DE_MIN, DE_MAX = 4.0, 25.0   # deltaE sanity band (v3 semantics: 4=too weak)
@@ -209,6 +209,10 @@ def _gate_ok(score, best):
     de = score.get("deltaE")
     if de is None or not (DE_MIN <= float(de) <= DE_MAX):
         return False, f"deltaE {de} outside [{DE_MIN}, {DE_MAX}]"
+    # NOTE: no relative deltaE-degradation guard — the absolute [DE_MIN, DE_MAX]
+    # band plus the structure-correlation floor already catch content
+    # destruction; a relative guard would block rounds that legitimately push
+    # style harder (style_distance down, deltaE slightly up).
     return True, "ok"
 
 
@@ -342,6 +346,9 @@ def refine(model0, src_px, dst_px, eval_images, plains, ref_stats,
                         return _finish(chain, lut, trace, gate_desc, rounds, say)
                     say(f"    基线（第 0 轮）交叉验证：style_distance={best['style_distance']:.4f}"
                         f" ΔE={best['deltaE']:.3f} 结构相关={best['structure']:.4f}")
+                    # record the baseline in the report trace so later runs and
+                    # diagnostics can see what the rounds were compared against
+                    note(0, True, best, "基线（未参与迭代）", {"gate": "kfold"})
                 gain_estimate = chain.total_gain() * (1.0 + gamma * 0.8)
                 if gain_estimate > TOTAL_GAIN_CAP:
                     note(r, False, None, f"预计组合色度增益 {gain_estimate:.2f} 超上限（防颜色崩坏）")
