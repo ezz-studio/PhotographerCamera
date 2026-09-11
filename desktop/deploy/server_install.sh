@@ -13,8 +13,10 @@
 #   STUDIO_BASE         公开基址（默认 https://app.tybtool.top）
 #   INSTALL_DIR         安装根目录（默认 /home/admin/photographer-studio）
 #   PORT                服务端口（默认 8765）
-#   STUDIO_CADDY_PASSWORD  设置则自动配置 Caddy 反代 + basicauth 并 reload
-#                          （需服务器已装 caddy 且 /etc/caddy/origin.pem + origin.key 已就位）
+#   STUDIO_CADDY_PASSWORD  设置则自动进入 Caddy 反代配置（basicauth 密码），并引导输入 SSL 证书
+#                          （留空则脚本交互询问；证书可粘贴内容或输入 .pem 文件路径）
+#   STUDIO_SSL_CERT        origin 公钥：.pem 文件路径 或 内联 PEM 文本（非交互/自动化用）
+#   STUDIO_SSL_KEY         origin 私钥：.pem 文件路径 或 内联 PEM 文本
 #   CADDY_HOST          对外域名（默认 json.tybtool.top）
 #
 set -euo pipefail
@@ -26,6 +28,8 @@ VER_URL="${1:-${STUDIO_VERSION_URL:-$DEFAULT_VER}}"
 INSTALL_DIR="${INSTALL_DIR:-/home/admin/photographer-studio}"
 PORT="${PORT:-8765}"
 CADDY_PASSWORD="${STUDIO_CADDY_PASSWORD:-${CADDY_PASSWORD:-}}"
+STUDIO_SSL_CERT="${STUDIO_SSL_CERT:-}"
+STUDIO_SSL_KEY="${STUDIO_SSL_KEY:-}"
 CF_HOST="${CADDY_HOST:-json.tybtool.top}"
 
 echo "==> PhotographerCamera Studio 一键安装 / 升级"
@@ -129,14 +133,93 @@ for i in $(seq 1 20); do
 done
 [ "$OK" -eq 1 ] && echo "    健康检查通过" || echo "    !! 健康检查未通过，请查: journalctl -u photographer-studio -f"
 
-# 8) 可选 Caddy 反代 + basicauth
-if [ -n "$CADDY_PASSWORD" ]; then
-  if command -v caddy >/dev/null 2>&1; then
-    HASH="$(caddy hash-password "$CADDY_PASSWORD")"
-    $SUDO mkdir -p /etc/caddy/Caddyfile.d
-    $SUDO tee /etc/caddy/Caddyfile.d/studio.conf >/dev/null <<EOF
+# 8) Caddy 反代 + basicauth（交互引导 SSL 证书输入）
+# 读取一个 PEM：支持 (a) 交互粘贴多行内容 (b) 输入 .pem 文件路径 (c) 通过 envval 提供（文件或内联）
+read_pem() {
+  local prompt="$1" outfile="$2" envval="${3:-}" line data path
+  if [ -n "$envval" ]; then
+    if [ -f "$envval" ]; then
+      $SUDO cp "$envval" "$outfile"; echo "    (已从环境变量文件复制: $envval)"; return 0
+    fi
+    printf '%s\n' "$envval" | $SUDO tee "$outfile" >/dev/null
+    echo "    (已从环境变量写入 $outfile)"; return 0
+  fi
+  echo "$prompt"
+  echo "  - 粘贴：直接 Ctrl+V 粘贴内容（以 -----BEGIN 开头），粘贴完在【空行】按回车结束"
+  echo "  - 文件：直接输入 .pem 文件的绝对路径并回车"
+  data=""
+  while IFS= read -r line; do
+    if [ -z "$line" ]; then
+      [ -n "$data" ] && break        # 空行 = 粘贴结束
+    else
+      if [ -z "$data" ] && [ -f "$line" ]; then path="$line"; break; fi
+      data+="$line"$'\n'
+    fi
+  done
+  if [ -n "$path" ]; then
+    $SUDO cp "$path" "$outfile"; echo "    (已从文件复制: $path)"
+  elif [ -n "$data" ]; then
+    printf '%s' "$data" | $SUDO tee "$outfile" >/dev/null; echo "    (已写入 $outfile)"
+  else
+    echo "    !! 未读取到内容，跳过该项"; return 1
+  fi
+}
+
+setup_caddy() {
+  if ! command -v caddy >/dev/null 2>&1; then
+    echo "!! 未检测到 caddy，跳过公网反代配置。"
+    echo "   安装 caddy 后再配置：Debian/Ubuntu 用 'sudo apt install -y caddy'，"
+    echo "   或官方脚本 https://caddyserver.com/docs/install ；然后参考 DEPLOY.md 手动加反代。"
+    return 0
+  fi
+
+  # 是否配置：env 指定密码 → 自动；否则交互询问（仅 tty）
+  local do_caddy=""
+  if [ -n "$CADDY_PASSWORD" ]; then
+    do_caddy="y"
+  elif [ -t 0 ]; then
+    read -r -p "是否配置公网反代 (Caddy + basicauth)? [y/N] " do_caddy
+  fi
+  case "$do_caddy" in y|Y|yes|YES) ;; *)
+    echo "==> 跳过 Caddy 反代（仅本机 http://127.0.0.1:$PORT 可用）"; return 0;; esac
+
+  # basicauth 密码
+  if [ -z "$CADDY_PASSWORD" ] && [ -t 0 ]; then
+    read -r -s -p "请输入公网访问密码 (basicauth): " CADDY_PASSWORD; echo
+  fi
+  if [ -z "$CADDY_PASSWORD" ]; then
+    echo "!! 未提供密码，跳过 Caddy 反代"; return 0
+  fi
+
+  # SSL 证书方式
+  local mode="1"
+  if [ -t 0 ]; then
+    echo "SSL 证书方式："
+    echo "  1) Cloudflare Origin CA 证书（Cloudflare SSL 模式需设为 Full (strict)）"
+    echo "  2) 暂不提供证书（Cloudflare SSL 模式需设为 Flexible，Caddy 仅监听 80）"
+    read -r -p "请选择 [1/2，默认1]: " mode
+  fi
+  case "$mode" in 2) mode=2;; *) mode=1;; esac
+
+  $SUDO mkdir -p /etc/caddy/Caddyfile.d
+  local use_tls=0
+  if [ "$mode" = "1" ]; then
+    if read_pem "请输入 SSL 公钥 (origin_certificate.pem，可粘贴或输入文件路径):" \
+                /etc/caddy/origin.pem "$STUDIO_SSL_CERT" \
+       && read_pem "请输入 SSL 私钥 (private_key.pem，可粘贴或输入文件路径):" \
+                   /etc/caddy/origin.key "$STUDIO_SSL_KEY"; then
+      use_tls=1
+    else
+      echo "    !! 证书读取失败，回退为「不提供证书」模式（Cloudflare SSL 需设为 Flexible）"
+    fi
+  fi
+  local tls_line=""
+  [ "$use_tls" = "1" ] && tls_line="    tls /etc/caddy/origin.pem /etc/caddy/origin.key"
+
+  local HASH="$(caddy hash-password "$CADDY_PASSWORD")"
+  $SUDO tee /etc/caddy/Caddyfile.d/studio.conf >/dev/null <<EOF
 $CF_HOST {
-    tls /etc/caddy/origin.pem /etc/caddy/origin.key
+$tls_line
     basicauth {
         studio $HASH
     }
@@ -144,12 +227,11 @@ $CF_HOST {
     reverse_proxy 127.0.0.1:$PORT
 }
 EOF
-    $SUDO systemctl reload caddy
-    echo "==> Caddy 已配置 $CF_HOST 并 reload（basicauth 已启用）"
-  else
-    echo "!! 未检测到 caddy，跳过反代；请手动将 $CF_HOST 反代到 127.0.0.1:$PORT"
-  fi
-fi
+  $SUDO systemctl reload caddy 2>/dev/null || $SUDO systemctl restart caddy
+  echo "==> Caddy 已配置 $CF_HOST 并 reload（basicauth 已启用，模式: $([ "$use_tls" = 1 ] && echo 'Full(strict)' || echo 'Flexible')）"
+}
+
+setup_caddy
 
 echo
 echo "==> 安装完成：$TAG 已运行，开机自启已启用。"
