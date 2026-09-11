@@ -567,9 +567,12 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                     "before" side. Without it there is nothing to measure the
                     style against, so it is required, not optional.
     eval_images   : photos used only for validation (never for fitting).
-    rounds        : iterative residual refinement rounds (v3.1). DEFAULT 1 =
-                    the legacy single-pass v3 behaviour (2026-09-11 用户实测
-                    迭代轮在桌面端爆色，已回退默认；>1 时仍受门控保护).
+    rounds        : iterative residual refinement rounds (v3.1). DEFAULT 3 =
+                    train -> gate -> retrain. Every round must beat the best
+                    score on the honest validation (hold-out / K-fold CV) or
+                    the whole chain terminates — 防过拟合，宁拒不冒进.
+                    (2026-09-11 晚曾临时回退 rounds=1，后经查爆色根因是预览
+                    层双叠加而非训练算法，已重新默认启用；见 12735dd。)
     """
     def say(msg):
         (progress or (lambda m: print(m, flush=True)))(msg)
