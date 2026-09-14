@@ -98,7 +98,8 @@ internal object FilmGrainShaders {
             float frameSeed,
             float pixelScale
         ) {
-            float grainAmount = pow(clamp(amount, 0.0, 1.0), 0.58);
+            float normalizedAmount = clamp(amount, 0.0, 1.0);
+            float grainAmount = pow(normalizedAmount, 0.58);
             vec3 linearColor = max(grainSrgbToLinear(srgbColor), vec3(1e-4));
             vec3 density = -log(linearColor) * 0.4342944819;
             vec3 densityMin = vec3(0.03);
@@ -119,10 +120,11 @@ internal object FilmGrainShaders {
                 fract(frameSeed * 0.569840296)
             ) * 4096.0;
             float seedPlane = mod(frameSeed, 4096.0) * 0.03125;
-            // grain.size：颗粒团块尺寸——除以 size 降低空间频率（块更大）。
-            // pixelScale 只随渲染分辨率变化，profile 的 size 在此叠加。
+            // 上游 a418b2f476：颗粒空间尺寸随 amount 平滑变化（低量更细，中段达满尺寸），
+            // 与 profile 的 grain.size uniform（uGrainSize）叠加控制。
+            float grainSize = mix(0.5, 1.0, smoothstep(0.0, 0.5, normalizedAmount));
             float grainSizeScale = clamp(uGrainSize, 0.25, 4.0);
-            vec2 grainPixel = outputPixel / max(pixelScale * grainSizeScale, 0.25) + seedOffset;
+            vec2 grainPixel = outputPixel / max(pixelScale * grainSize * grainSizeScale, 0.25) + seedOffset;
             float lumaGrain = grainSimplex(vec3(grainPixel * 0.42, seedPlane));
             float dyeR = grainSimplex(vec3(grainPixel * 0.12, seedPlane + 17.0));
             float dyeB = grainSimplex(vec3(grainPixel * 0.12, seedPlane + 43.0));
@@ -134,12 +136,19 @@ internal object FilmGrainShaders {
             float grainLc = clamp(uGrainLumaContrast, 0.0, 1.0);
             float highlightFloor = mix(1.0, 0.32, grainLc);
             float highlightVisibility = mix(1.0, highlightFloor, highlightMask);
+            // 上游 a418b2f476：低量时稀化弱颗粒区，中段恢复全覆盖。
+            float sparseThreshold = 0.08 * (1.0 - smoothstep(0.0, 0.5, normalizedAmount));
+            float grainCoverage = 1.0 - clamp(
+                sparseThreshold / max(abs(lumaGrain), 1e-4), 0.0, 1.0
+            );
             vec3 densityNoise = vec3(lumaGrain * lumaDensityStd * 2.7);
             densityNoise += dyeCloud * densityStd * 0.22;
-            densityNoise *= highlightVisibility;
+            densityNoise *= highlightVisibility * grainCoverage;
             // grain.density：银盐密度越高，单位面积颗粒起伏越大 → 幅度增益。
             float grainDensityScale = clamp(uGrainDensity, 0.25, 4.0);
-            density = max(density + densityNoise * grainAmount * 1.8 * grainDensityScale, vec3(0.0));
+            // 上游 a418b2f476：整体颗粒强度 ×0.7 精修（与 profile density 增益叠加）。
+            const float grainStrengthScale = 0.7;
+            density = max(density + densityNoise * grainAmount * 1.8 * grainDensityScale * grainStrengthScale, vec3(0.0));
             return grainLinearToSrgb(exp(-density * 2.302585093));
         }
     """.trimIndent()
