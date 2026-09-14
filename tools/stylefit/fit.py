@@ -557,8 +557,8 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                eval_images: Optional[List[np.ndarray]] = None,
                progress: Optional[Callable[[str], None]] = None,
                seed: int = 20240917, max_ref_images: int = 260,
-               px_per_ref: int = 8000, px_per_plain: int = 60000,
-               rounds: int = 3,
+               px_per_ref: int = 8000,                px_per_plain: int = 60000,
+               rounds: int = 12,
                **_ignored) -> tuple:
     """Learn the look from two corpora of images (already decoded, 0..1 float).
 
@@ -567,12 +567,17 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                     "before" side. Without it there is nothing to measure the
                     style against, so it is required, not optional.
     eval_images   : photos used only for validation (never for fitting).
-    rounds        : iterative residual refinement rounds (v3.1). DEFAULT 3 =
-                    train -> gate -> retrain. Every round must beat the best
-                    score on the honest validation (hold-out / K-fold CV) or
-                    the whole chain terminates — 防过拟合，宁拒不冒进.
+    rounds        : iterative residual refinement — SAFETY CEILING, not a
+                    fixed count. DEFAULT 12. The loop runs at most this many
+                    extra rounds, but the gate is the real stop condition:
+                    as soon as a round fails to beat the best honest score
+                    (hold-out / K-fold CV) at every step size, the WHOLE
+                    chain terminates early — 防过拟合，宁拒不冒进. So on small
+                    / clean data it typically accepts far fewer than 12 and
+                    stops; the ceiling only prevents runaway loops.
                     (2026-09-11 晚曾临时回退 rounds=1，后经查爆色根因是预览
-                    层双叠加而非训练算法，已重新默认启用；见 12735dd。)
+                    层双叠加而非训练算法，已重新默认启用 rounds=12 动态上限；
+                    见 12735dd / 2026-09-14。)
     """
     def say(msg):
         (progress or (lambda m: print(m, flush=True)))(msg)
@@ -615,8 +620,8 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
     rounds = int(rounds)
     if rounds > 1:
         from . import iterative as IT
-        say(f"  迭代残差训练（最多 {rounds} 个额外轮次，"
-            "每轮经留出/交叉验证门控，防过拟合与颜色崩坏）…")
+        say(f"  迭代残差训练（安全上限 {rounds} 个额外轮次，"
+            "门控未通过即提前终止；实际接受轮数由门控决定）…")
         chain, lut, itrace = IT.refine(
             model, src_px, dst_px,
             eval_images=(eval_images if eval_images is not None and

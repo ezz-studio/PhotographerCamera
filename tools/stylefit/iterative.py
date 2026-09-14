@@ -224,7 +224,7 @@ def _finish(chain, lut, trace, gate_desc, rounds, say):
 
 # -------------------------------------------------------------------- refine
 def refine(model0, src_px, dst_px, eval_images, plains, ref_stats,
-           strength: float = 0.8, rounds: int = 3, lut_size: int = 33,
+           strength: float = 0.8, rounds: int = 12, lut_size: int = 33,
            progress=None, seed: int = 20240917, fit_px: int = 60000):
     """Iteratively refine the round-0 transfer model.
 
@@ -234,7 +234,10 @@ def refine(model0, src_px, dst_px, eval_images, plains, ref_stats,
     eval_images : HELD-OUT un-graded images for the direct gate (may be None)
     plains   : un-graded fit-side images for the K-fold gate fallback
     ref_stats: target statistics dict (fit computes it from the graded set)
-    rounds   : max additional rounds (1 = legacy single-pass behaviour)
+    rounds   : SAFETY CEILING on extra rounds (1 = legacy single-pass behaviour).
+                The actual count is gate-driven: a round that cannot beat the
+                best honest score at any step size terminates the whole chain,
+                so the loop almost always stops well before this limit.
 
     Returns (chain, lut, trace). `chain` is a CompositeModel even when no
     extra round is accepted, so downstream code has one shape to handle.
