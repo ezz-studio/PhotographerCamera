@@ -147,6 +147,33 @@ import kotlin.math.min
 import kotlin.math.PI
 import kotlin.math.roundToInt
 
+/**
+ * 1.6.2：Grain 滑块的「profile 基准合成」——滑块是 profile grain.amount 之上的**乘数**，
+ * ×1.00 严格等于 profile 原值（不篡改风格）。
+ *
+ * 纯线性乘法在实机上不可感甚至失效，原因有二：
+ *  1) profile 的 grain.amount 普遍很小（实测 0.02~0.06），而渲染端
+ *     FilmGrainShaders.applyDensityFilmGrain 先做 pow(amount, 0.58)，×2 只把内部
+ *     grainAmount 从 0.131 抬到 0.196（约 +50%）——肉眼几乎分辨不出；
+ *  2) grain.amount = 0 的 profile（native / smoke_look 等）乘任何倍率都是 0，
+ *     滑块完全不动。
+ * 故对「向上调节」（>1）段做**可感下限补偿**：按滑动比例把基准抬到
+ * [GRAIN_PERCEPTIBLE_FLOOR] 之后再乘。adj=1 处 deficit 项系数为 0，左右严格连续，
+ * profile 忠实性不受影响；基准高于下限的电影感 profile（如 MONO 400 = 0.2）
+ * deficit=0 → 仍是纯乘数，风格不被改写。向下（<1）段恒为纯乘数。
+ */
+private const val GRAIN_PERCEPTIBLE_FLOOR = 0.08f
+
+/** 1.6.2：快捷面板滑块（EV / Grain）的落盘 debounce，单位毫秒。 */
+private const val ADJ_APPLY_DEBOUNCE_MS = 80L
+
+private fun grainWithMultiplier(base: Float, multiplier: Float): Float {
+    if (multiplier <= 1f) return (base * multiplier).coerceIn(0f, 1f)
+    val deficit = maxOf(0f, GRAIN_PERCEPTIBLE_FLOOR - base)
+    val liftedBase = base + deficit * (multiplier - 1f)
+    return (liftedBase * multiplier).coerceIn(0f, 1f)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScreen(navController: NavController) {
@@ -397,7 +424,9 @@ fun CameraScreen(navController: NavController) {
     var sheetTarget by remember { mutableStateOf<String?>(null) }
     // 0.9.3 EV：滑条始终可用，直接叠加在 profile 基准曝光上
     //（原 0.8.2 AE-L 门控已按用户指令整体移除）。
-    var adjEv by remember { mutableFloatStateOf(0f) }
+    // 1.6.2：持久化到 pc_settings（此前 EV/Grain 只活在内存里，重启或重进相机页
+    // 就悄悄回到默认，用户以为「滑块调了无效」）。
+    var adjEv by remember { mutableFloatStateOf(sp.getFloat("adj_ev", 0f)) }
     // 0.8.2 WB 绝对值滑条：色温真实开尔文、色调 ±20（引擎 CCT/tint 语义）；
     // AWB 关闭瞬间以引擎冻结的实测值为起点（LaunchedEffect 同步）。
     var adjWbTemp by remember { mutableFloatStateOf(5000f) }
@@ -407,7 +436,11 @@ fun CameraScreen(navController: NavController) {
     var awbOn by remember { mutableStateOf(sp.getBoolean("awb_on", true)) }
     // Grain is a MULTIPLIER on the profile's own grain amount: 1.0 = keep the
     // preset's grain character unchanged, 0 = no grain, 2 = double it.
-    var adjGrain by remember { mutableFloatStateOf(1f) }
+    // 1.6.2：持久化到 pc_settings.adj_grain（同上）；实际合成见 grainWithMultiplier。
+    var adjGrain by remember { mutableFloatStateOf(sp.getFloat("adj_grain", 1f)) }
+    // 1.6.2：滑块 debounce 句柄——手指滑动时每一帧都写 DataStore + reload profile LUT
+    // 会掉帧，统一在停手后才真正落实（滑块的数值本身就是实时的，观感无损）。
+    var adjApplyJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val sheetState = rememberModalBottomSheetState()
 
@@ -420,13 +453,48 @@ fun CameraScreen(navController: NavController) {
         }
     }
 
+    // 1.6.2：原生档（未选 profile / 当前槽位 lutId = "none"）下 Grain 滑块的落点。
+    // 此时 profile 基准为 0，颗粒量完全由滑块经 grainWithMultiplier 给出（可感下限
+    // 补偿）；拉回 ×1.00 会写回 0，原生档自动恢复纯净。只有槽位确实是 none 时才写，
+    // 绝不覆盖某个 LUT/滤镜自己的用户配方。
+    fun applyNativeSlotGrainOnly() {
+        if (currentLutId != "none") return
+        val amount = grainWithMultiplier(0f, adjGrain)
+        com.photographercamera.core.debug.DebugLog.log(
+            "PROFILE",
+            "native-slot grain -> lut=$currentLutId grain=$amount (mul=$adjGrain)",
+        )
+        scope.launch {
+            try {
+                val lm = LutManager(context)
+                lm.saveColorRecipeParams(
+                    currentLutId,
+                    com.photographercamera.photon.model.ColorRecipeParams.DEFAULT.copy(
+                        filmGrain = amount,
+                    ),
+                )
+            } catch (t: Throwable) {
+                com.photographercamera.core.debug.DebugLog.logError(
+                    "PROFILE",
+                    "native-slot grain inject failed for '$currentLutId'",
+                    t,
+                )
+            }
+        }
+    }
+
     // 风格注入：把选中的 profile 通过 ProfileToRecipeMapper 映射到 ColorRecipeParams，
     // 写入 LutManager（按 lutId 存 DataStore），再 pvm.setLut 让预览+成片套用。
-    // 原 adjEv/adjWbTemp/adjWbTint/adjGrain 滑块仅作 UI 占位（EV/WB/grain 已由 recipe 覆盖）。
+    // （0.9.x 旧注：adjEv/adjWbTemp/adjWbTint/adjGrain 曾仅作 UI 占位；1.6.2 起 EV 与
+    //  Grain 已真正叠加在 profile 基准之上，见 grainWithMultiplier / adjEv 加法。）
     fun applyAdjustments() {
         if (selected.isEmpty()) {
             // 未选 profile：halation/grain 等单例通道回默认，防上一 profile 残留
             com.photographercamera.core.photon.color.FilmParamsStore.reset()
+            // 1.6.2：原生档（lutId = "none"）下 Grain 滑块仍需可用。此处基准量是 0，
+            // 由 grainWithMultiplier 的可感下限补偿给出颗粒；拉回 ×1.00 即写回 0，
+            // 原生档自动恢复干净。
+            applyNativeSlotGrainOnly()
             return
         }
         val profile = ProfileLoader.getProfile(selected) ?: run {
@@ -434,15 +502,18 @@ fun CameraScreen(navController: NavController) {
             return
         }
         val mapping = ProfileToRecipeMapper.map(profile)
-        // 快捷面板叠加：EV（recipe 曝光偏移，始终生效）与 Grain 乘数
+        // 快捷面板叠加：EV（recipe 曝光偏移，始终生效）与 Grain 乘数。
+        // 1.6.2：Grain 不再是无补偿的线性乘法——见 grainWithMultiplier 注释。
+        val grainBase = mapping.recipe.filmGrain
         val adjustedRecipe = mapping.recipe.copy(
             exposure = mapping.recipe.exposure + adjEv,
-            filmGrain = mapping.recipe.filmGrain * adjGrain,
+            filmGrain = grainWithMultiplier(grainBase, adjGrain),
         )
         val lutId = "profile:$selected"
         com.photographercamera.core.debug.DebugLog.log(
             "PROFILE",
             "inject '$selected' -> lut=$lutId grain=${adjustedRecipe.filmGrain} " +
+                "(base=$grainBase mul=$adjGrain) " +
                 "wb=(${adjustedRecipe.temperature},${adjustedRecipe.tint}) ev=${adjustedRecipe.exposure}",
         )
         scope.launch {
@@ -487,6 +558,19 @@ fun CameraScreen(navController: NavController) {
             } catch (t: Throwable) {
                 com.photographercamera.core.debug.DebugLog.logError("PROFILE", "recipe inject failed for '$selected'", t)
             }
+        }
+    }
+
+    /**
+     * 1.6.2：快捷面板滑块统一入口——UI 数值实时跟随，落盘 + profile 重注入 debounce
+     * 到停手后执行（一次拖动只写一次 DataStore，不再每帧 reload profile LUT）。
+     */
+    fun commitAdjustments(persist: () -> Unit) {
+        adjApplyJob?.cancel()
+        adjApplyJob = scope.launch {
+            kotlinx.coroutines.delay(ADJ_APPLY_DEBOUNCE_MS)
+            persist()
+            applyAdjustments()
         }
     }
 
@@ -1085,7 +1169,10 @@ fun CameraScreen(navController: NavController) {
                                 value = adjEv,
                                 center = 0f,
                                 range = -2f..2f,
-                                onValueChange = { adjEv = it; applyAdjustments() },
+                                onValueChange = { v ->
+                                    adjEv = v
+                                    commitAdjustments { sp.edit().putFloat("adj_ev", v).apply() }
+                                },
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
@@ -1161,7 +1248,10 @@ fun CameraScreen(navController: NavController) {
                                 value = adjGrain,
                                 center = 1f,
                                 range = 0f..2f,
-                                onValueChange = { adjGrain = it; applyAdjustments() },
+                                onValueChange = { v ->
+                                    adjGrain = v
+                                    commitAdjustments { sp.edit().putFloat("adj_grain", v).apply() }
+                                },
                             )
                             Text("×" + "%.2f".format(adjGrain), color = TextSecondary, fontSize = 13.sp)
                         }
