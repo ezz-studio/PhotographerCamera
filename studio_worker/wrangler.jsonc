@@ -1,0 +1,13 @@
+// PhotographerCamera Studio — Cloudflare Worker 部署配置
+// 静态资源（public/）由 Workers Assets 托管；src/worker.js 只处理轻量 API。
+// 训练（numpy/scipy）无法在 Worker 内运行 —— 训练仍在桌面端 / 本地服务器完成，
+// 本站只做：导入 profile → WebGL 实时预览调参 → 导出 .json / .cube / 批量 PNG。
+{
+  "name": "photographer-studio",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  }
+}
