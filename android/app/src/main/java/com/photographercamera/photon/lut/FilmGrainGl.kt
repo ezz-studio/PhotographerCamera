@@ -20,6 +20,8 @@ internal class FilmGrainGl(
     private var frameSeedLocation = -1
     private var pixelScaleLocation = -1
     private var lumaContrastLocation = -1
+    private var sizeLocation = -1
+    private var densityLocation = -1
     private var outputTextureId = 0
     private var outputFramebufferId = 0
     private var outputWidth = 0
@@ -80,6 +82,8 @@ internal class FilmGrainGl(
         GLES30.glUniform1f(frameSeedLocation, frameSeed)
         GLES30.glUniform1f(pixelScaleLocation, FilmGrainShaders.pixelScale(width, height))
         GLES30.glUniform1f(lumaContrastLocation, FilmParamsStore.current.grainLumaContrast)
+        GLES30.glUniform1f(sizeLocation, FilmParamsStore.current.grainSize)
+        GLES30.glUniform1f(densityLocation, FilmParamsStore.current.grainDensity)
         drawQuad(programId)
         val error = GLES30.glGetError()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
@@ -99,6 +103,8 @@ internal class FilmGrainGl(
         frameSeedLocation = -1
         pixelScaleLocation = -1
         lumaContrastLocation = -1
+        sizeLocation = -1
+        densityLocation = -1
         outputTextureId = 0
         outputFramebufferId = 0
         outputWidth = 0
@@ -133,6 +139,8 @@ internal class FilmGrainGl(
         frameSeedLocation = GLES30.glGetUniformLocation(programId, "uFrameSeed")
         pixelScaleLocation = GLES30.glGetUniformLocation(programId, "uPixelScale")
         lumaContrastLocation = GLES30.glGetUniformLocation(programId, "uGrainLumaContrast")
+        sizeLocation = GLES30.glGetUniformLocation(programId, "uGrainSize")
+        densityLocation = GLES30.glGetUniformLocation(programId, "uGrainDensity")
         return true
     }
 

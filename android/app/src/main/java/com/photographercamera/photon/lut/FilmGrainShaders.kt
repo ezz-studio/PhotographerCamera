@@ -10,6 +10,13 @@ package com.photographercamera.photon.lut
 internal object FilmGrainShaders {
     val FUNCTIONS = """
         uniform float uGrainLumaContrast;
+        // grain.size / grain.density：此前 pc_grain（effect.frag）是唯一读取它们的实现，
+        // 而该着色器已无 Kotlin 引用（死代码）→ 两个 profile 参数在 APP 内完全不生效。
+        // 现在按桌面 tools/profile_renderer.apply_grain 的语义接进实时通路：
+        //   size    → 颗粒团块的空间频率（越大=颗粒越粗），默认 1.0 与修复前逐位一致
+        //   density → 银盐密度的噪声幅度增益，默认 1.0 与修复前逐位一致
+        uniform float uGrainSize;
+        uniform float uGrainDensity;
         vec3 grainRandom3(vec3 c) {
             float pos = dot(c, vec3(17.0, 59.4, 15.0));
             pos = mod(pos, 1608.49543864);
@@ -112,7 +119,10 @@ internal object FilmGrainShaders {
                 fract(frameSeed * 0.569840296)
             ) * 4096.0;
             float seedPlane = mod(frameSeed, 4096.0) * 0.03125;
-            vec2 grainPixel = outputPixel / max(pixelScale, 0.25) + seedOffset;
+            // grain.size：颗粒团块尺寸——除以 size 降低空间频率（块更大）。
+            // pixelScale 只随渲染分辨率变化，profile 的 size 在此叠加。
+            float grainSizeScale = clamp(uGrainSize, 0.25, 4.0);
+            vec2 grainPixel = outputPixel / max(pixelScale * grainSizeScale, 0.25) + seedOffset;
             float lumaGrain = grainSimplex(vec3(grainPixel * 0.42, seedPlane));
             float dyeR = grainSimplex(vec3(grainPixel * 0.12, seedPlane + 17.0));
             float dyeB = grainSimplex(vec3(grainPixel * 0.12, seedPlane + 43.0));
@@ -127,7 +137,9 @@ internal object FilmGrainShaders {
             vec3 densityNoise = vec3(lumaGrain * lumaDensityStd * 2.7);
             densityNoise += dyeCloud * densityStd * 0.22;
             densityNoise *= highlightVisibility;
-            density = max(density + densityNoise * grainAmount * 1.8, vec3(0.0));
+            // grain.density：银盐密度越高，单位面积颗粒起伏越大 → 幅度增益。
+            float grainDensityScale = clamp(uGrainDensity, 0.25, 4.0);
+            density = max(density + densityNoise * grainAmount * 1.8 * grainDensityScale, vec3(0.0));
             return grainLinearToSrgb(exp(-density * 2.302585093));
         }
     """.trimIndent()

@@ -928,6 +928,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 locations.uGrainLumaContrastLocation,
                 com.photographercamera.core.photon.color.FilmParamsStore.current.grainLumaContrast,
             )
+            GLES30.glUniform1f(
+                locations.uGrainSizeLocation,
+                com.photographercamera.core.photon.color.FilmParamsStore.current.grainSize,
+            )
+            GLES30.glUniform1f(
+                locations.uGrainDensityLocation,
+                com.photographercamera.core.photon.color.FilmParamsStore.current.grainDensity,
+            )
             GLES30.glUniform1f(locations.uVignetteLocation, params.vignette)
             // 0.9.17：profile.vignette 桌面语义（radius/feather/center），与成片端同步
             run {

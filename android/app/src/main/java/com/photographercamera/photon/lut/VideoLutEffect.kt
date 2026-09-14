@@ -880,6 +880,14 @@ private class VideoLutShaderProgram(
             GLES30.glGetUniformLocation(programId, "uGrainLumaContrast"),
             com.photographercamera.core.photon.color.FilmParamsStore.current.grainLumaContrast,
         )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(programId, "uGrainSize"),
+            com.photographercamera.core.photon.color.FilmParamsStore.current.grainSize,
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(programId, "uGrainDensity"),
+            com.photographercamera.core.photon.color.FilmParamsStore.current.grainDensity,
+        )
         
         if (colorRecipeEnabled) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(programId, "uExposure"), currentRecipeParams.exposure)
