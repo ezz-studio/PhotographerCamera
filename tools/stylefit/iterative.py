@@ -277,7 +277,11 @@ def refine(model0, src_px, dst_px, eval_images, plains, ref_stats,
     else:
         best = None
         gate_desc = "kfold"
-        say("    验证集不足 3 张：轮次门控切换为对未调色集的 4 折交叉验证")
+        # 注意：这里说的不是"未调色验证集"不够——未调色图全部都在用（拟合源分布
+        # + K 折门控）。指的是"独立留出评估集"（不参与拟合、专供直评的那一批）。
+        # 未调色图已参与拟合，直接拿它自评会偏乐观，所以诚实的做法是 K 折交叉验证。
+        say(f"    未配置独立留出验证集（≥3 张不参与拟合的未调色图）："
+            f"轮次门控改用对全部 {len(plains)} 张未调色图的 4 折交叉验证")
 
     for r in range(1, rounds + 1):
         base_gamma, base_caps = _round_params(strength, r)
