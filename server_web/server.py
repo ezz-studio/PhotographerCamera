@@ -548,9 +548,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "无效的 profile JSON（顶层应为对象）"}, 400)
                 ok, errors = S.validate_profile(prof)
                 prof = S.safe_clamp(prof)
-                _norm = R.neutralize_lut_params(prof)  # see /api/load_profile note
-                if _norm is not None:
-                    prof = _norm
+                # (no neutralize_lut_params — reflect the JSON faithfully; see /api/load_profile)
                 src_name = str(body.get("name") or
                                os.path.splitext(str(prof.get("name") or "imported"))[0] or
                                "imported")
