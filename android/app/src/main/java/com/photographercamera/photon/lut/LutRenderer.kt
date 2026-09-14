@@ -924,6 +924,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 locations.uFilmGrainPixelScaleLocation,
                 FilmGrainShaders.pixelScale(width, height)
             )
+            GLES30.glUniform1f(
+                locations.uGrainLumaContrastLocation,
+                com.photographercamera.core.photon.color.FilmParamsStore.current.grainLumaContrast,
+            )
             GLES30.glUniform1f(locations.uVignetteLocation, params.vignette)
             // 0.9.17：profile.vignette 桌面语义（radius/feather/center），与成片端同步
             run {

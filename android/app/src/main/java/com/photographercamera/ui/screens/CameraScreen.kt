@@ -467,6 +467,7 @@ fun CameraScreen(navController: NavController) {
                         halationWarmth = mapping.residual.halationWarmth,
                         grainSize = mapping.residual.grainSize,
                         grainDensity = mapping.residual.grainDensity,
+                        grainLumaContrast = mapping.residual.grainLumaContrast,
                         shadowSaturation = mapping.residual.shadowSaturation,
                         filmCurveShadowFloor = mapping.residual.filmCurveShadowFloor,
                         filmCurveHighlightCeiling = mapping.residual.filmCurveHighlightCeiling,

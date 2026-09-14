@@ -9,6 +9,7 @@ package com.photographercamera.photon.lut
  */
 internal object FilmGrainShaders {
     val FUNCTIONS = """
+        uniform float uGrainLumaContrast;
         vec3 grainRandom3(vec3 c) {
             float pos = dot(c, vec3(17.0, 59.4, 15.0));
             pos = mod(pos, 1608.49543864);
@@ -119,7 +120,10 @@ internal object FilmGrainShaders {
             float lumaDensityStd = dot(densityStd, vec3(0.333333));
             float positiveLuma = dot(linearColor, vec3(0.2126, 0.7152, 0.0722));
             float highlightMask = smoothstep(0.55, 0.92, positiveLuma);
-            float highlightVisibility = mix(1.0, 0.32, highlightMask);
+            // uGrainLumaContrast: 1=强胶片感（保留历史默认 0.32 高光抑制），0=全画面均匀（假噪点）。
+            float grainLc = clamp(uGrainLumaContrast, 0.0, 1.0);
+            float highlightFloor = mix(1.0, 0.32, grainLc);
+            float highlightVisibility = mix(1.0, highlightFloor, highlightMask);
             vec3 densityNoise = vec3(lumaGrain * lumaDensityStd * 2.7);
             densityNoise += dyeCloud * densityStd * 0.22;
             densityNoise *= highlightVisibility;

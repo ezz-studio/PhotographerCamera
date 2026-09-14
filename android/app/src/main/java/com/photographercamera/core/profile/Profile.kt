@@ -87,6 +87,9 @@ data class Grain(
     @SerialName("amount") val amount: Float = 0.0f,
     @SerialName("size") val size: Float = 1.0f,
     @SerialName("density") val density: Float = 1.0f,
+    // 胶片式颗粒亮度响应：1.0=强胶片感（高光颗粒显著弱于暗部），0.0=全画面均匀（假噪点）。
+    // 键名遵循 profile 全库 snake_case 惯例（与 highlight_rolloff/black_point 一致）。
+    @SerialName("luma_contrast") val lumaContrast: Float = 1.0f,
 )
 
 @Serializable

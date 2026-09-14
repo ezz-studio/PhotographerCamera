@@ -1,6 +1,7 @@
 package com.photographercamera.photon.lut
 
 import android.opengl.GLES30
+import com.photographercamera.core.photon.color.FilmParamsStore
 import com.photographercamera.photon.utils.PLog
 import kotlin.math.abs
 
@@ -18,6 +19,7 @@ internal class FilmGrainGl(
     private var amountLocation = -1
     private var frameSeedLocation = -1
     private var pixelScaleLocation = -1
+    private var lumaContrastLocation = -1
     private var outputTextureId = 0
     private var outputFramebufferId = 0
     private var outputWidth = 0
@@ -77,6 +79,7 @@ internal class FilmGrainGl(
         GLES30.glUniform1f(amountLocation, amount.coerceIn(0f, 1f))
         GLES30.glUniform1f(frameSeedLocation, frameSeed)
         GLES30.glUniform1f(pixelScaleLocation, FilmGrainShaders.pixelScale(width, height))
+        GLES30.glUniform1f(lumaContrastLocation, FilmParamsStore.current.grainLumaContrast)
         drawQuad(programId)
         val error = GLES30.glGetError()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
@@ -95,6 +98,7 @@ internal class FilmGrainGl(
         amountLocation = -1
         frameSeedLocation = -1
         pixelScaleLocation = -1
+        lumaContrastLocation = -1
         outputTextureId = 0
         outputFramebufferId = 0
         outputWidth = 0
@@ -128,6 +132,7 @@ internal class FilmGrainGl(
         amountLocation = GLES30.glGetUniformLocation(programId, "uAmount")
         frameSeedLocation = GLES30.glGetUniformLocation(programId, "uFrameSeed")
         pixelScaleLocation = GLES30.glGetUniformLocation(programId, "uPixelScale")
+        lumaContrastLocation = GLES30.glGetUniformLocation(programId, "uGrainLumaContrast")
         return true
     }
 

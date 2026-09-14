@@ -37,7 +37,7 @@ const PARAM_LABEL = {
   threshold: "阈值", strength: "强度", amount: "强度", radius: "半径",
   saturation: "饱和度", contrast: "对比度", compression: "压缩",
   black_point: "黑点", luma: "亮度噪点", chroma: "彩度噪点",
-  size: "颗粒尺寸", density: "密度", warmth: "暖度", midpoint: "中点",
+  size: "颗粒尺寸", density: "密度", luma_contrast: "颗粒明暗分布", warmth: "暖度", midpoint: "中点",
   feather: "羽化", roundness: "圆度", opacity: "不透明度", enabled: "启用",
 };
 
@@ -327,13 +327,14 @@ function renderControls() {
     const body = wrap.querySelector(".group-body");
 
     items.forEach((c) => {
-      const cur = getPath(state.profile, c.path);
-      if (cur === undefined) return;                 // not present in this profile
-
       if (c.type === "tone_curve") {
         renderToneCurve(body, c);
         return;
       }
+      const cur = getPath(state.profile, c.path);
+      // 缺失的键（如 stylefit profile 把 hsl 子项写成空对象）按架构默认值显示，
+      // 这样 HSL 等滑竿始终可见、可微调，同时绝不覆盖 JSON 中已有的真实数值。
+      const val = (cur === undefined) ? (c.default != null ? c.default : 0) : cur;
 
       const row = document.createElement("div");
       row.className = "slider";
@@ -346,7 +347,7 @@ function renderControls() {
       if (c.type === "boolean") {
         row.innerHTML =
           `<div class="lab"><span class="name">${label}</span>` +
-          `<span class="val">${cur ? "开" : "关"}</span></div>`;
+          `<span class="val">${val ? "开" : "关"}</span></div>`;
         const btn = row.querySelector(".val");
         btn.onclick = () => {
           const v = !getPath(state.profile, c.path);
@@ -358,8 +359,8 @@ function renderControls() {
         const step = c.type === "integer" ? 1 : (c.step || 0.01);
         row.innerHTML =
           `<div class="lab"><span class="name">${label}</span>` +
-          `<span class="val" contenteditable="false">${(+cur).toFixed(3)}</span></div>` +
-          `<input type="range" min="${c.min}" max="${c.max}" step="${step}" value="${cur}">`;
+          `<span class="val" contenteditable="false">${(+val).toFixed(3)}</span></div>` +
+          `<input type="range" min="${c.min}" max="${c.max}" step="${step}" value="${val}">`;
         const range = row.querySelector("input");
         const valEl = row.querySelector(".val");
         range.oninput = () => {

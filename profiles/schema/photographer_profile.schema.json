@@ -116,7 +116,8 @@
       "properties": {
         "amount":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
         "size":    { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 },
-        "density": { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 }
+        "density": { "type": "number", "minimum": 0.5, "maximum": 3, "default": 1.0 },
+        "luma_contrast": { "type": "number", "minimum": 0, "maximum": 1, "default": 1.0, "description": "胶片颗粒亮度分布对比：1=高光颗粒显著弱于暗部（胶片感），0=全画面均匀（假噪点）" }
       }
     },
     "noise": {

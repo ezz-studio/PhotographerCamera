@@ -22,6 +22,8 @@ object FilmParamsStore {
         val halationWarmth: Float = 1f,
         val grainSize: Float = 1f,
         val grainDensity: Float = 1f,
+        /** grain.lumaContrast（0..1）：胶片颗粒高光/暗部分布对比，1=强胶片感。 */
+        val grainLumaContrast: Float = 1f,
         val shadowSaturation: Float = 1f,
         val filmCurveShadowFloor: Float = 8f,
         val filmCurveHighlightCeiling: Float = 248f,
@@ -53,8 +55,9 @@ object FilmParamsStore {
     ) {
         val isIdentity: Boolean
             get() = halationStrength <= 0f && grainSize == 1f && grainDensity == 1f &&
-                shadowSaturation == 1f && filmCurveShadowFloor == 8f &&
-                filmCurveHighlightCeiling == 248f && colorMatrix3x3 == IDENTITY_MATRIX
+                grainLumaContrast == 1f && shadowSaturation == 1f &&
+                filmCurveShadowFloor == 8f && filmCurveHighlightCeiling == 248f &&
+                colorMatrix3x3 == IDENTITY_MATRIX
     }
 
     @Volatile

@@ -129,7 +129,7 @@ def default_profile(name: str = "Photographer A") -> dict:
         "shadow": {"black_point": 0.0, "compression": 0.0, "tint": [0, 0, 0], "saturation": 1.0, "contrast": 1.0},
         "lens": {"vignette": 0.0, "chromatic_aberration": 0.0, "sharpness_falloff": 0.0,
                  "distortion": 0.0, "bloom": 0.0, "flare": 0.0},
-        "grain": {"amount": 0.0, "size": 1.0, "density": 1.0},
+        "grain": {"amount": 0.0, "size": 1.0, "density": 1.0, "luma_contrast": 1.0},
         "noise": {"luma": 0.0, "chroma": 0.0},
         "halation": {"amount": 0.0, "radius": 1.0, "threshold": 0.9, "warmth": 1.0},
         "bloom": {"amount": 0.0, "radius": 1.0, "threshold": 0.9},

@@ -26,6 +26,7 @@ data class ResidualParams(
     val colorMatrix3x3: List<List<Float>>,
     val grainSize: Float,
     val grainDensity: Float,
+    val grainLumaContrast: Float,
     val halationRadius: Float,
     val halationThreshold: Float,
     val halationWarmth: Float,
@@ -53,34 +54,24 @@ object ProfileToRecipeMapper {
 
     /**
      * stylefit v3 判定：profile 自带 3D 风格 LUT（color_layer=="lut" 且 payload 有数据）。
-     * 语义与桌面 tools/profile_renderer.py render() 一致——3D LUT 是唯一风格色阶段，
-     * 存在时必须旁路整条参数化色链（exposure/wb/matrix/highlight/shadow/tone_curve/hsl），
-     * 否则双重加风格（LUT+参数链叠加）导致严重过调/偏色。
+     * 语义与桌面 tools/profile_renderer.py render() 一致——3D LUT 承载全部已学色彩风格；
+     * 而 profile 的 exposure/wb/matrix/highlight/shadow/tone_curve/hsl 作为 LUT 之**上**的
+     * 微调层原样下发（不再 neutralize）。stylefit 生成的 LUT profile 这些字段恒为 identity，
+     * 故默认无叠加、不会双施加爆色；用户在 JSON 里改它们即实时成为 LUT 之上的分调。
      */
     fun isLutProfile(p: PhotographerProfile): Boolean =
         p.colorLayer == "lut" && !p.colorLut?.data.isNullOrBlank()
 
-    /**
-     * LUT 分支用的"色链中性化"副本：参数化色层全部回 schema 默认（=identity），
-     * 空间层（grain/bloom/halation/vignette/sharpen/lens/film_curve）原样保留，
-     * map() 主体无需感知该分支。
-     */
-    private fun neutralizeColorLayers(p: PhotographerProfile): PhotographerProfile = p.copy(
-        exposure = Exposure(),
-        whiteBalance = WhiteBalance(),
-        colorMatrix = ColorMatrix(),
-        highlightRolloff = HighlightRolloff(),
-        shadow = Shadow(),
-        toneCurve = ToneCurve(),
-        hsl = Hsl(),
-    )
+    // 注意：路线 A 下不再 neutralize 色彩链——profile 的 exposure/wb/matrix/highlight/
+    // shadow/tone/hsl 作为 LUT 之上的微调层原样下发（map() 内 effective = p）。
+    // 生成型 LUT profile 这些字段恒为 identity，故默认无叠加；编辑即分调。
 
     /**
      * PhotographerProfile → ColorRecipeParams(+ResidualParams)。
      * 每个字段的单位换算见行内注释；默认值对默认值，identity 对 identity。
      */
     fun map(p: PhotographerProfile): RecipeMapping {
-        val effective = if (isLutProfile(p)) neutralizeColorLayers(p) else p
+        val effective = p
         // ColorRecipeParams 是全 val data class：用 copy 链逐步覆盖（不可变风格）。
         var r = ColorRecipeParams()
 
@@ -125,6 +116,7 @@ object ProfileToRecipeMapper {
             colorMatrix3x3 = effective.colorMatrix.matrix3x3,
             grainSize = effective.grain.size,
             grainDensity = effective.grain.density,
+            grainLumaContrast = effective.grain.lumaContrast,
             halationRadius = effective.halation.radius,
             halationThreshold = effective.halation.threshold,
             halationWarmth = effective.halation.warmth,
@@ -237,7 +229,7 @@ object ProfileToRecipeMapper {
 
     private fun identityResidual(): ResidualParams = ResidualParams(
         colorMatrix3x3 = listOf(listOf(1f, 0f, 0f), listOf(0f, 1f, 0f), listOf(0f, 0f, 1f)),
-        grainSize = 1f, grainDensity = 1f,
+        grainSize = 1f, grainDensity = 1f, grainLumaContrast = 1f,
         halationRadius = 1f, halationThreshold = 0.9f, halationWarmth = 1f,
         vignetteRadius = 1f, vignetteFeather = 0.5f, vignetteCenter = listOf(0.5f, 0.5f),
         sharpenRadius = 1f, bloomRadius = 1f, bloomThreshold = 0.9f,

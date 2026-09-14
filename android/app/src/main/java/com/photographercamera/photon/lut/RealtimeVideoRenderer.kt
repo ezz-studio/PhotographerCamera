@@ -546,6 +546,10 @@ class RealtimeVideoRenderer(
             locations.uFilmGrainPixelScaleLocation,
             FilmGrainShaders.pixelScale(encoderOutputSize.width, encoderOutputSize.height),
         )
+        GLES30.glUniform1f(
+            locations.uGrainLumaContrastLocation,
+            com.photographercamera.core.photon.color.FilmParamsStore.current.grainLumaContrast,
+        )
         GLES30.glUniform1f(locations.uVignetteLocation, params.vignette)
         GLES30.glUniform1f(locations.uFlashLocation, params.flash)
         GLES30.glUniform1f(locations.uBleachBypassLocation, params.bleachBypass)

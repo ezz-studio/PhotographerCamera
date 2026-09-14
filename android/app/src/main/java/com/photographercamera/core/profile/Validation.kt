@@ -83,6 +83,7 @@ fun validateProfile(p: PhotographerProfile): ValidationResult {
     check(errs, "grain.amount", p.grain.amount, 0f, 1f)
     check(errs, "grain.size", p.grain.size, 0.5f, 3f)
     check(errs, "grain.density", p.grain.density, 0.5f, 3f)
+    check(errs, "grain.luma_contrast", p.grain.lumaContrast, 0f, 1f)
 
     check(errs, "noise.luma", p.noise.luma, 0f, 1f)
     check(errs, "noise.chroma", p.noise.chroma, 0f, 1f)
