@@ -139,12 +139,6 @@ data class RawStackResult(
      */
     val mgcSpatialStrengthMap: MgcSpatialStrengthMap? = null,
     /**
-     * Process-local Sabre NoiseModel coefficient scale measured from accumulated Q8 green merge
-     * weights. V25 does not apply a second reference-SNR lookup-table scale after
-     * GetMergedNoiseModel.
-     */
-    val mgcSabreNoiseModelScale: Float? = null,
-    /**
      * Merged output-frame SNR used by MGC FinishRaw to select luma/chroma tuning.
      * This is the linear signal-domain SNR, not ISO or sensor gain.
      */

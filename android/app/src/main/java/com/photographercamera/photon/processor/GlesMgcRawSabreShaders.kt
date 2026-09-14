@@ -646,9 +646,8 @@ internal object GlesMgcRawSabreShaders {
 
     /**
      * Reproduces the Q8 `SABRE: Average merge factor` diagnostic at V25 0x34e6964. The original
-     * computes the global mean of `256 / accumulated_green_weight_q8`. This is the measured
-     * coefficient scale Photon can transport for its reimplemented Sabre merge; the diagnostic
-     * itself must not be mistaken for the input of GetMergedNoiseModel.
+     * computes the global mean of `256 / accumulated_green_weight_q8`. This is diagnostic only;
+     * classic Sabre builds its merged NoiseModel from the exposure-normalized frame models.
      *
      * Four-by-four reduction keeps the readback small without changing the global average.
      */

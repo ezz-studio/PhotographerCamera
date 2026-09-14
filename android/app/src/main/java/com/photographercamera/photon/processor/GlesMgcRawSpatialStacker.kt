@@ -1842,22 +1842,20 @@ internal class GlesMgcRawSpatialStacker(
             val strengthResolveStartNs = System.nanoTime()
             val spatialDenoiseEnabled =
                 MultiFrameConfig.ENABLE_MGC_SPATIAL_DEFAULT_DENOISE && !referenceOnly
-            val resolvedSpatialNoiseModel = if (
-                strengthCapture != null && queuedStrengthReadback != null
-            ) {
-                resolveSpatialNoiseModel(strengthCapture, queuedStrengthReadback)
-            } else {
-                null
-            }
             val spatialNoiseModel = if (spatialDenoiseEnabled) {
-                resolvedSpatialNoiseModel ?: createIdentitySpatialNoiseModel(
-                    referenceCalibration = referenceCalibration,
-                    reason = when {
-                        strengthCapture == null -> "single-admitted-frame"
-                        queuedStrengthReadback == null -> "strength-readback-unavailable"
-                        else -> "strength-aot-invalid"
-                    },
-                )
+                if (spatialNoiseFrameCount == 1) {
+                    createIdentitySpatialNoiseModel(referenceCalibration)
+                } else {
+                    val capture = checkNotNull(strengthCapture) {
+                        "MGC Spatial multi-frame noise capture is unavailable"
+                    }
+                    val readback = checkNotNull(queuedStrengthReadback) {
+                        "MGC Spatial multi-frame noise readback is unavailable"
+                    }
+                    checkNotNull(resolveSpatialNoiseModel(capture, readback)) {
+                        "MGC Spatial multi-frame AOT noise model failed"
+                    }
+                }
             } else {
                 null
             }
@@ -1923,7 +1921,6 @@ internal class GlesMgcRawSpatialStacker(
                 )
             }
             checkGlError("MGC Spatial ${outputMode.name} merge")
-            returned = true
             // MGC's base-SNR * sqrt(planned frame count) value is only a pre-merge planning
             // estimate. FinishRaw leaves its explicit SNR override unset and evaluates the
             // propagated Spatial output NoiseModel instead, after alignment/rejection weights
@@ -1938,11 +1935,16 @@ internal class GlesMgcRawSpatialStacker(
             } else {
                 null
             }
-            val finishRawDenoiseSnr = propagatedOutputSnr
-                ?: MgcSpatialMergeTuning.mergedSnr(
+            val finishRawDenoiseSnr = if (spatialDenoiseEnabled) {
+                checkNotNull(propagatedOutputSnr) {
+                    "MGC Spatial output NoiseModel cannot produce a finite SNR"
+                }
+            } else {
+                MgcSpatialMergeTuning.mergedSnr(
                     bayerKernelTuning.referenceSnr,
                     mergedFrames,
                 )
+            }
             val resultLabel = when {
                 exportedRgbTexture != 0 -> "${gpuLinearRgbStorage.name}_GPU"
                 exportedBayerTexture != 0 -> "BAYER16_GPU"
@@ -1970,7 +1972,7 @@ internal class GlesMgcRawSpatialStacker(
                     "total=${(System.nanoTime() - processStartNs) / 1_000_000L}ms",
             )
             val rgbOutput = outputMode == MgcSpatialOutputMode.RGB
-            RawStackResult(
+            val result = RawStackResult(
                 fusedBayerBuffer = cpuOutput,
                 width = outputWidth,
                 height = outputHeight,
@@ -2017,6 +2019,8 @@ internal class GlesMgcRawSpatialStacker(
                 mgcSpatialReferenceOnlyDiagnostic = referenceOnly,
                 fastMomentsRawStats = fastMomentsRawStats,
             )
+            returned = true
+            result
         } catch (error: Exception) {
             PLog.e(TAG, "MGC Spatial ${outputMode.name} merge failed", error)
             null
@@ -2187,6 +2191,12 @@ internal class GlesMgcRawSpatialStacker(
                 exposureScale = 1f,
                 kernelTuning = kernelTuning,
             )
+            val noiseFrames = arrayListOf(
+                MgcSabreMergedNoiseModel.Frame(
+                    referenceCalibration.cameraRgbReadNoise,
+                    referenceCalibration.cameraRgbShotNoise,
+                ),
+            )
             val sabreResolveFinalBlackLevel =
                 sabreResolveBlackLevel(referenceCalibration.blackLevels)
             PLog.i(
@@ -2258,6 +2268,10 @@ internal class GlesMgcRawSpatialStacker(
                     referenceExposure / validExposureProduct(frame.exposureProduct)
                     ).toFloat().coerceIn(MIN_EXPOSURE_SCALE, MAX_EXPOSURE_SCALE)
                 val calibration = calibrationForFrame(frame, exposureScale, kernelTuning)
+                noiseFrames += MgcSabreMergedNoiseModel.Frame(
+                    calibration.cameraRgbReadNoise,
+                    calibration.cameraRgbShotNoise,
+                )
                 uploadRaw(images[index], currentRaw, "Sabre frame $index")
                 renderSabreExtract(currentRaw, currentExtracted, extractedWidth, extractedHeight)
                 val noiseTexture = createSabreNoiseLut(referenceCalibration, calibration)
@@ -2354,11 +2368,16 @@ internal class GlesMgcRawSpatialStacker(
             val sabreAverageMergeFactor = readSabreAverageMergeFactor(
                 accumulatedWeightsGb = accumulatedWeightsGb,
             )
-            val sabreNoiseModelScale = sabreAverageMergeFactor
+            val mergedNoiseModel = MgcSabreMergedNoiseModel.merge(
+                noiseFrames,
+                kernelTuning.referenceSnr,
+            )
             PLog.i(
                 SABRE_TAG,
-                "MGC Sabre merged NoiseModel averageMergeFactor=$sabreAverageMergeFactor " +
-                    "coefficientScale=$sabreNoiseModelScale",
+                "MGC Sabre merged NoiseModel diagnosticAverageMergeFactor=$sabreAverageMergeFactor " +
+                    "snrCorrection=${MgcSabreMergedNoiseModel.snrCorrection(kernelTuning.referenceSnr)} " +
+                    "read=${mergedNoiseModel.read.contentToString()} " +
+                    "shot=${mergedNoiseModel.shot.contentToString()}",
             )
 
             renderSabreDehomogenize(
@@ -2570,15 +2589,13 @@ internal class GlesMgcRawSpatialStacker(
                 }
             }
             checkGlError("MGC Sabre Resolve/VGN color noise")
-            returned = true
-            // FinishRaw resolves denoise tuning SNR from the merged frame's NoiseModel when no
-            // explicit override is present. Photon represents Sabre's merged model with the
-            // measured Q8 average merge factor. V25's GetMergedNoiseModel branch returns the
-            // model directly and does not apply a second SNR lookup-table reduction. The
-            // separately logged referenceSnr * sqrt(frameCount) value remains only a pre-merge
-            // planning estimate.
-            val finishRawDenoiseSnr = kernelTuning.referenceSnr /
-                sqrt(sabreNoiseModelScale)
+            // Classic Sabre composes exposure-normalized frame models and applies its SNR
+            // correction before FinishRaw estimates SNR from the resulting green coefficients.
+            val finishRawDenoiseSnr = checkNotNull(MgcSpatialMergeTuning.outputNoiseModelSnr(
+                signal = kernelTuning.referenceSignal,
+                greenReadVariance = mergedNoiseModel.read[1],
+                greenShotNoiseFactor = mergedNoiseModel.shot[1],
+            )) { "MGC Sabre merged NoiseModel cannot produce a finite SNR" }
             PLog.i(
                 SABRE_TAG,
                 "MGC Sabre complete frames=${frames.size} native=${width}x$height " +
@@ -2590,7 +2607,7 @@ internal class GlesMgcRawSpatialStacker(
                     "chromaFinal=${chromaResult.finalSubmissionMs}ms " +
                     "total=${elapsedMs(processStartNs)}ms",
             )
-            RawStackResult(
+            val result = RawStackResult(
                 fusedBayerBuffer = cpuOutput,
                 width = outputWidth,
                 height = outputHeight,
@@ -2612,11 +2629,15 @@ internal class GlesMgcRawSpatialStacker(
                 },
                 lensShadingCorrectionApplied = hasLensShading(),
                 mergedFrameCount = frames.size,
-                mgcSabreNoiseModelScale = sabreNoiseModelScale,
+                mgcDenoiseReadNoise = mergedNoiseModel.read,
+                mgcDenoiseShotNoise = mergedNoiseModel.shot,
+                mgcDenoiseCorrelation = mergedNoiseModel.correlation,
                 mgcDenoiseTuningSnr = finishRawDenoiseSnr,
                 mgcSharpenAttenuationScale = sabreResolveParameters.demosaicSharpness,
                 coreImagingTuning = coreImagingTuning,
             )
+            returned = true
+            result
         } catch (error: Exception) {
             completionRecorder.releasePending()
             PLog.e(SABRE_TAG, "MGC Sabre merge failed", error)
@@ -5781,32 +5802,19 @@ internal class GlesMgcRawSpatialStacker(
             viewportHeight = capture.rejectionHeight,
         )
         val noise = spatialNoiseParameters(calibration)
-        var usedIdentity = false
         for (channel in 0 until 3) {
             val destination = channel * capture.frameCount + frameIndex
             capture.inputReadNoise[destination] = noise.read[channel]
             capture.inputShotNoise[destination] = noise.shot[channel]
-            usedIdentity = usedIdentity ||
-                noise.read[channel] != calibration.cameraRgbReadNoise.getOrElse(channel) { Float.NaN } ||
-                noise.shot[channel] != calibration.cameraRgbShotNoise.getOrElse(channel) { Float.NaN }
+        }
+        check(calibration.globalFrameWeight.isFinite() && calibration.globalFrameWeight > 0f &&
+            calibration.kernelSigma.isFinite() && calibration.kernelSigma > 0f) {
+            "MGC Spatial strength frame=$frameIndex has invalid parameters: " +
+                "weight=${calibration.globalFrameWeight} sigma=${calibration.kernelSigma}"
         }
         capture.frameWeights[frameIndex] = calibration.globalFrameWeight
-            .takeIf { it.isFinite() && it > 0f }
-            ?: SPATIAL_IDENTITY_MULTIPLIER.also { usedIdentity = true }
         capture.kernelSigmas[frameIndex] = calibration.kernelSigma
-            .takeIf { it.isFinite() && it > 0f }
-            ?: SPATIAL_IDENTITY_MULTIPLIER.also { usedIdentity = true }
         capture.captured[frameIndex] = true
-        if (usedIdentity) {
-            PLog.w(
-                TAG,
-                "MGC Spatial strength frame=$frameIndex contained invalid parameters; " +
-                    "using identity inputs read=${noise.read.contentToString()} " +
-                    "shot=${noise.shot.contentToString()} " +
-                    "frameWeight=${capture.frameWeights[frameIndex]} " +
-                    "kernelSigma=${capture.kernelSigmas[frameIndex]}",
-            )
-        }
     }
 
     private fun spatialNoiseParameters(
@@ -5820,24 +5828,20 @@ internal class GlesMgcRawSpatialStacker(
                 (read > 0f || shot > 0f)
         }
 
-        val fallbackChannel = intArrayOf(1, 0, 2).firstOrNull(::validPair)
-        val fallbackRead = fallbackChannel?.let(calibration.cameraRgbReadNoise::get)
-            ?: SPATIAL_IDENTITY_READ_NOISE
-        val fallbackShot = fallbackChannel?.let(calibration.cameraRgbShotNoise::get)
-            ?: SPATIAL_IDENTITY_SHOT_NOISE
+        check(calibration.cameraRgbReadNoise.size == 3 &&
+            calibration.cameraRgbShotNoise.size == 3 && (0..2).all(::validPair)) {
+            "MGC Spatial has invalid camera RGB noise: " +
+                "read=${calibration.cameraRgbReadNoise.contentToString()} " +
+                "shot=${calibration.cameraRgbShotNoise.contentToString()}"
+        }
         return SpatialNoiseParameters(
-            read = FloatArray(3) { channel ->
-                if (validPair(channel)) calibration.cameraRgbReadNoise[channel] else fallbackRead
-            },
-            shot = FloatArray(3) { channel ->
-                if (validPair(channel)) calibration.cameraRgbShotNoise[channel] else fallbackShot
-            },
+            read = calibration.cameraRgbReadNoise.copyOf(),
+            shot = calibration.cameraRgbShotNoise.copyOf(),
         )
     }
 
     private fun createIdentitySpatialNoiseModel(
         referenceCalibration: FrameCalibration,
-        reason: String,
     ): MgcSpatialStrengthMapGenerator.Result {
         val geometry = mgcSpatialDiagnosticGeometry(
             outputMode = outputMode,
@@ -5845,9 +5849,9 @@ internal class GlesMgcRawSpatialStacker(
             imageHeight = height,
         )
         val noise = spatialNoiseParameters(referenceCalibration)
-        PLog.w(
+        PLog.i(
             TAG,
-            "MGC Spatial denoise model fallback=identity reason=$reason " +
+            "MGC Spatial single-frame identity noise model " +
                 "strengthQ8=$SPATIAL_IDENTITY_STRENGTH_Q8 " +
                 "read=${noise.read.contentToString()} shot=${noise.shot.contentToString()}",
         )
@@ -9884,8 +9888,6 @@ internal class GlesMgcRawSpatialStacker(
         const val MAX_WHITE_BALANCE_GAIN = 64f
         const val MIN_NOISE_VARIANCE = 1e-12f
         const val SPATIAL_IDENTITY_MULTIPLIER = 1f
-        const val SPATIAL_IDENTITY_READ_NOISE = 0f
-        const val SPATIAL_IDENTITY_SHOT_NOISE = 1f
         const val SPATIAL_IDENTITY_STRENGTH_Q8 = 256
         // FilterRejectionMap runtime values read from the original MGC process. The
         // ClippedGaussian formula and tap center were independently verified against its AOT.

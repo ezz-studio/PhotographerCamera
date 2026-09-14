@@ -225,7 +225,6 @@ class RawDemosaicProcessor {
             mgcDenoiseReadNoise = baseMetadata?.mgcDenoiseReadNoise,
             mgcDenoiseShotNoise = baseMetadata?.mgcDenoiseShotNoise,
             mgcSpatialStrengthMap = baseMetadata?.mgcSpatialStrengthMap,
-            mgcSabreNoiseModelScale = baseMetadata?.mgcSabreNoiseModelScale,
             mgcDenoiseTuningSnr = baseMetadata?.mgcDenoiseTuningSnr,
             mgcSharpenAttenuationScale = baseMetadata?.mgcSharpenAttenuationScale,
             coreImagingTuning = baseMetadata?.coreImagingTuning
@@ -1400,7 +1399,6 @@ class RawDemosaicProcessor {
                     "frames=${metadata.frameCount} " +
                     "readNoise=${metadata.mgcDenoiseReadNoise?.contentToString()} " +
                     "shotNoise=${metadata.mgcDenoiseShotNoise?.contentToString()} " +
-                    "sabreNoiseModelScale=${metadata.mgcSabreNoiseModelScale} " +
                     "strengthMap=${metadata.mgcSpatialStrengthMap?.let {
                         "${it.width}x${it.height}"
                     } ?: "none"} " +
@@ -2476,7 +2474,6 @@ class RawDemosaicProcessor {
                 mgcDenoiseReadNoise = null,
                 mgcDenoiseShotNoise = null,
                 mgcSpatialStrengthMap = null,
-                mgcSabreNoiseModelScale = null,
                 mgcDenoiseTuningSnr = null,
                 mgcSharpenAttenuationScale =
                     processLocalMgcSharpenAttenuationScale,
@@ -5835,34 +5832,23 @@ class RawDemosaicProcessor {
         )
     }
 
-    /**
-     * Reproduces classic Sabre's MergeRaw metadata branch. V25 calls GetMergedNoiseModel and uses
-     * the returned model directly. Photon transports the measured Q8 average merge factor through
-     * [RawMetadata.mgcSabreNoiseModelScale]; no second reference-SNR lookup-table scale is applied.
-     * Sabre does not expose Spatial correlation data.
-     */
+    /** Consume the classic Sabre merged model once, without reference-model or frame-count scaling. */
     private fun sabreOutputNoiseMetadata(metadata: RawMetadata): RawMetadata {
-        val scale = checkNotNull(metadata.mgcSabreNoiseModelScale) {
-            "Sabre NoiseModel coefficient scale is unavailable"
-        }
-        check(scale.isFinite() && scale > 0f) {
-            "Sabre NoiseModel coefficient scale is malformed: $scale"
-        }
-        val rgbNoise = checkNotNull(
-            MgcFullResolutionDenoise.resolveUserAdjustmentCameraRgbNoise(metadata),
-        ) { "Sabre physical Bayer noise model is unavailable" }
+        val read = checkNotNull(metadata.mgcDenoiseReadNoise)
+        val shot = checkNotNull(metadata.mgcDenoiseShotNoise)
+        val correlation = checkNotNull(metadata.mgcDenoiseCorrelation)
+        check(read.size == 3 && shot.size == 3 && correlation.size == 128)
+        check(read.all { it.isFinite() && it >= 0f } &&
+            shot.all { it.isFinite() && it >= 0f } &&
+            correlation.all { it.isFinite() && it >= 0f })
         PLog.i(
             TAG,
-            "MGC Sabre default denoise noise source=reference-bayer*measured-merge-factor " +
-                "captureFrames=${metadata.frameCount} scale=$scale " +
-                "read=${rgbNoise.read.contentToString()} " +
-                "shot=${rgbNoise.shot.contentToString()}",
+            "MGC Sabre default denoise noise source=classic-merged-model " +
+                "captureFrames=${metadata.frameCount} " +
+                "read=${read.contentToString()} shot=${shot.contentToString()}",
         )
         return metadata.copy(
             frameCount = 1,
-            mgcDenoiseCorrelation = null,
-            mgcDenoiseReadNoise = null,
-            mgcDenoiseShotNoise = null,
             mgcSpatialStrengthMap = null,
         )
     }

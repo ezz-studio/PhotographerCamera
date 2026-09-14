@@ -94,14 +94,27 @@ internal object MgcSabreNoiseEstimatesLut {
         return squaredErrorSum / QMC_SAMPLE_COUNT.toFloat()
     }
 
-    /** Box-Muller sequence from MGC's `TransformNoiseModel`, including its bit-reversed angle. */
+    /** V25 TransformNoiseModel (0x5ee7524): XOR progressively filled high-bit masks. */
+    internal fun qmcAngleBits(index: Int): UInt {
+        require(index >= 0)
+        var remaining = index
+        var mask = 0x80000000u
+        var bits = 0u
+        while (remaining != 0) {
+            if ((remaining and 1) != 0) bits = bits xor mask
+            mask = mask or (mask shr 1)
+            remaining = remaining ushr 1
+        }
+        return bits
+    }
+
+    /** Box-Muller sequence from MGC's `TransformNoiseModel`. */
     private fun createQmcNormalSamples(): FloatArray {
         val samples = FloatArray(QMC_SAMPLE_COUNT)
         for (index in 0 until QMC_PAIR_COUNT) {
             val radialInput = (index.toFloat() + 0.5f) / QMC_PAIR_COUNT.toFloat()
             val radius = sqrt((-2f * ln(radialInput.toDouble()).toFloat()).toDouble()).toFloat()
-            val reversed = Integer.reverse(index).toUInt().toLong()
-            val phase = (reversed.toDouble() / UINT32_RANGE).toFloat()
+            val phase = (qmcAngleBits(index).toLong().toDouble() / UINT32_RANGE).toFloat()
             val angle = (phase.toDouble() * TWO_PI).toFloat()
             samples[index * 2] = radius * sin(angle.toDouble()).toFloat()
             samples[index * 2 + 1] = radius * cos(angle.toDouble()).toFloat()

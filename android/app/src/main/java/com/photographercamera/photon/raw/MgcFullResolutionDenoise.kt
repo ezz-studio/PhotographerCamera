@@ -181,26 +181,26 @@ internal object MgcFullResolutionDenoise {
             )
             return false
         }
-        val spatialCorrelation = if (useSpatialModel) {
+        val mergedCorrelation = if (useSpatialModel || useSabreModel) {
             metadata.mgcDenoiseCorrelation
         } else null
         val coreTuning = metadata.coreImagingTuning.normalized()
         val lumaCorrelation = applyFusionCorrelationScale(
-            correlation = preparedYuvNoiseModel?.lumaCorrelation ?: spatialCorrelation,
+            correlation = preparedYuvNoiseModel?.lumaCorrelation ?: mergedCorrelation,
             scale = coreTuning.fusion.noiseCorrelationScale,
             enabled = useSabreModel,
         )
         val chromaCorrelation = applyFusionCorrelationScale(
-            correlation = preparedYuvNoiseModel?.chromaCorrelation ?: spatialCorrelation,
+            correlation = preparedYuvNoiseModel?.chromaCorrelation ?: mergedCorrelation,
             scale = coreTuning.fusion.noiseCorrelationScale,
             enabled = useSabreModel,
         )
-        if (useSpatialModel &&
+        if ((useSpatialModel || useSabreModel) &&
             (!validCorrelation(lumaCorrelation) || !validCorrelation(chromaCorrelation))
         ) {
             PLog.e(
                 TAG,
-                "MGC denoise rejected missing/malformed Spatial Y/C correlation spectrum",
+                "MGC denoise rejected missing/malformed $pass Y/C correlation spectrum",
             )
             return false
         }
@@ -225,16 +225,15 @@ internal object MgcFullResolutionDenoise {
 
         val rgbRead: FloatArray
         val rgbShot: FloatArray
-        val sabreNoiseModelScale: Float
-        if (useSpatialModel) {
+        if (useSpatialModel || useSabreModel) {
             rgbRead = metadata.mgcDenoiseReadNoise?.copyOf()
                 ?: run {
-                    PLog.e(TAG, "MGC denoise rejected missing Spatial read coefficients")
+                    PLog.e(TAG, "MGC denoise rejected missing $pass read coefficients")
                     return false
                 }
             rgbShot = metadata.mgcDenoiseShotNoise?.copyOf()
                 ?: run {
-                    PLog.e(TAG, "MGC denoise rejected missing Spatial shot coefficients")
+                    PLog.e(TAG, "MGC denoise rejected missing $pass shot coefficients")
                     return false
                 }
             if (!validRgbNoise(rgbRead) || !validRgbNoise(rgbShot) ||
@@ -242,38 +241,19 @@ internal object MgcFullResolutionDenoise {
             ) {
                 PLog.e(
                     TAG,
-                    "MGC denoise rejected malformed Spatial noise coefficients: " +
+                    "MGC denoise rejected malformed $pass noise coefficients: " +
                         "read=${rgbRead.contentToString()} shot=${rgbShot.contentToString()}",
                 )
                 return false
             }
-            sabreNoiseModelScale = 1f
         } else {
             val resolvedNoise = resolveUserAdjustmentCameraRgbNoise(metadata)
             if (resolvedNoise == null) {
                 PLog.w(TAG, "MGC denoise skipped: RAW noise profile is unavailable")
                 return false
             }
-            sabreNoiseModelScale = if (useSabreModel) {
-                metadata.mgcSabreNoiseModelScale?.takeIf {
-                    it.isFinite() && it > 0f
-                } ?: run {
-                    PLog.e(TAG, "MGC Sabre denoise rejected missing NoiseModel scale")
-                    return false
-                }
-            } else {
-                1f
-            }
-            // V25 GetMergedNoiseModel returns Sabre's merged model directly. Photon transports
-            // the measured Q8 average merge factor and applies it uniformly to the physical
-            // reference read/shot coefficients; there is no additional reference-SNR table.
-            // The physical camera model has no quadratic term.
-            rgbShot = FloatArray(3) { channel ->
-                resolvedNoise.shot[channel] * sabreNoiseModelScale
-            }
-            rgbRead = FloatArray(3) { channel ->
-                resolvedNoise.read[channel] * sabreNoiseModelScale
-            }
+            rgbShot = resolvedNoise.shot
+            rgbRead = resolvedNoise.read
         }
         val useLensShadingForStrength =
             (useSpatialModel || useSabreModel || applyLensShadingToDenoiseStrength) &&
@@ -377,7 +357,6 @@ internal object MgcFullResolutionDenoise {
                 "measureMoire=$measureMoireEnabled outputScale=$outputScale " +
                 "rgbShot=${rgbShot.contentToString()} " +
                 "rgbRead=${rgbRead.contentToString()} " +
-                "sabreNoiseModelScale=$sabreNoiseModelScale " +
                 "rgbWb=${rgbWhiteBalance.contentToString()} " +
                 "tuningInterpolation=linear " +
                 "lumaScales=${coreTuning.denoise.lumaStrengthScale} " +

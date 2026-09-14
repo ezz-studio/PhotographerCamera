@@ -81,7 +81,15 @@ internal object MgcSpatialStrengthMapGenerator {
             inputReadNoise.size == frameCount * 3 &&
             inputShotNoise.size == frameCount * 3 &&
             frameWeights.size == frameCount &&
-            kernelSigmas.size == frameCount
+            kernelSigmas.size == frameCount &&
+            inputReadNoise.indices.all { index ->
+                val read = inputReadNoise[index]
+                val shot = inputShotNoise[index]
+                read.isFinite() && read >= 0f && shot.isFinite() && shot >= 0f &&
+                    (read > 0f || shot > 0f)
+            } &&
+            frameWeights.all { it.isFinite() && it > 0f } &&
+            kernelSigmas.all { it.isFinite() && it > 0f }
         if (!valid) {
             PLog.e(
                 TAG,

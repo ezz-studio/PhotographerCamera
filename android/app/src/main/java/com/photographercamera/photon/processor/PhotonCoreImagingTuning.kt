@@ -151,7 +151,11 @@ data class PhotonFusionTuning(
     val mergeGradientThreshold: Float? = null,
     /** Normalized green signal used only when reference-frame measurement is unavailable. */
     val missingReferenceSignal: Float = DEFAULT_MISSING_REFERENCE_SIGNAL,
-    /** Scales the 128-bin correlation spectrum before demosaic/noise-pyramid propagation. */
+    /**
+     * Scales Sabre's 128-bin spectrum before noise-pyramid propagation. The
+     * separable 2D noise energy scales quadratically; zero means zero modeled
+     * noise energy. Spatial preserves its measured spectrum without this override.
+     */
     val noiseCorrelationScale: Float = 1f,
 ) {
     fun normalized(): PhotonFusionTuning = copy(
