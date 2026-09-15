@@ -142,15 +142,23 @@ object ShadowsHighlightsShader {
             return sum / max(weightSum, 0.0001);
         }
 
-        // DO NOT merge upstream 2ef405b29c here. It replaces this single blend with a
-        // `for (int i = 0; i < 4; i++)` loop of compound convex blends. applyShadowsHighlights
-        // feeds opacity as 2.0 * clamp(uHighlights/uShadows, -1.0, 1.0), so |opacity| reaches 2.0
-        // and min(opacity * opacity, 4.0) makes the SAME overlay run up to 4 times in sequence.
-        // That double-grades the image and destroys highlights/colour/brightness for EVERY tone
-        // engine (Adobe/AgX/Spektrafilm/Darktable/Hncs), because this pass is engine-agnostic.
-        // Keep this single range-weighted blend.
+        // 阴影/高光叠加必须是"凸组合"（convex blend）：混合比例 <= 1.0，结果只能落在
+        // 原值与 overlay 结果之间。历史上两个版本都在这里出过问题，本处是修正版：
+        //
+        //  (1) 1.6.2 比例取 min(opacity * opacity, 4.0)。applyShadowsHighlights 传入
+        //      opacity = 2.0 * clamp(uHighlights/uShadows, -1.0, 1.0)，|opacity| 可达 2.0，
+        //      于是比例可达 4.0。暗部（shadowsXform 在 baseL=0 处为满值 1.0）会执行
+        //      nextL = la + deltaL * 4.0 —— 这是"外推"，越过 overL 后再被 clamp 到
+        //      [0,1]，暗部被整体抬亮、动态范围被压扁，观感就是"照片蒙上一层浅灰"；
+        //      亮部同理被推向纯白，即"高光崩坏"。
+        //  (2) 上游 2ef405b29c 把同一个 overlay 拆成 for (i < 4) 循环来消耗这 4 倍比例。
+        //      它把亮度做成了收敛的凸组合（这一步是对的），但 chroma 每轮都乘
+        //      (a.y + b.y) * chromaFactor，4 轮复利，饱和度失控 —— 即"双重调色"。
+        //
+        // 把比例上限钳到 1.0（凸组合）可同时消除这两个缺陷；且本 pass 与色调引擎无关
+        // （Adobe / AgX / Spektrafilm / Darktable / Hncs 共用），修一次即全引擎生效。
         float shOverlayBlendAmount(float opacity, float transform) {
-            float opacity2 = min(opacity * opacity, 4.0);
+            float opacity2 = min(opacity * opacity, 1.0);
             float safeTransform = clamp(transform, 0.0, 1.0);
             return opacity2 * safeTransform;
         }
@@ -171,21 +179,17 @@ object ShadowsHighlightsShader {
                 ? 1.0 - (1.0 - 2.0 * (la - 0.5)) * (1.0 - lb)
                 : 2.0 * la * lb;
             float deltaL = overL - la;
-            float nextL = la + deltaL * optrans;
-            float anchorDelta = lb - la;
-            if (deltaL * anchorDelta > 0.0) {
-                nextL = deltaL < 0.0
-                    ? max(nextL, min(la, lb))
-                    : min(nextL, max(la, lb));
-            }
-            a.x = clamp(nextL, 0.0, 1.0);
+            // 严格凸组合：nextL 落在 [la, overL] 内，不做任何外推。因为不再外推，
+            // 旧的 anchor 钳制（会在 base 跨过源 L 时产生跳变）一并去掉。
+            a.x = clamp(mix(la, overL, optrans), 0.0, 1.0);
 
+            // 色度只按最终亮度混合比例混合一次，绝不逐次累乘。
             float chromaFactor = a.x * lref * ccorrect + (1.0 - a.x) * href * (1.0 - ccorrect);
             float chromaTrans = abs(deltaL) > SH_LOW_APPROX
                 ? clamp((a.x - la) / deltaL, 0.0, 1.0)
                 : clamp(optrans, 0.0, 1.0);
-            a.y = a.y * (1.0 - chromaTrans) + (a.y + b.y) * chromaFactor * chromaTrans;
-            a.z = a.z * (1.0 - chromaTrans) + (a.z + b.z) * chromaFactor * chromaTrans;
+            a.y = mix(a.y, (a.y + b.y) * chromaFactor, chromaTrans);
+            a.z = mix(a.z, (a.z + b.z) * chromaFactor, chromaTrans);
             return a;
         }
 

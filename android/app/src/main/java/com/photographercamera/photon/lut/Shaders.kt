@@ -194,7 +194,8 @@ object Shaders {
                 color.rgb = mix(color.rgb, softGlow, uSoftLight * 0.75);
                 float softLuma = dot(softBlur, vec3(0.2126, 0.7152, 0.0722));
                 color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
-                color.rgb = (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5;
+                // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5
+                // 已删除：无空间 mask，会抬黑压白，与成片端 LutImageProcessor 保持一致。
             }
             
             if (uHalation > 0.0) {
@@ -205,7 +206,8 @@ object Shaders {
                 color.rgb = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - bloomEffect);
                 float mist = bLuma * uHalation * 0.15;
                 color.rgb += mist;
-                color.rgb = (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5;
+                // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5
+                // 已删除（同成片端）：泛光只在高光晕区叠加，不再压平整体对比度。
             }
             
             if (uRedHalation > 0.0) {

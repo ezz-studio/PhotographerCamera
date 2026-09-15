@@ -4168,8 +4168,12 @@ class LutImageProcessor(context: Context? = null) {
                     float mist = bLuma * uHalation * 0.15;
                     color.rgb += mist;
                     
-                    // 5. 稍微削减对比度以获得“电影感”
-                    color.rgb = (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5;
+                    // 5. 此处原本还有一次"围绕 0.5 的整体对比度压缩"：
+                    //      color.rgb = (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5;
+                    //    它没有空间 mask，是对全图生效的：黑场被整体抬升、动态范围收窄，
+                    //    观感就是"照片蒙上一层浅灰"；同时违反"泛光只做空间层叠加、不改变
+                    //    整体色彩与亮度"（色彩/亮度由 LUT 唯一决定）的约定。已删除。
+                    //    泛光本身（上方 screen 叠加 + 光晕区 mist）保持原样。
                 }
                 
                 if (uRedHalation > 0.0) {
@@ -4216,7 +4220,10 @@ class LutImageProcessor(context: Context? = null) {
                     color.rgb = mix(color.rgb, softGlow, uSoftLight * 0.75);
                     float softLuma = dot(softBlur, vec3(0.2126, 0.7152, 0.0722));
                     color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
-                    color.rgb = (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5;
+                    // 此处原本还有一次全图对比度压缩（无空间 mask，同样会抬黑压白）：
+                    //   color.rgb = (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5;
+                    // 与泛光分支同理，为满足"柔光/泛光只做空间层叠加、不改变整体色彩与
+                    // 亮度"，并保持与预览端语义一致，已删除。
                 }
                 // 末级 TPDF 抖动：打散 profile 曲线重塑带来的 8-bit 量化台阶（色彩断层），
                 // ±1 LSB 不可见；RAW_MAX 的读出噪声 / JPEG 压缩噪声经抬黑后被放大，

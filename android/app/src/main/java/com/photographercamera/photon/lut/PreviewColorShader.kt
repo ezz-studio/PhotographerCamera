@@ -395,7 +395,8 @@ internal object PreviewColorShader {
                     color.rgb = mix(color.rgb, softGlow, uSoftLight * 0.75);
                     float softLuma = dot(softBlur, W);
                     color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
-                    color.rgb = (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5;
+                    // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5
+                    // 已删除（同成片端）：柔光只在空间层叠加，不再抬黑压白。
                     color.rgb = sanitizeColor(color.rgb);
                 }
                 """ else ""}
