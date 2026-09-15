@@ -1,0 +1,32 @@
+# 行尾策略：本仓库跨 Windows(开发) / Linux(服务器) 使用
+# 若 shell 脚本被转成 CRLF，在 Linux 上执行会报 "/usr/bin/env: 'bash\r': No such file or directory"
+# 或 "bad interpreter"，所以必须锁死 LF。
+
+# Shell 脚本：始终 LF
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# Windows 批处理：始终 CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# 二进制：不做任何行尾/编码转换
+*.apk       binary
+*.jar       binary
+*.so        binary
+*.aar       binary
+*.keystore  binary
+*.jks       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.gif       binary
+*.ico       binary
+*.ttf       binary
+*.otf       binary
+*.woff      binary
+*.woff2     binary
+*.zip       binary
+*.exe       binary
+*.dll       binary
