@@ -150,26 +150,46 @@ internal data class CaptureDenoiseStrengths(
 internal fun resolveCaptureDenoiseStrengths(
     isRawCapture: Boolean,
     userPrefs: UserPreferences?,
-): CaptureDenoiseStrengths = when {
-    !isRawCapture -> CaptureDenoiseStrengths(0f, 0f, null, null)
-    // 0.9.10：画质调优关闭 → 默认降噪参数（忽略用户滑杆）
-    userPrefs?.rawMaxQualityTuning == false -> CaptureDenoiseStrengths(
-        editableLuma = 0f,
-        editableChroma = 0f,
-        bakedLuma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH),
-        bakedChroma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH),
-    )
-    else -> CaptureDenoiseStrengths(
-        editableLuma = 0f,
-        editableChroma = 0f,
-        bakedLuma = RawDenoiseDefaults.normalize(
-            userPrefs?.rawMaxNoiseReduction ?: RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH
-        ),
-        bakedChroma = RawDenoiseDefaults.normalize(
-            userPrefs?.rawMaxChromaNoiseReduction
-                ?: RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH
-        ),
-    )
+): CaptureDenoiseStrengths {
+    // 1.7.6：JPEG MAX 对齐 RAW MAX 软件降噪。
+    // 此前 !isRawCapture 分支把 editableLuma/editableChroma 硬编码为 0，导致 JPEG 后期
+    // 完全不施加软件降噪（仅走硬件 ISP 降噪），与 RAW MAX 观感不一致、暗部/平滑区噪点更明显。
+    // 现改为同样消费 rawMaxNoiseReduction / rawMaxChromaNoiseReduction 设置项：该值经
+    // capture → metadata.noiseReduction → processBitmap/prepareUltraHdrSource 的
+    // `metadata.noiseReduction ?: param` 逻辑施加到 JPEG 成片，与 RAW 共用同一条降噪通道。
+    val tuningOn = userPrefs?.rawMaxQualityTuning != false
+    val luma = if (tuningOn) {
+        userPrefs?.rawMaxNoiseReduction ?: RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH
+    } else {
+        RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH
+    }
+    val chroma = if (tuningOn) {
+        userPrefs?.rawMaxChromaNoiseReduction ?: RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH
+    } else {
+        RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH
+    }
+    val nLuma = RawDenoiseDefaults.normalize(luma)
+    val nChroma = RawDenoiseDefaults.normalize(chroma)
+    return when {
+        !isRawCapture -> CaptureDenoiseStrengths(
+            editableLuma = nLuma,
+            editableChroma = nChroma,
+            bakedLuma = nLuma,
+            bakedChroma = nChroma,
+        )
+        !tuningOn -> CaptureDenoiseStrengths(
+            editableLuma = 0f,
+            editableChroma = 0f,
+            bakedLuma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH),
+            bakedChroma = RawDenoiseDefaults.normalize(RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH),
+        )
+        else -> CaptureDenoiseStrengths(
+            editableLuma = 0f,
+            editableChroma = 0f,
+            bakedLuma = nLuma,
+            bakedChroma = nChroma,
+        )
+    }
 }
 
 private fun ColorRecipeParams.withoutIndependentEffects(): ColorRecipeParams {
@@ -6181,9 +6201,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (orderedImages.size != expectedFrameCount) return
             val context = getApplication<Application>()
             val shouldAutoSave = autoSaveAfterCapture.firstOrNull() ?: false
+            // 1.7.6：JPEG MAX 对齐 RAW MAX 软件降噪——此前此处把降噪/色度降噪硬编码 0，
+            // 导致 HDR bracket（captureMode=jpg_max）成片无软件降噪。现改为同样消费设置项。
+            val userPrefs = userPreferencesRepository.userPreferences.firstOrNull()
+            val denoiseStrengths = resolveCaptureDenoiseStrengths(
+                isRawCapture = false,
+                userPrefs = userPrefs,
+            )
             val sharpeningValue = 0f
-            val noiseReductionValue = 0f
-            val chromaNoiseReductionValue = 0f
+            val noiseReductionValue = denoiseStrengths.editableLuma
+            val chromaNoiseReductionValue = denoiseStrengths.editableChroma
             val photoQualityValue = photoQuality.firstOrNull() ?: 95
             val baseImage = orderedImages[HDR_BRACKET_ZERO_INDEX]
             val useSuperRes = false
