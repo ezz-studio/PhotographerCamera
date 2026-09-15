@@ -67,10 +67,42 @@ internal data class ColorPassLocations(
 
 internal class PreviewColorProgramCache {
     private val programs = mutableMapOf<PreviewColorShaderVariant, ColorPassLocations>()
+    private val failed = mutableSetOf<PreviewColorShaderVariant>()
 
     fun get(variant: PreviewColorShaderVariant): ColorPassLocations? {
         programs[variant]?.let { return it }
 
+        if (variant !in failed) {
+            compile(variant)?.let {
+                programs[variant] = it
+                PLog.d(TAG, "Compiled preview color shader variant: $variant")
+                return it
+            }
+            failed += variant
+            PLog.e(TAG, "Failed to build preview color shader: $variant")
+        }
+
+        // 兜底降级：完整特性版本编译/链接失败时，改用一个「最小变体」重编一次。
+        // 必须这么做——调用方 LutRenderer.getColorPassLocations 拿到 null 后是 `?: return`，
+        // 会**直接放弃绘制**，取景预览就是全黑（1.7.4 预览黑屏的放大机制）。
+        // 降级后最多是部分风格不生效，画面仍然可见，且日志有明确记录。
+        val minimal = variant.minimalFallback()
+        if (minimal != variant) {
+            programs[minimal]?.let { return it }
+            if (minimal !in failed) {
+                compile(minimal)?.let {
+                    programs[minimal] = it
+                    PLog.e(TAG, "Preview color shader degraded to minimal variant: $variant")
+                    return it
+                }
+                failed += minimal
+            }
+        }
+        PLog.e(TAG, "Preview color shader unavailable, color pass skipped: $variant")
+        return null
+    }
+
+    private fun compile(variant: PreviewColorShaderVariant): ColorPassLocations? {
         val vertexShader = GlUtils.compileShader(GLES30.GL_VERTEX_SHADER, Shaders.VERTEX_SHADER)
         val fragmentShader = GlUtils.compileShader(
             GLES30.GL_FRAGMENT_SHADER,
@@ -90,11 +122,7 @@ internal class PreviewColorProgramCache {
             PLog.e(TAG, "Failed to link preview color shader: $variant")
             return null
         }
-
-        val locations = queryLocations(programId)
-        programs[variant] = locations
-        PLog.d(TAG, "Compiled preview color shader variant: $variant")
-        return locations
+        return queryLocations(programId)
     }
 
     fun release() {
@@ -104,6 +132,7 @@ internal class PreviewColorProgramCache {
 
     fun reset() {
         programs.clear()
+        failed.clear()
     }
 
     private fun queryLocations(program: Int): ColorPassLocations {

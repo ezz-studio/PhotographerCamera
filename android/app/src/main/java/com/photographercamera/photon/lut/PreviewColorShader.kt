@@ -153,6 +153,31 @@ internal object PreviewColorShader {
                 return prepareToneSample(sampleImage(clamp(uv, vec2(0.0), vec2(1.0))));
             }
 
+            // 依赖清单（缺一个都会让 GLSL 编译失败 → 程序链接失败 → 取景全黑）：
+            //   uHighlights / uShadows / uTexelSize   —— uniform，本文件已声明
+            //   srgbToLinear / linearToSrgb           —— PreviewColorShaderModules.COLOR_TRANSFER_CORE
+            //   applyExposureInLinearSpace            —— PreviewColorShaderModules.EXPOSURE
+            //   sanitizeColor                         —— PreviewColorShaderModules.SANITIZE
+            //   sampleToneSource / shRgbToXyz / shXyzToRgb —— 本处补齐（成片端由 LutImageProcessor 内联提供）
+            // 校验工具：tools/check_glsl_symbols.py --entry preview
+            vec3 shRgbToXyz(vec3 rgb) {
+                vec3 linearRgb = srgbToLinear(rgb);
+                return mat3(
+                    0.4360747, 0.2225045, 0.0139322,
+                    0.3850649, 0.7168786, 0.0971045,
+                    0.1430804, 0.0606169, 0.7141733
+                ) * linearRgb;
+            }
+
+            vec3 shXyzToRgb(vec3 xyz) {
+                vec3 linearRgb = mat3(
+                     3.1338561, -0.9787684,  0.0719453,
+                    -1.6168667,  1.9161415, -0.2289914,
+                    -0.4906146,  0.0334540,  1.4052427
+                ) * xyz;
+                return linearToSrgb(linearRgb);
+            }
+
             ${ShadowsHighlightsShader.GLSL}
 
             ${if (needsOklab) PreviewColorShaderModules.OKLAB else ""}

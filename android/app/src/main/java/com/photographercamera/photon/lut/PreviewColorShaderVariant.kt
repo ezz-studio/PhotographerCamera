@@ -19,6 +19,19 @@ internal data class PreviewColorShaderVariant(
     val includeJpegInputToneCurve: Boolean = false,
     val includeSpatialRecipeEffects: Boolean = false,
 ) {
+    /**
+     * 最小可用变体：关掉所有可选特性（它们各自引入额外函数/纹理依赖，是编译失败的主要来源），
+     * 只保留与输入契约相关的项（纹理来源、JPEG 输入曲线、空间效果开关）。
+     * 供 ColorPassProgram 的降级兜底使用：宁可少几项风格，也不要让取景预览全黑。
+     */
+    fun minimalFallback(): PreviewColorShaderVariant = copy(
+        includeExtendedLutCurves = false,
+        includeOklchDensity = false,
+        includeLchMixer = false,
+        includePreLogFilmGrain = false,
+        includeLutMask = false,
+    )
+
     companion object {
         fun forPass(
             textureSource: PreviewColorTextureSource,
