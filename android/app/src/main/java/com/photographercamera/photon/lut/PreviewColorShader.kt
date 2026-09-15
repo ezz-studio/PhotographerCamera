@@ -133,7 +133,27 @@ internal object PreviewColorShader {
                 return dot(color, W);
             }
 
-            ${PreviewShadowsHighlightsShader.GLSL}
+            // 预览与成片共用同一份阴影/高光叠加数学（ShadowsHighlightsShader.GLSL）。
+            // 成片的 sampleImage() 采的是「LUT 前的原图」，预览等价地采 uCameraTexture，
+            // 其余（Lab 凸组合、19 点双边基础层、色度只混合一次）完全一致 —— 两端不再各写一份，
+            // 从根上杜绝"取景与成片不一致"再次发生。
+            vec3 sampleImage(vec2 uv) {
+                return texture(uCameraTexture, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+            }
+
+            vec3 prepareToneSample(vec3 sampleColor) {
+                vec3 prepared = sampleColor;
+                if (abs(uExposure) > 0.001) {
+                    prepared = applyExposureInLinearSpace(prepared, uExposure);
+                }
+                return sanitizeColor(prepared);
+            }
+
+            vec3 sampleToneSource(vec2 uv) {
+                return prepareToneSample(sampleImage(clamp(uv, vec2(0.0), vec2(1.0))));
+            }
+
+            ${ShadowsHighlightsShader.GLSL}
 
             ${if (needsOklab) PreviewColorShaderModules.OKLAB else ""}
             ${if (needsClassifiers) PreviewColorShaderModules.LCH_CLASSIFIERS else ""}
@@ -222,7 +242,7 @@ internal object PreviewColorShader {
                         color.rgb = sanitizeColor(color.rgb);
                     }
 
-                    color.rgb = applyPreviewShadowsHighlights(color.rgb);
+                    color.rgb = applyShadowsHighlights(color.rgb, uvCoord);
                     color.rgb = sanitizeColor(color.rgb);
 
                     float luma = getLuma(color.rgb);
