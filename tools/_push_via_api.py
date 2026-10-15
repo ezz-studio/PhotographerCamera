@@ -29,6 +29,13 @@ def git(*args):
     return out.stdout.decode("utf-8", "replace"), out.returncode
 
 
+def git_bytes(*args):
+    """Raw-bytes variant: blob content must NEVER round-trip through str
+    (decode('utf-8', 'replace') corrupts binary files, e.g. PNG fixtures)."""
+    out = subprocess.run(["git"] + list(args), capture_output=True)
+    return out.stdout, out.returncode
+
+
 def main():
     commit = sys.argv[1] if len(sys.argv) > 1 else "HEAD"
     branch = sys.argv[2] if len(sys.argv) > 2 else "main"
@@ -110,12 +117,12 @@ def main():
             tree_entries.append({"path": p, "mode": "100644", "type": "blob", "sha": None})
             continue
         mode_str = mode.split()[0]
-        content, rc = git("cat-file", "blob", "%s:%s" % (sha, p))
+        raw, rc = git_bytes("cat-file", "blob", "%s:%s" % (sha, p))
         if rc != 0:
-            blob = git("show", "%s:%s" % (sha, p))[0]
-        else:
-            blob = content
-        raw = blob.encode("utf-8")
+            raw, rc = git_bytes("show", "%s:%s" % (sha, p))
+            if rc != 0:
+                print("  skip (unreadable): %s" % p)
+                continue
         b = api("/repos/%s/%s/git/blobs" % (REPO_OWNER, REPO_NAME), "POST",
                 {"content": base64.b64encode(raw).decode("ascii"), "encoding": "base64"})
         tree_entries.append({"path": p, "mode": mode_str, "type": "blob", "sha": b["sha"]})
