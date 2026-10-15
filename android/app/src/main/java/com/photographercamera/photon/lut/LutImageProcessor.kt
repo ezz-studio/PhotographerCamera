@@ -331,7 +331,12 @@ class LutImageProcessor(context: Context? = null) {
                 return false
             }
             // 初始化 shader 和缓冲区
-            initShaderProgram()
+            // Phase C（需求 3.8）：initShaderProgram 返回值必须检查——静默失败会让
+            // performRender 以 program 0 绘制并读回未初始化 FBO（旧 04 报告 F10）。
+            if (!initShaderProgram()) {
+                PLog.e(TAG, "initShaderProgram failed; aborting initialize")
+                return false
+            }
             initBuffers()
 
             isInitialized = true
@@ -521,6 +526,8 @@ class LutImageProcessor(context: Context? = null) {
         currentCoroutineContext().ensureActive()
         if (!isInitialized) {
             if (!initialize()) {
+                // Phase C（需求 3.8）：记录回退原因，避免调用方误以为 Profile 已应用
+                PLog.w(TAG, "applyLut: initialize() failed, returning original bitmap (profile NOT applied)")
                 return@withContext bitmap
             }
         }
@@ -611,11 +618,16 @@ class LutImageProcessor(context: Context? = null) {
     /**
      * lens 光学阶段 bitmap→bitmap（HANDOFF_android_lens）。在 glDispatcher 的
      * EGL 上下文内上传纹理 → LensStageGl 全 pass → glReadPixels 读回。
-     * 仅在 LensParamsStore.current 非零时被调用；本方法内不再判断。
+     * 仅在 lens 参数非零时被调用；本方法内不再判断。
+     *
+     * Phase C（PA-01）：F16 输入走半精度全程（DirectBuffer 直传 → 16F RT →
+     * HALF_FLOAT 读回 → RGBA_F16 出口 + colorSpace 传递），不再于 Stage 0
+     * 量化成 8-bit；8-bit 输入（YUV/HEIC 链）保持原路径不变。
      */
     private suspend fun applyLensStage(input: Bitmap): Bitmap = withContext(glDispatcher) {
         if (!isInitialized && !initialize()) return@withContext input
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        val want16F = input.config == Bitmap.Config.RGBA_F16
         try {
             val w = input.width
             val h = input.height
@@ -627,7 +639,33 @@ class LutImageProcessor(context: Context? = null) {
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-            android.opengl.GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, input, 0)
+            if (want16F) {
+                // 半精度直传（与 uploadImageTexture 同策略；禁止 F16→ARGB_8888 隐式量化）
+                val byteCount = input.byteCount.toLong()
+                val f16Buffer = com.photographercamera.photon.utils.DirectBufferAllocator
+                    .allocateNative(byteCount)
+                if (f16Buffer != null) {
+                    try {
+                        f16Buffer.position(0)
+                        input.copyPixelsToBuffer(f16Buffer)
+                        f16Buffer.position(0)
+                        GLES30.glTexImage2D(
+                            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
+                            w, h, 0,
+                            GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, f16Buffer
+                        )
+                    } finally {
+                        com.photographercamera.photon.utils.DirectBufferAllocator.freeNative(f16Buffer)
+                    }
+                } else {
+                    PLog.w(TAG, "applyLensStage F16 upload alloc failed; 8-bit fallback")
+                    android.opengl.GLUtils.texImage2D(
+                        GLES30.GL_TEXTURE_2D, 0, input.asGlUploadCompatibleBitmap(), 0
+                    )
+                }
+            } else {
+                android.opengl.GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, input, 0)
+            }
 
             val identity = floatArrayOf(
                 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
@@ -639,7 +677,8 @@ class LutImageProcessor(context: Context? = null) {
                 srcCropRect = floatArrayOf(0f, 0f, 1f, 1f),
                 width = w,
                 height = h,
-                p = com.photographercamera.core.photon.lens.LensParamsStore.current,
+                p = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.lens ?: com.photographercamera.core.photon.lens.LensParamsStore.current),
+                halfFloat = want16F,
             )
             if (outTex == 0) return@withContext input
 
@@ -653,19 +692,48 @@ class LutImageProcessor(context: Context? = null) {
             )
             GLES30.glViewport(0, 0, w, h)
             GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 4)
-            val buffer = java.nio.ByteBuffer.allocateDirect(w * h * 4)
-                .order(java.nio.ByteOrder.nativeOrder())
-            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
-            buffer.position(0)
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-            GLES30.glDeleteFramebuffers(1, fbo, 0)
-            GLES30.glDeleteTextures(1, tex, 0)
 
-            val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            out.copyPixelsFromBuffer(buffer)
+            val out: Bitmap
+            if (want16F) {
+                // Phase C（PA-01）：HALF_FLOAT 读回 + RGBA_F16 出口，16F 主链
+                // 不再被 Stage 0 量化；colorSpace 随输入传递（修复出口恒失 tag）。
+                val pixelSize = w * h * 4 * 2
+                val f16Buffer = com.photographercamera.photon.utils.DirectBufferAllocator
+                    .allocateNative(pixelSize.toLong())
+                    ?: ByteBuffer.allocateDirect(pixelSize).order(ByteOrder.nativeOrder())
+                GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, f16Buffer)
+                f16Buffer.position(0)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                GLES30.glDeleteFramebuffers(1, fbo, 0)
+                GLES30.glDeleteTextures(1, tex, 0)
+                out = try {
+                    createBitmap(
+                        w, h, Bitmap.Config.RGBA_F16,
+                        colorSpace = input.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB),
+                    )
+                } catch (e: OutOfMemoryError) {
+                    PLog.e(TAG, "applyLensStage OOM creating F16 bitmap ($w x $h)", e)
+                    return@withContext input
+                }
+                out.copyPixelsFromBuffer(f16Buffer)
+                if (f16Buffer.isDirect) {
+                    com.photographercamera.photon.utils.DirectBufferAllocator.freeNative(f16Buffer)
+                }
+            } else {
+                val buffer = ByteBuffer.allocateDirect(w * h * 4)
+                    .order(ByteOrder.nativeOrder())
+                GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buffer)
+                buffer.position(0)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                GLES30.glDeleteFramebuffers(1, fbo, 0)
+                GLES30.glDeleteTextures(1, tex, 0)
+                out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                out.copyPixelsFromBuffer(buffer)
+            }
             out
         } catch (t: Throwable) {
             android.util.Log.w("LensStage", "applyLensStage failed, passthrough", t)
+            PLog.w(TAG, "applyLensStage failed (want16F=$want16F), passthrough: ${t.message}")
             input
         }
     }
@@ -903,6 +971,8 @@ class LutImageProcessor(context: Context? = null) {
         currentCoroutineContext().ensureActive()
         if (!isInitialized) {
             if (!initialize()) {
+                // Phase C（需求 3.8）：记录回退原因，避免调用方误以为 Profile 已应用
+                PLog.w(TAG, "applyLut: initialize() failed, returning original bitmap (profile NOT applied)")
                 return@withContext bitmap
             }
         }
@@ -1597,7 +1667,7 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
     }
 
-    private fun initShaderProgram() {
+    private fun initShaderProgram(): Boolean {
         val vertexShader = compileShader(GLES30.GL_VERTEX_SHADER, IMAGE_VERTEX_SHADER)
         val fragmentShader = compileShader(GLES30.GL_FRAGMENT_SHADER, IMAGE_FRAGMENT_SHADER_COLOR_RECIPE)
 
@@ -1605,6 +1675,17 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glAttachShader(shaderProgram, vertexShader)
         GLES30.glAttachShader(shaderProgram, fragmentShader)
         GLES30.glLinkProgram(shaderProgram)
+
+        // Phase C（需求 3.8）：检查链接状态。旧实现不检查——编译失败（compileShader
+        // 返回 0）或链接失败时 program 无效，performRender 以 program 0 绘制并读回
+        // 未初始化 FBO，属于静默劣化（04 报告 F10）。
+        val linkStatus = IntArray(1)
+        GLES30.glGetProgramiv(shaderProgram, GLES30.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] == 0) {
+            val log = GLES30.glGetProgramInfoLog(shaderProgram)
+            PLog.e(TAG, "shader program link failed: $log")
+            return false
+        }
 
         // 获取 uniform 位置
         uImageTextureLoc = GLES30.glGetUniformLocation(shaderProgram, "uImageTexture")
@@ -1646,6 +1727,7 @@ class LutImageProcessor(context: Context? = null) {
             LUT_LUMINANCE_GAIN_SHADER,
             "LutLuminanceGain",
         )
+        return true
     }
 
     private fun ensureBitmapDenoiseProfilePrograms() {
@@ -1654,6 +1736,9 @@ class LutImageProcessor(context: Context? = null) {
             computeCapabilitiesChecked = true
         }
         if (!computeCapabilitiesSupported) {
+            // Phase C（需求 3.8）：记录跳过硬核降噪的原因（设备不支持 compute），
+            // 避免静默降级被误判为算法缺陷。
+            PLog.w(TAG, "GPU compute unsupported; bitmap NLM denoise falls back to passthrough")
             ensureBitmapDenoisePassthroughProgram()
             return
         }

@@ -75,3 +75,51 @@
 Studio 生成值（例：`光月定大青蛙.json`）全部在 schema 约束内；
 Android 端 coerce 保护：sharpenRadius 0.5..3、vignetteRadius 0.1..1、vignetteFeather 0.05..1、
 bloomThreshold 0..1、bloomRadius 归一 0..1。
+
+---
+
+## Phase B 修正（2026-10-15，基线 1.7.6 / c4523dc）
+
+以下条目依据 Phase A 只读审计（`_audit_phase_a/03_profile_param_map.md`，逐字段带 file:line）修正，
+**修正旧表结论，以代码为准**：
+
+### 1. 旧表结论修正
+
+| 参数 | 旧表结论 | Phase A 实证 | 新结论 |
+|---|---|---|---|
+| `shadow.saturation` | ✅ 全图饱和 | 仅注入 `FilmParamsStore.shadowSaturation`，**全仓无任何 uniform 消费端** | ⬜ **Android 死参数**（桌面端 `apply_shadow` 正常消费；双端不等价，勿标 ✅） |
+| `noise.luma/chroma` | ⚠️ 合并语义 | `ProfileToRecipeMapper.kt:105` 硬编码 `noise = 0f`（0.10.x 用户指令） | ⛔ **Android 实时通道不消费**（既定设计边界：桌面仅分析参考；严禁重新映射成任意 Noise 参数） |
+| `highlight_rolloff.strength` | ✅ 双重挂载 | `Mapper:84→recipe.highlights`（uHighlights）+ `Mapper:89→toneShoulder`（uToneShoulder），同一像素顺序施加两种非线性变换，**注释明示为有意双通道塑形** | ✅ **有意设计，保留**（PA-13；非 bug，禁止删任何一侧） |
+| `shadow.contrast` | ⬜ 桌面未消费 | Android `tonePivot=(c-1)×0.1` 弱联动生效 | ✅ Android 近似联动（桌面确为死参数） |
+| `halation.radius/threshold/warmth` | ✅ 已注入 | 已注入 FilmParamsStore，但渲染链未找到对应 uniform 消费 | ⚠️ **已注入未消费**（Phase C/E 接线候选；当前改动这些值不影响成像） |
+| `color_matrix.input_gamut/output_gamut` | ⬜ 双端死 | 双端均无消费 | ⬜ 双端死参数（文档标记，不接线） |
+| `color_adaptive` | 未列 | 全链无消费 | ⬜ Android 死字段（预留） |
+| `color_lut.source/strength` | 未列 | strength=烘焙元数据（已烘进 data，运行时 100% 采样即正确）；source 无消费 | ⬜ 元数据字段（非缺陷） |
+
+### 2. HSL hue_shift 单位语义差（PA-05，需求 2.5/6.2）
+
+- 桌面 `profile_renderer.apply_hsl`：hue_shift 按**度**解释（`/360.0`）。
+- Android `PreviewColorShaderModules.kt:224`：`hue_shift * radians(20.0)` —— **1.0 = 20°**。
+- 同一 JSON 值两端旋转量相差约 **18 倍**（360/20）。已按需求标记为**近似映射**，禁止视为等价。
+- **处置决策：不改单位。** 修改 Android 侧单位会 silently 改变所有存量 profile 的渲染语义（风险大于收益）；
+  正确路径是在 Profile Builder（Studio）导出时把 hue_shift 归一化为 Android 约定（度 → /18 或显式度），
+  属 Phase F 范围。在此之前，本文档即权威声明：**两端 hue_shift 非等价**。
+
+### 3. 新增注入通道 D：CaptureProfileStore（Phase B，需求 2.7）
+
+快门触发时 `CameraViewModel.createCaptureProfileSnapshot()` 冻结当前生效的
+Profile ID + Recipe + Film + Lens + 版本号为不可变快照（`CaptureProfileSnapshot`），
+经 `CaptureProfileStore.current` 下达成片渲染链：`LutImageProcessor` 的 Film/Lens 消费点
+改为「快照优先、快照为空回退单例」。预览（`LutRenderer`）与相册重渲染不读快照，继续跟随活参数。
+异步多帧处理/RAW 显影/最终保存期间用户切 profile 或调参，不再污染进行中的照片。
+
+### 4. 跨引擎语义差异备忘（需求 2.5）
+
+| 语义 | 桌面 | Android | 差异 |
+|---|---|---|---|
+| RGB 矩阵 | 行主序 + 行向量数学（rgb@M.T） | 列主序上传 + `M*v` | 数学等价（Phase A 实证同输入 diff=0）；**应用空间不同**：桌面显示域、Android 线性光域（二阶差异） |
+| WB | 加性偏移 | 乘性增益 | 不等价（小偏差下近似） |
+| HSL 分区 | HSV 7 区 | LCH 9 区（magenta 混入 purple/blue） | 近似 |
+| 曲线坐标 | 0-1 | 0-1（tone）/ 0-255 显示级（film） | 单位不同，已按通道区分 |
+| vignette 公式 | 线性 ramp + radius×0.7071 | smoothstep + uVwin 窗口（profile 未激活时） | 不等价（Phase A 实证三测试不受影响） |
+| LUT 链位 | 链首（post-LUT 调参语义） | HSL 之后（effect.frag 第 9 站） | LUT profile 两端链序不同（Phase A 遗留议题，需真机 A/B） |

@@ -151,5 +151,8 @@ data class GalleryMediaEntity(
     val spectralFilmPrint: String?,
     val spectralFilmCDensityGain: Float,
     val spectralFilmMDensityGain: Float,
-    val spectralFilmYDensityGain: Float
+    val spectralFilmYDensityGain: Float,
+    // Phase C（需求 2.7）：快门时 CaptureProfileSnapshot 标识，供追溯与调试
+    val profileId: String?,
+    val profileVersion: Long?
 )

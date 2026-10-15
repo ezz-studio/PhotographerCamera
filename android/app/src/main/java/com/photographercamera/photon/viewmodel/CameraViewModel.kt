@@ -2969,6 +2969,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             spectralFilmCDensityGain = spectralFilmSettings.tuning.cDensityGain,
             spectralFilmMDensityGain = spectralFilmSettings.tuning.mDensityGain,
             spectralFilmYDensityGain = spectralFilmSettings.tuning.yDensityGain,
+            // Phase C（需求 2.7）：快门快照标识随元数据落库，供追溯本次成片
+            // 实际使用的 Profile 参数代（无快照的路径记 null）。
+            profileId = com.photographercamera.core.photon.color.CaptureProfileStore.current?.profileId,
+            profileVersion = com.photographercamera.core.photon.color.CaptureProfileStore.current?.version,
             width = width,
             height = height,
             ratio = aspectRatio,

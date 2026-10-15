@@ -151,6 +151,11 @@ data class MediaMetadata(
     val spectralFilmCDensityGain: Float = 1f,
     val spectralFilmMDensityGain: Float = 1f,
     val spectralFilmYDensityGain: Float = 1f,
+    // Phase C（需求 2.7）：快门时 CaptureProfileSnapshot 标识。
+    // profileId 为当前 LUT/profile 标识（如 "profile:Nickshih"；原生档 "native"）；
+    // profileVersion 为快照单调递增版本号，用于追溯本次成片实际使用的参数代。
+    val profileId: String? = null,
+    val profileVersion: Long? = null,
 ) {
     /**
      * 将元数据转换为 CaptureInfo，用于写入 EXIF
@@ -503,6 +508,8 @@ data class MediaMetadata(
                     spectralFilmCDensityGain = if (obj.isNull("spectralFilmCDensityGain")) 1f else obj.optDouble("spectralFilmCDensityGain").toFloat(),
                     spectralFilmMDensityGain = if (obj.isNull("spectralFilmMDensityGain")) 1f else obj.optDouble("spectralFilmMDensityGain").toFloat(),
                     spectralFilmYDensityGain = if (obj.isNull("spectralFilmYDensityGain")) 1f else obj.optDouble("spectralFilmYDensityGain").toFloat(),
+                    profileId = if (obj.isNull("profileId")) null else obj.optString("profileId"),
+                    profileVersion = if (obj.isNull("profileVersion")) null else obj.optLong("profileVersion"),
                 )
             } catch (e: Exception) {
                 PLog.e(TAG, "Failed to parse JSON", e)

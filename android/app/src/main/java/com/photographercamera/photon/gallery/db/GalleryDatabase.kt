@@ -8,7 +8,7 @@ import com.photographercamera.photon.raw.RawToneMappingParameters
 
 @Database(
     entities = [GalleryMediaEntity::class],
-    version = 39,
+    version = 40,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GalleryConverters::class)
@@ -336,6 +336,14 @@ abstract class GalleryDatabase : RoomDatabase() {
                     "ALTER TABLE gallery_media ADD COLUMN computationalBokehStyle " +
                         "TEXT NOT NULL DEFAULT 'DEFAULT'"
                 )
+            }
+        }
+
+        // Phase C（需求 2.7）：快门 CaptureProfileSnapshot 标识落库（可空列，旧行 NULL）
+        private val MIGRATION_39_40 = object : androidx.room.migration.Migration(39, 40) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE gallery_media ADD COLUMN profileId TEXT")
+                db.execSQL("ALTER TABLE gallery_media ADD COLUMN profileVersion INTEGER")
             }
         }
 
@@ -708,7 +716,8 @@ abstract class GalleryDatabase : RoomDatabase() {
                         MIGRATION_34_35,
                         MIGRATION_35_36,
                         MIGRATION_36_37,
-                        MIGRATION_37_38
+                        MIGRATION_37_38,
+                        MIGRATION_39_40
                     )
                     .fallbackToDestructiveMigrationOnDowngrade(false)
                     .fallbackToDestructiveMigration(false)

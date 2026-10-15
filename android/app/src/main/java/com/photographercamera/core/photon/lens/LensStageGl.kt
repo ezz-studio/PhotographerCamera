@@ -190,12 +190,25 @@ class LensStageGl {
     private var streakProgram = 0
     private var compositeProgram = 0
 
-    private class Rt(val tex: Int, val fbo: Int, var w: Int, var h: Int) {
+    private class Rt(
+        val tex: Int,
+        val fbo: Int,
+        var w: Int,
+        var h: Int,
+        val half: Boolean,
+    ) {
         fun ensure(nw: Int, nh: Int): Boolean {
             if (w == nw && h == nh) return false
             w = nw; h = nh
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
-            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, nw, nh, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            // Phase C（PA-01）：half 模式用 GL_RGBA16F/GL_HALF_FLOAT，避免成片 16F
+            // 主链最前端（Stage 0）被量化成 8-bit；预览链保持 8-bit 设计不变。
+            GLES30.glTexImage2D(
+                GLES30.GL_TEXTURE_2D, 0,
+                if (half) GLES30.GL_RGBA16F else GLES30.GL_RGBA,
+                nw, nh, 0, GLES30.GL_RGBA,
+                if (half) GLES30.GL_HALF_FLOAT else GLES30.GL_UNSIGNED_BYTE, null,
+            )
             return true
         }
     }
@@ -208,6 +221,9 @@ class LensStageGl {
     private var sRt: Rt? = null
     private var t1Rt: Rt? = null
     private var t2Rt: Rt? = null
+
+    /** 当前 RT 格式模式：true=GL_RGBA16F（成片 16F 主链），false=GL_RGBA8（预览链）。 */
+    private var rtHalf = false
 
     private fun quad(): FloatBuffer {
         quadBuf?.let { return it }
@@ -258,11 +274,16 @@ class LensStageGl {
         if (compositeProgram == 0) compositeProgram = link(fsComposite)
     }
 
-    private fun makeRt(w: Int, h: Int): Rt {
+    private fun makeRt(w: Int, h: Int, half: Boolean): Rt {
         val tex = IntArray(1)
         GLES30.glGenTextures(1, tex, 0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex[0])
-        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0,
+            if (half) GLES30.GL_RGBA16F else GLES30.GL_RGBA,
+            w, h, 0, GLES30.GL_RGBA,
+            if (half) GLES30.GL_HALF_FLOAT else GLES30.GL_UNSIGNED_BYTE, null,
+        )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -272,7 +293,7 @@ class LensStageGl {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo[0])
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, tex[0], 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-        return Rt(tex[0], fbo[0], w, h)
+        return Rt(tex[0], fbo[0], w, h, half)
     }
 
     private fun bind(rt: Rt, w: Int, h: Int) {
@@ -301,6 +322,10 @@ class LensStageGl {
      * 完整 lens 阶段。输入可以是 OES 相机纹理（带 st/crop）或普通 TEXTURE_2D
      * （st=identity, crop=(0,0,1,1)）。返回输出纹理 id（全分辨率，TEXTURE_2D）。
      * 全零参数直接返回 0（调用方沿用原输入，渲染逐像素不变）。
+     *
+     * halfFloat=true 时全部内部 RT 用 GL_RGBA16F（成片 16F 主链，Phase C PA-01：
+     * 修复 lens 阶段把 F16 输入量化成 8-bit 的链头瓶颈）；默认 false 保持预览链
+     * 原有 8-bit 设计。模式切换时旧格式 RT 整体重建（program 与上下文不受影响）。
      */
     fun process(
         srcTex: Int,
@@ -310,21 +335,26 @@ class LensStageGl {
         width: Int,
         height: Int,
         p: LensParams,
+        halfFloat: Boolean = false,
     ): Int {
         if (p.isZero || width <= 0 || height <= 0) return 0
+        if (halfFloat != rtHalf) {
+            releaseRts()
+            rtHalf = halfFloat
+        }
         val needOes = srcTarget == GLES11Ext.GL_TEXTURE_EXTERNAL_OES
         ensurePrograms(needOes)
         val qw = max(1, width / 4)
         val qh = max(1, height / 4)
 
-        if (warpRt == null) warpRt = makeRt(width, height)
-        if (outRt == null) outRt = makeRt(width, height)
-        if (eRt == null) eRt = makeRt(qw, qh)
-        if (bRt == null) bRt = makeRt(qw, qh)
-        if (gRt == null) gRt = makeRt(qw, qh)
-        if (sRt == null) sRt = makeRt(qw, qh)
-        if (t1Rt == null) t1Rt = makeRt(qw, qh)
-        if (t2Rt == null) t2Rt = makeRt(qw, qh)
+        if (warpRt == null) warpRt = makeRt(width, height, rtHalf)
+        if (outRt == null) outRt = makeRt(width, height, rtHalf)
+        if (eRt == null) eRt = makeRt(qw, qh, rtHalf)
+        if (bRt == null) bRt = makeRt(qw, qh, rtHalf)
+        if (gRt == null) gRt = makeRt(qw, qh, rtHalf)
+        if (sRt == null) sRt = makeRt(qw, qh, rtHalf)
+        if (t1Rt == null) t1Rt = makeRt(qw, qh, rtHalf)
+        if (t2Rt == null) t2Rt = makeRt(qw, qh, rtHalf)
 
         val prevFbo = IntArray(1)
         GLES30.glGetIntegerv(GLES30.GL_FRAMEBUFFER_BINDING, prevFbo, 0)
@@ -429,15 +459,21 @@ class LensStageGl {
 
     /** 释放宿主上下文里的 GL 资源（在对应上下文线程调用；可选）。 */
     fun release() {
+        releaseRts()
+        rtHalf = false
+        for (p in intArrayOf(warpOesProgram, warp2dProgram, extractProgram, blurProgram, streakProgram, compositeProgram)) {
+            if (p != 0) GLES30.glDeleteProgram(p)
+        }
+        warpOesProgram = 0; warp2dProgram = 0; extractProgram = 0; blurProgram = 0; streakProgram = 0; compositeProgram = 0
+    }
+
+    /** 仅释放 RT（保留 program）；half 模式切换时调用。 */
+    private fun releaseRts() {
         val rts = listOfNotNull(warpRt, outRt, eRt, bRt, gRt, sRt, t1Rt, t2Rt)
         for (rt in rts) {
             GLES30.glDeleteTextures(1, intArrayOf(rt.tex), 0)
             GLES30.glDeleteFramebuffers(1, intArrayOf(rt.fbo), 0)
         }
         warpRt = null; outRt = null; eRt = null; bRt = null; gRt = null; sRt = null; t1Rt = null; t2Rt = null
-        for (p in intArrayOf(warpOesProgram, warp2dProgram, extractProgram, blurProgram, streakProgram, compositeProgram)) {
-            if (p != 0) GLES30.glDeleteProgram(p)
-        }
-        warpOesProgram = 0; warp2dProgram = 0; extractProgram = 0; blurProgram = 0; streakProgram = 0; compositeProgram = 0
     }
 }
