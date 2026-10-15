@@ -26,6 +26,7 @@ sys.path.insert(0, HERE)
 PORT = 8791
 BASE = f"http://127.0.0.1:{PORT}"
 DATA = os.path.join(ROOT, "studio_session", "testdata")
+DATA_PLAIN = os.path.join(ROOT, "studio_session", "testdata_plain")
 
 
 def _make_dataset(n: int = 12) -> str:
@@ -47,6 +48,29 @@ def _make_dataset(n: int = 12) -> str:
     return DATA
 
 
+def _make_plain_dataset(n: int = 8) -> str:
+    """Ordinary UN-GRADED photos (input distribution S) for held-out validation.
+
+    build_profile.build() requires validation_root (style = T / S; the ungraded
+    side is the measurement baseline, not optional), so the smoke test must
+    supply one — otherwise /api/generate fails by design.
+    """
+    os.makedirs(DATA_PLAIN, exist_ok=True)
+    rng = np.random.default_rng(21)
+    for i in range(n):
+        h, w = 300 + i * 5, 340 + i * 3
+        yy, xx = np.mgrid[0:h, 0:w]
+        base = np.dstack([
+            0.42 + 0.16 * (xx / w) + rng.normal(0, 0.02, (h, w)),
+            0.44 + 0.14 * (yy / h) + rng.normal(0, 0.02, (h, w)),
+            0.40 + 0.12 * (1 - yy / h) + rng.normal(0, 0.02, (h, w)),
+        ])
+        Image.fromarray((np.clip(base, 0, 1) * 255).astype(np.uint8), "RGB").save(
+            os.path.join(DATA_PLAIN, f"plain_{i:02d}.jpg"), quality=92
+        )
+    return DATA_PLAIN
+
+
 def _req(path: str, payload: dict | None = None, raw: bool = False, timeout: int = 600):
     if payload is None:
         req = urllib.request.Request(BASE + path)
@@ -64,7 +88,9 @@ def _req(path: str, payload: dict | None = None, raw: bool = False, timeout: int
 
 def main() -> int:
     data = _make_dataset()
-    print(f"[0] synthetic dataset: {data} ({len(os.listdir(data))} images)")
+    plains = _make_plain_dataset()
+    print(f"[0] synthetic dataset: {data} ({len(os.listdir(data))} images)"
+          f" | plain validation set: {plains} ({len(os.listdir(plains))} images)")
 
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     proc = subprocess.Popen(
@@ -108,7 +134,8 @@ def main() -> int:
         # --- generate (async) ---------------------------------------------
         images = [i["path"] for i in browsed["images"]]
         job = _req("/api/generate", {"images": images, "name": "Smoke Look",
-                                     "outdir": "profiles/studio_smoke"})
+                                     "outdir": "profiles/studio_smoke",
+                                     "validation_dir": plains})
         jid = job["job"]
         while True:
             j = _req(f"/api/job?id={jid}")

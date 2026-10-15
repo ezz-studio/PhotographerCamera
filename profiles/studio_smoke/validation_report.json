@@ -1,46 +1,140 @@
 {
-  "schema": "validation_report/v1",
-  "n_test": 2,
-  "overall_test_loss": 0.93963,
-  "loss_threshold": 1.0,
+  "schema": "validation_report/v2",
+  "validation_mode": "stylefit",
   "validation_status": "validated",
+  "honest_cv": true,
+  "overall_test_loss": 13.496,
+  "n_test": 1,
+  "loss_threshold": 30.0,
+  "style_similarity": 92.91,
+  "style_distance_after": 7.09,
+  "style_distance_before": 12.168,
+  "style_improvement": 1.716,
+  "style_gap_reduction_pct": 41.7,
   "components": {
-    "color": 0.08882,
-    "tone": 0.15754,
-    "histogram": 0.03628,
-    "hsl": 0.26279,
-    "highlight": 0.29396,
-    "shadow": 0.13324,
-    "texture": 0.38844
+    "L_mean": 0.7728,
+    "L_std": 2.2772,
+    "a_mean": 1.8923,
+    "b_mean": 4.1801,
+    "C_mean": 11.864,
+    "C_p95": 23.4893,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 6.8862,
+    "L_p5": 5.8969,
+    "L_p25": 2.0321,
+    "L_p50": 0.163,
+    "L_p75": 0.9016,
+    "L_p95": 1.8016,
+    "L_p99": 2.4901
   },
-  "per_image": [
-    {
-      "color": 0.09057485016562844,
-      "tone": 0.15900095303853354,
-      "histogram": 0.03558860476321586,
-      "hsl": 0.24267315864562988,
-      "highlight": 0.3166127477973568,
-      "shadow": 0.13701367378234863,
-      "texture": 0.36824082757594073,
-      "total": 0.9528053547610725
-    },
-    {
-      "color": 0.08707189128904094,
-      "tone": 0.15607816974322,
-      "histogram": 0.03697453582635983,
-      "hsl": 0.28290247917175293,
-      "highlight": 0.27131276150627615,
-      "shadow": 0.12946024537086487,
-      "texture": 0.4086431272783719,
-      "total": 0.92645451359197
-    }
-  ],
+  "plain_stats": {
+    "L_mean": 53.7147,
+    "L_std": 3.0807,
+    "a_mean": -3.1565,
+    "b_mean": 6.5895,
+    "C_mean": 12.7816,
+    "C_p95": 25.5925,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 47.3248,
+    "L_p5": 48.7399,
+    "L_p25": 51.3681,
+    "L_p50": 53.6968,
+    "L_p75": 56.0991,
+    "L_p95": 58.6554,
+    "L_p99": 60.0435
+  },
+  "rendered_stats": {
+    "L_mean": 57.2292,
+    "L_std": 8.3957,
+    "a_mean": 0.435,
+    "b_mean": 4.2055,
+    "C_mean": 23.0344,
+    "C_p95": 38.3444,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 39.2372,
+    "L_p5": 42.3516,
+    "L_p25": 51.243,
+    "L_p50": 57.9482,
+    "L_p75": 63.6698,
+    "L_p95": 69.86,
+    "L_p99": 73.1625
+  },
+  "reference_stats": {
+    "L_mean": 58.002,
+    "L_std": 6.1185,
+    "a_mean": 2.3274,
+    "b_mean": 0.0254,
+    "C_mean": 34.8984,
+    "C_p95": 61.8337,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 46.1234,
+    "L_p5": 48.2485,
+    "L_p25": 53.2751,
+    "L_p50": 57.7853,
+    "L_p75": 62.7682,
+    "L_p95": 68.0584,
+    "L_p99": 70.6723
+  },
   "dataset": {
-    "discovered": 12,
-    "loaded": 12,
-    "train": 8,
-    "validation": 2,
-    "optimize_images": 10,
-    "test": 2
+    "graded_total": 12,
+    "graded_sampled": 12,
+    "plain_total": 7,
+    "plain_eval": 1,
+    "eval_held_out": true,
+    "pixels_source": 420000,
+    "pixels_target": 96000,
+    "plain_fit_used": 7,
+    "plain_eval_used": 1,
+    "graded_skipped": 0
+  },
+  "content_fidelity": {
+    "deltaE_mean": 13.496,
+    "deltaE_p95": 21.375,
+    "luma_correlation": 0.9967,
+    "structure_correlation": 0.9896,
+    "n_images": 1,
+    "verdict": "ok"
+  },
+  "holdout": {},
+  "cv": {
+    "k": 4,
+    "seed": 20240917,
+    "style_distance_before": 12.168,
+    "style_distance_after": 7.09,
+    "style_improvement": 1.716,
+    "style_similarity": 92.91,
+    "content_deltaE_mean": 13.514
+  },
+  "iterative": {
+    "rounds_requested": 12,
+    "accepted_rounds": 0,
+    "gate": "kfold",
+    "trace": [
+      {
+        "round": 0,
+        "accepted": true,
+        "reason": "基线（未参与迭代）",
+        "style_distance": 7.0925,
+        "deltaE": 13.5142,
+        "structure": 0.9896,
+        "gate": "kfold"
+      },
+      {
+        "round": 1,
+        "accepted": false,
+        "reason": "预计组合色度增益 2.22 超上限（防颜色崩坏）"
+      }
+    ]
+  },
+  "lut": {
+    "size": 33,
+    "cells": 35937,
+    "coverage": 1.0,
+    "adaptive": false,
+    "strength": 0.8
   }
 }

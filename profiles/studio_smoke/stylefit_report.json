@@ -1,0 +1,310 @@
+{
+  "style_match": {
+    "L_mean": 0.7728,
+    "L_std": 2.2772,
+    "a_mean": 1.8923,
+    "b_mean": 4.1801,
+    "C_mean": 11.864,
+    "C_p95": 23.4893,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 6.8862,
+    "L_p5": 5.8969,
+    "L_p25": 2.0321,
+    "L_p50": 0.163,
+    "L_p75": 0.9016,
+    "L_p95": 1.8016,
+    "L_p99": 2.4901
+  },
+  "content_fidelity": {
+    "deltaE_mean": 13.496,
+    "deltaE_p95": 21.375,
+    "luma_correlation": 0.9967,
+    "structure_correlation": 0.9896,
+    "n_images": 1,
+    "verdict": "ok"
+  },
+  "holdout": {},
+  "rendered_stats": {
+    "L_mean": 57.2292,
+    "L_std": 8.3957,
+    "a_mean": 0.435,
+    "b_mean": 4.2055,
+    "C_mean": 23.0344,
+    "C_p95": 38.3444,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 39.2372,
+    "L_p5": 42.3516,
+    "L_p25": 51.243,
+    "L_p50": 57.9482,
+    "L_p75": 63.6698,
+    "L_p95": 69.86,
+    "L_p99": 73.1625
+  },
+  "plain_stats": {
+    "L_mean": 53.7147,
+    "L_std": 3.0807,
+    "a_mean": -3.1565,
+    "b_mean": 6.5895,
+    "C_mean": 12.7816,
+    "C_p95": 25.5925,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 47.3248,
+    "L_p5": 48.7399,
+    "L_p25": 51.3681,
+    "L_p50": 53.6968,
+    "L_p75": 56.0991,
+    "L_p95": 58.6554,
+    "L_p99": 60.0435
+  },
+  "style_match_before": {
+    "L_mean": 4.2873,
+    "L_std": 3.0378,
+    "a_mean": 5.4838,
+    "b_mean": 6.5641,
+    "C_mean": 22.1168,
+    "C_p95": 36.2412,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 1.2014,
+    "L_p5": 0.4914,
+    "L_p25": 1.907,
+    "L_p50": 4.0885,
+    "L_p75": 6.6691,
+    "L_p95": 9.403,
+    "L_p99": 10.6288
+  },
+  "style_distance": 7.072,
+  "style_distance_before": 12.168,
+  "style_improvement": 1.721,
+  "version": 3,
+  "method": "unpaired CIELAB distribution transfer: luminance quantile map (linear + bounded shape), optimal linear transport of the (a,b) covariance, per-hue and per-luma residual corrections; baked into one 3D LUT",
+  "model": {
+    "exposure_luma": {
+      "source_mean": 53.72,
+      "target_mean": 58.02,
+      "source_std": 3.09,
+      "target_std": 10.08,
+      "contrast_gain": 2.0
+    },
+    "tone_curve_probe": {
+      "L5": -5.0,
+      "L25": -13.13,
+      "L50": -4.02,
+      "L75": 14.07,
+      "L95": 5.0
+    },
+    "white_balance_ab_shift": {
+      "a": 4.0,
+      "b": -4.0
+    },
+    "chroma_gain": [
+      1.8,
+      1.8
+    ],
+    "hue_residual_max": 5.0,
+    "tint_max": 1.16
+  },
+  "iterative": {
+    "rounds_requested": 12,
+    "accepted_rounds": 0,
+    "gate": "kfold",
+    "trace": [
+      {
+        "round": 0,
+        "accepted": true,
+        "reason": "基线（未参与迭代）",
+        "style_distance": 7.0925,
+        "deltaE": 13.5142,
+        "structure": 0.9896,
+        "gate": "kfold"
+      },
+      {
+        "round": 1,
+        "accepted": false,
+        "reason": "预计组合色度增益 2.22 超上限（防颜色崩坏）"
+      }
+    ]
+  },
+  "lut": {
+    "size": 33,
+    "cells": 35937,
+    "coverage": 1.0,
+    "adaptive": false,
+    "strength": 0.8
+  },
+  "reference_stats": {
+    "L_mean": 58.002,
+    "L_std": 6.1185,
+    "a_mean": 2.3274,
+    "b_mean": 0.0254,
+    "C_mean": 34.8984,
+    "C_p95": 61.8337,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 46.1234,
+    "L_p5": 48.2485,
+    "L_p25": 53.2751,
+    "L_p50": 57.7853,
+    "L_p75": 62.7682,
+    "L_p95": 68.0584,
+    "L_p99": 70.6723
+  },
+  "dataset": {
+    "graded_total": 12,
+    "graded_sampled": 12,
+    "plain_total": 7,
+    "plain_eval": 1,
+    "eval_held_out": true,
+    "pixels_source": 420000,
+    "pixels_target": 96000,
+    "plain_fit_used": 7,
+    "plain_eval_used": 1,
+    "graded_skipped": 0
+  },
+  "estimated": {
+    "vignette": 0.0,
+    "grain": 0.0432,
+    "glow": 0.0,
+    "exposure_bias": 0.1245,
+    "white_balance": {
+      "temperature_bias": -1.0,
+      "tint_bias": -1.0
+    },
+    "color_matrix": [
+      [
+        1.2,
+        -0.2,
+        -0.2
+      ],
+      [
+        -0.2,
+        1.2,
+        -0.2
+      ],
+      [
+        -0.2,
+        -0.1314,
+        1.2
+      ]
+    ],
+    "tone_curve": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0625,
+        0.0
+      ],
+      [
+        0.125,
+        0.0
+      ],
+      [
+        0.1875,
+        0.0062
+      ],
+      [
+        0.25,
+        0.1187
+      ],
+      [
+        0.3125,
+        0.2312
+      ],
+      [
+        0.375,
+        0.3169
+      ],
+      [
+        0.4375,
+        0.3294
+      ],
+      [
+        0.5,
+        0.4598
+      ],
+      [
+        0.5625,
+        0.6403
+      ],
+      [
+        0.625,
+        0.7698
+      ],
+      [
+        0.6875,
+        0.7823
+      ],
+      [
+        0.75,
+        0.8907
+      ],
+      [
+        0.8125,
+        1.0
+      ],
+      [
+        0.875,
+        1.0
+      ],
+      [
+        0.9375,
+        1.0
+      ],
+      [
+        1.0,
+        1.0
+      ]
+    ],
+    "hsl": {
+      "red": {
+        "hue_shift": -9.963,
+        "saturation": 1.5,
+        "lightness": 1.0938
+      },
+      "orange": {
+        "hue_shift": -9.782,
+        "saturation": 1.4371,
+        "lightness": 1.0856
+      },
+      "yellow": {
+        "hue_shift": -3.816,
+        "saturation": 1.478,
+        "lightness": 1.0615
+      },
+      "green": {
+        "hue_shift": 11.403,
+        "saturation": 1.5,
+        "lightness": 1.0681
+      },
+      "cyan": {
+        "hue_shift": 12.0,
+        "saturation": 1.5,
+        "lightness": 1.1338
+      },
+      "blue": {
+        "hue_shift": 5.046,
+        "saturation": 1.5,
+        "lightness": 1.1846
+      },
+      "purple": {
+        "hue_shift": -2.194,
+        "saturation": 1.5,
+        "lightness": 1.1297
+      }
+    }
+  },
+  "cv": {
+    "k": 4,
+    "seed": 20240917,
+    "style_distance_before": 12.168,
+    "style_distance_after": 7.09,
+    "style_improvement": 1.716,
+    "style_similarity": 92.91,
+    "content_deltaE_mean": 13.514
+  }
+}

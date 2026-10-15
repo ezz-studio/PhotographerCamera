@@ -1,12 +1,20 @@
 {
-  "overall_test_loss": 0.93963,
+  "overall_test_loss": 13.496,
   "components": {
-    "color": 0.08882,
-    "tone": 0.15754,
-    "histogram": 0.03628,
-    "hsl": 0.26279,
-    "highlight": 0.29396,
-    "shadow": 0.13324,
-    "texture": 0.38844
+    "L_mean": 0.7728,
+    "L_std": 2.2772,
+    "a_mean": 1.8923,
+    "b_mean": 4.1801,
+    "C_mean": 11.864,
+    "C_p95": 23.4893,
+    "clip_high": 0.0,
+    "clip_low": 0.0,
+    "L_p1": 6.8862,
+    "L_p5": 5.8969,
+    "L_p25": 2.0321,
+    "L_p50": 0.163,
+    "L_p75": 0.9016,
+    "L_p95": 1.8016,
+    "L_p99": 2.4901
   }
 }

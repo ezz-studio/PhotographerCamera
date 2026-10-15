@@ -681,7 +681,7 @@ class LutImageProcessor(context: Context? = null) {
         // 之前执行（光学先于风格化）。全零参数直通；失败原样返回不阻断成片。
         var source = bitmap
         runCatching {
-            if (!com.photographercamera.core.photon.lens.LensParamsStore.current.isZero) {
+            if (!(com.photographercamera.core.photon.color.CaptureProfileStore.current?.lens ?: com.photographercamera.core.photon.lens.LensParamsStore.current).isZero) {
                 source = applyLensStage(source)
             }
         }
@@ -1030,7 +1030,7 @@ class LutImageProcessor(context: Context? = null) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uVignette"), vignette)
             // 0.9.17：profile.vignette 桌面语义（radius/feather/center）
             run {
-                val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+                val fp = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current)
                 val profileVignette = fp.profileActive && vignette > 0f
                 GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(program, "uVignetteStyle"),
@@ -1103,7 +1103,7 @@ class LutImageProcessor(context: Context? = null) {
         // 作为曲线 LUT 复合链的输入侧：master(channel(film(x)))。仅 profile 注入时生效
         //（FilmParamsStore 默认端点 8/248 非恒等，须用 profileActive 门控），
         // 未注入时 filmFloor/Ceiling 为 null，烘焙结果与原实现逐字节一致。
-        val filmParams = com.photographercamera.core.photon.color.FilmParamsStore.current
+        val filmParams = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current)
         val filmFloor = if (filmParams.profileActive) filmParams.filmCurveShadowFloor else null
         val filmCeiling = if (filmParams.profileActive) filmParams.filmCurveHighlightCeiling else null
         val filmCurveActive = filmFloor != null && filmCeiling != null &&
@@ -1134,7 +1134,7 @@ class LutImageProcessor(context: Context? = null) {
         // 设置 HDF 参数
         // 0.9.1：recipe.halation 经 JSON 桥被上游 toJson() 抹零 → 用 FilmParamsStore
         // 补回 profile 原值（成片端 HDF 链路；与预览端 LutRenderer 同源）
-        val effectiveHalation = maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength)
+        val effectiveHalation = maxOf(halation, (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).halationStrength)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uHalation"), effectiveHalation)
         if (effectiveHalation > 0f) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
@@ -2139,8 +2139,8 @@ class LutImageProcessor(context: Context? = null) {
             GLES30.glGetUniformLocation(lutSharpenProgram, "uRadius"),
             // 0.9.17：profile.sharpen.radius 对齐桌面端 apply_sharpen(radius)——
             // 仅 profile 注入时覆盖，否则保持上游默认半径
-            if (com.photographercamera.core.photon.color.FilmParamsStore.current.profileActive) {
-                com.photographercamera.core.photon.color.FilmParamsStore.current.sharpenRadius
+            if ((com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).profileActive) {
+                (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).sharpenRadius
                     .coerceIn(0.5f, 3f)
             } else {
                 SrgbSharpnessShader.DEFAULT_RADIUS
@@ -3099,7 +3099,7 @@ class LutImageProcessor(context: Context? = null) {
         // 防上游 toJson 抹零后 profile halation 链全灭）
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"),
-            maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength),
+            maxOf(halation, (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).halationStrength),
         )
         GLES30.glUniformMatrix4fv(
             GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uMVPMatrix"), 1, false, identityMatrix, 0

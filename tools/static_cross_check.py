@@ -4,9 +4,19 @@
 Checks (no Android SDK needed):
   1. Every key path in the shipped profile JSONs has a matching @SerialName /
      property in Profile.kt (kotlinx-serialization would fail loudly otherwise).
-  2. Every uniform referenced in ProfileRenderer.kt is declared in some shader
-     file under assets/shaders/.
-  3. Every shader asset referenced by ProfileRenderer.kt / GLSL.kt exists.
+  2. Every uniform looked up at runtime (glGetUniformLocation(..., "u_x")) in the
+     live Android render chain is DECLARED in some embedded GLSL string
+     (uniform <type> u_x;). A lookup without a declaration is a silent no-op
+     uniform (glUniform* on location -1) — the class of bug that produced the
+     1.7.4/1.7.5 preview blackout.
+     NOTE: this replaced the pre-0.9.0 check against core/gpu/ProfileRenderer.kt,
+     which was deleted in commit 4c463ab (engine switch). The live chain is now
+     photon/lut/* (LutImageProcessor / LutRenderer / PreviewColorShader /
+     FilmGrain*) plus core/photon/color/*.
+  3. Every shader asset referenced from Kotlin ("shaders/...") exists.
+     The legacy assets/shaders/ directory has had no loader since 0.9.0
+     (shaders are embedded Kotlin strings now), so zero references is the
+     expected healthy state — reported, not an error.
   4. Validation ranges in Validation.kt cover the schema's min/max bounds.
 """
 from __future__ import annotations
@@ -60,23 +70,71 @@ for profile_file in asset_profiles:
         errors.append(f"[json->kt] {profile_file}: key '{key}' (path {path}) has no "
                       f"@SerialName or property in Profile.kt")
 
-# --- 2. Uniforms referenced in Kotlin vs declared in shaders -------------------
-renderer = read(os.path.join(KT, "core", "gpu", "ProfileRenderer.kt"))
-kotlin_uniforms = set(re.findall(r'"(u_[a-zA-Z_]+)"', renderer))
-shader_dir = os.path.join(ASSETS, "shaders")
-shader_text = ""
-for f in os.listdir(shader_dir):
-    shader_text += read(os.path.join(shader_dir, f))
-declared = set(re.findall(r"uniform\s+\w+\s+(u_[a-zA-Z_]+)", shader_text))
-for u in sorted(kotlin_uniforms):
-    if u not in declared:
-        errors.append(f"[uniform] '{u}' referenced in ProfileRenderer.kt but not "
-                      f"declared in any shader")
+# --- 2. Uniform lookups vs GLSL declarations (live render chain) ----------------
+# Live render-chain Kotlin files (post-0.9.0 engine switch). Uniform names are
+# looked up literally via glGetUniformLocation(program, "u_xxx").
+LIVE_CHAIN_DIRS = [
+    os.path.join(KT, "photon", "lut"),
+    os.path.join(KT, "photon", "gpu"),
+    os.path.join(KT, "photon", "video"),
+    os.path.join(KT, "core", "photon", "color"),
+    os.path.join(KT, "core", "photon", "lens"),
+]
+kt_sources: dict[str, str] = {}
+for d in LIVE_CHAIN_DIRS:
+    if not os.path.isdir(d):
+        continue
+    for fn in sorted(os.listdir(d)):
+        if fn.endswith(".kt"):
+            kt_sources[os.path.join(d, fn)] = read(os.path.join(d, fn))
 
-# --- 3. Shader assets referenced from Kotlin exist -----------------------------
-for m in re.findall(r'"shaders/([a-zA-Z0-9_.]+)"', renderer):
-    if not os.path.exists(os.path.join(shader_dir, m)):
-        errors.append(f"[assets] shader '{m}' referenced but missing")
+lookup_re = re.compile(r'[gG]etUniformLocation\(\s*[^,]+?,\s*"(u[A-Za-z0-9_]+)"')
+# GLSL declarations may carry a precision qualifier and/or a multi-word type
+# (e.g. "uniform mediump sampler3D uLutTexture;"); collect them from the WHOLE
+# Kotlin tree because GLSL is injected across files (PreviewColorShader pulls in
+# ShadowsHighlightsShader.GLSL, RAW shaders live under photon/raw/, ...).
+declare_re = re.compile(r"uniform\s+(?:lowp\s+|mediump\s+|highp\s+)?\w+\s+(u[A-Za-z0-9_]+)\s*(?:\[\s*\d*\s*\])?\s*;")
+
+looked_up: dict[str, list[str]] = {}   # uniform -> [files that look it up]
+declared: set[str] = set()
+for path, text in kt_sources.items():
+    for m in lookup_re.finditer(text):
+        looked_up.setdefault(m.group(1), []).append(os.path.basename(path))
+
+# Declarations may live anywhere in the Kotlin tree (GLSL strings are injected
+# across modules), so scan every .kt under the app source root.
+for dirpath, _dirs, files in os.walk(KT):
+    for fn in sorted(files):
+        if not fn.endswith(".kt"):
+            continue
+        fp = os.path.join(dirpath, fn)
+        if fp in kt_sources:
+            text = kt_sources[fp]
+        else:
+            with open(fp, encoding="utf-8") as f:
+                text = f.read()
+        for m in declare_re.finditer(text):
+            declared.add(m.group(1))
+
+for u in sorted(looked_up):
+    if u not in declared:
+        files = ", ".join(sorted(set(looked_up[u])))
+        errors.append(f"[uniform] '{u}' looked up in {files} but not declared in "
+                      f"any embedded GLSL string (silent no-op uniform)")
+
+# --- 3. Shader asset references exist ------------------------------------------
+shader_dir = os.path.join(ASSETS, "shaders")
+shader_refs = 0
+for path, text in kt_sources.items():
+    for m in re.finditer(r'"shaders/([a-zA-Z0-9_.]+)"', text):
+        shader_refs += 1
+        if not os.path.exists(os.path.join(shader_dir, m.group(1))):
+            errors.append(f"[assets] shader '{m.group(1)}' referenced in "
+                          f"{os.path.basename(path)} but missing")
+if shader_refs == 0:
+    n_assets = len(os.listdir(shader_dir)) if os.path.isdir(shader_dir) else 0
+    print(f"Shader asset references from live chain: 0 "
+          f"(assets/shaders/ holds {n_assets} unloaded files since 0.9.0 — OK)")
 
 # --- 4. Validation ranges vs schema -------------------------------------------
 schema = json.load(open(os.path.join(ROOT, "profiles", "schema",
@@ -108,7 +166,9 @@ for name, lo, hi in kt_checks:
         matched += 1
 
 print(f"JSON keys checked against Profile.kt @SerialName set ({len(serial_names)} names)")
-print(f"Uniforms referenced: {len(kotlin_uniforms)}, declared in shaders: {len(declared)}")
+print(f"Live-chain Kotlin files scanned: {len(kt_sources)}; "
+      f"uniforms looked up: {len(looked_up)}, declared in GLSL: {len(declared)}")
+print(f"Shader asset references: {shader_refs}")
 print(f"Validation.kt range checks: {len(kt_checks)}, schema-matched: {matched} "
       f"(of {len(schema_bounds)} schema bounds)")
 if errors:

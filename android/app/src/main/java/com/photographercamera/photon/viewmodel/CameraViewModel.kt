@@ -507,6 +507,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val cameraController = Camera2Controller(application)
 
+    /** Phase B：CaptureProfileSnapshot 版本号（单调递增，快门追溯用）。 */
+    private val captureSnapshotSeq = java.util.concurrent.atomic.AtomicLong(0)
+
 
     // 内容仓库（单例，与 GalleryViewModel 共享）
     private val contentRepository = ContentRepository.getInstance(application)
@@ -3059,6 +3062,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.resumeVideoRecording()
     }
 
+    /**
+     * Phase B（需求 2.7）：快门触发时把当前生效的 Profile 参数冻结为不可变快照。
+     * recipe 取 VM 内同步状态 currentRecipeParams（与预览/视频同源，含快捷面板叠加），
+     * film/lens 取两个参数单例的当前值；version 单调递增便于日志与元数据追溯。
+     */
+    fun createCaptureProfileSnapshot(): com.photographercamera.core.photon.color.CaptureProfileSnapshot {
+        val lutId = currentLutId.value ?: "native"
+        return com.photographercamera.core.photon.color.CaptureProfileSnapshot(
+            profileId = lutId,
+            recipe = getMergedRecipeParams(),
+            film = com.photographercamera.core.photon.color.FilmParamsStore.current,
+            lens = com.photographercamera.core.photon.lens.LensParamsStore.current,
+            version = captureSnapshotSeq.incrementAndGet(),
+        )
+    }
+
     fun capture() {
         multiFrameDispatched = false
         if (state.value.captureMode == CaptureMode.VIDEO) {
@@ -3080,6 +3099,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             return
         }
+
+        // Phase B（需求 2.7）：快门触发时创建不可变 Profile 快照。异步多帧处理、
+        // 元数据记录与最终保存全程读取同一份（CaptureProfileStore.current），
+        // 防止处理到一半时用户切 profile / 调参导致后半段使用另一份参数。
+        com.photographercamera.core.photon.color.CaptureProfileStore.current = createCaptureProfileSnapshot()
 
         startupPrewarmJob?.takeIf { it.isActive }?.let { job ->
             PLog.d(TAG, "Canceling idle capture prewarm for shutter priority")

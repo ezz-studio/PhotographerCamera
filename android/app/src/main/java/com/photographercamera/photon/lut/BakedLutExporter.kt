@@ -25,6 +25,8 @@ object BakedLutExporter {
                 .toByteArray(Charsets.UTF_8)
         }
 
+        // Phase B：导出烘焙是非拍摄路径，显式回退到活参数单例，避免残留拍摄快照串味。
+        com.photographercamera.core.photon.color.CaptureProfileStore.clear()
         val imageProcessor = LutImageProcessor(context)
         return try {
             val clutBitmap = createIdentityUnwrappedClutBitmap(UNWRAPPED_CLUT_SIZE)
@@ -47,6 +49,8 @@ object BakedLutExporter {
         lutConfig: LutConfig,
         recipe: ColorRecipeParams
     ): ByteArray? {
+        // Phase B：导出烘焙是非拍摄路径，显式回退到活参数单例，避免残留拍摄快照串味。
+        com.photographercamera.core.photon.color.CaptureProfileStore.clear()
         val imageProcessor = LutImageProcessor(context)
         return try {
             val haldBitmap = createIdentityHaldBitmap(HALD_LEVEL)

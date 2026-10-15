@@ -7,8 +7,12 @@ Purpose: prove the GPU shader math equals the validated CPU reference
 here uses `c @ M.T`, which reproduces both the GLSL `m * c` and the CPU `v @ M.T`.
 
 Scope: only the seed-free, blur-free layers are bit-exact comparable:
-  Exposure, White Balance, Color Matrix, Tone Curve (LUT), Highlight,
-  Shadow, HSL (LUT), Vignette.
+  Exposure, White Balance, Color Matrix, Highlight, Shadow, Film Curve,
+  Tone Curve (LUT), HSL (LUT), Vignette.
+  Chain order follows the Android unified engine (assets/shaders/effect.frag
+  v0.3.0) and tools/profile_renderer.py:
+  exposure -> WB -> matrix -> highlight -> shadow -> film curve -> tone curve
+  -> HSL -> vignette.
 Sharpen / Bloom / Halation (Gaussian blur) and Grain / Noise (procedural RNG)
 are GPU-approximated and validated by on-device visual QA (Phase 32), not here.
 """
@@ -191,7 +195,8 @@ def pc_vignette(c, uv, center, amount, radius, feather):
 
 
 def pc_film_curve(c, shadow_floor=8.0 / 255.0, highlight_ceiling=248.0 / 255.0):
-    """Mirror shaders/film_curve.frag (LAST chain pass): C1-continuous soft-knee
+    """Mirror shaders/film_curve.frag (chain position: after shadow, before tone
+    curve — Android unified engine effect.frag v0.3.0): C1-continuous soft-knee
     remap toward the shadow floor / highlight ceiling. Inputs are 0..1 display
     levels; matches GpuParams.kt coercion (lo to [0,0.4], hi to [0.6,1]) and the
     filmEnabled early-out (floor<=0 AND ceiling>=255 -> pass skipped)."""
@@ -221,13 +226,26 @@ def render_deterministic(rgb: np.ndarray, profile: dict) -> np.ndarray:
     wb = p.get("white_balance", {})
     c = pc_white_balance(c, wb.get("temperature_bias", 0.0), wb.get("tint_bias", 0.0))
     c = pc_color_matrix(c, p.get("color_matrix", {}).get("matrix_3x3"))
-    points = p.get("tone_curve", {}).get("points", [])
-    if points and not (len(points) == 2 and points[0] == [0, 0] and points[1] == [1, 1]):
-        c = pc_tone_curve(c, bake_tone_lut(points))
     hr = p.get("highlight_rolloff", {})
     c = pc_highlight(c, hr.get("threshold", 0.8), hr.get("strength", 0.0), hr.get("saturation", 1.0))
     sh = p.get("shadow", {})
     c = pc_shadow(c, sh.get("black_point", 0.0), sh.get("compression", 0.0), sh.get("saturation", 1.0))
+    # Chain order synced with the Android unified engine (assets/shaders/effect.frag
+    # v0.3.0) and tools/profile_renderer.py:
+    #   exposure -> WB -> matrix -> highlight -> shadow -> film curve -> tone curve
+    #   -> HSL -> vignette
+    # (LutImageProcessor.kt:1102 documents the same "shadow -> film curve -> tone
+    # curve" ordering for the stills path. The previous ordering in this file —
+    # tone curve right after the matrix and film curve at the very end — was the
+    # legacy mainchain.frag v0.2.x order and diverged from the Android chain.)
+    fc = p.get("film_curve", {})
+    floor = float(fc.get("shadow_floor", 8.0))
+    ceil = float(fc.get("highlight_ceiling", 248.0))
+    if floor > 0.0 or ceil < 255.0:
+        c = pc_film_curve(c, floor / 255.0, ceil / 255.0)
+    points = p.get("tone_curve", {}).get("points", [])
+    if points and not (len(points) == 2 and points[0] == [0, 0] and points[1] == [1, 1]):
+        c = pc_tone_curve(c, bake_tone_lut(points))
     c = pc_hsl(c, bake_hsl_lut(p.get("hsl", {})))
     vg = p.get("vignette", {})
     if vg.get("amount", 0.0) > 0.0:
@@ -238,10 +256,4 @@ def render_deterministic(rgb: np.ndarray, profile: dict) -> np.ndarray:
         uv = np.stack([(xx + 0.5) / w, (yy + 0.5) / h], axis=-1)
         c = pc_vignette(c, uv, vg.get("center", [0.5, 0.5]), vg.get("amount", 0.0),
                         vg.get("radius", 1.0), vg.get("feather", 0.5))
-    # film curve LAST (same position as ProfileRenderer's film pass).
-    fc = p.get("film_curve", {})
-    floor = float(fc.get("shadow_floor", 8.0))
-    ceil = float(fc.get("highlight_ceiling", 248.0))
-    if floor > 0.0 or ceil < 255.0:
-        c = pc_film_curve(c, floor / 255.0, ceil / 255.0)
     return np.clip(c, 0.0, 1.0)
