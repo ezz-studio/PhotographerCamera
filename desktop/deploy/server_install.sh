@@ -175,10 +175,41 @@ ensure_caddy_import() {
     $SUDO sed -i '/^[[:space:]]*http:\/\/ {/,/^}/d' "$cf"
     echo "    (已移除默认欢迎站点块，备份 ${cf}.bak.*)"
   fi
-  # 确保加载本目录（Debian 默认仅认 *.caddyfile；我们写 studio.caddyfile 已匹配，这里兜底）
-  if ! grep -qE '^[[:space:]]*import[[:space:]]+/etc/caddy/Caddyfile\.d' "$cf"; then
-    echo 'import /etc/caddy/Caddyfile.d/*' | $SUDO tee -a "$cf" >/dev/null
-    echo "    (已追加 import /etc/caddy/Caddyfile.d/*)"
+  # 只要主文件里已有任意一处 import 指向 Caddyfile.d，就不再追加，
+  # 否则相对(Debian默认 import Caddyfile.d/*.caddyfile)与绝对两行会重复加载同一目录 → ambiguous site
+  if grep -qE '^[[:space:]]*import[[:space:]]+.*Caddyfile\.d' "$cf"; then
+    echo "    (主 Caddyfile 已含 Caddyfile.d 导入，跳过追加)"
+    return 0
+  fi
+  echo 'import /etc/caddy/Caddyfile.d/*.caddyfile' | $SUDO tee -a "$cf" >/dev/null
+  echo "    (已追加 import /etc/caddy/Caddyfile.d/*.caddyfile)"
+}
+
+# 移除主 Caddyfile 里直接书写的 $host 站点块，避免与导入的 studio.caddyfile 重复定义
+# （历史：早期部署把站点块写进主文件，新版改为 Caddyfile.d 导入，重跑会导致 ambiguous site）
+remove_inline_site() {
+  local cf=/etc/caddy/Caddyfile host="$1"
+  [ -f "$cf" ] || return 0
+  local host_esc; host_esc="$(printf '%s' "$host" | sed 's/[.[\*^$]/\\&/g')"
+  grep -qE "$host_esc" "$cf" || return 0
+  local bak="${cf}.bak.$(date +%s)"
+  $SUDO cp "$cf" "$bak"
+  # 括号计数：从首个含 host 的行起，吞掉到匹配闭合 } 为止的整块（支持 :443 / 缩进 / 嵌套）
+  $SUDO awk -v h="$host_esc" '
+    $0 ~ h && !inblock { inblock=1; depth=0 }
+    inblock {
+      n=gsub(/{/,"{"); m=gsub(/}/,"}");
+      depth += n - m;
+      if (depth <= 0) inblock=0;
+      next
+    }
+    { print }
+  ' "$bak" | $SUDO tee "$cf" >/dev/null
+  if $SUDO caddy validate --config "$cf" >/dev/null 2>&1; then
+    echo "    (已移除主 Caddyfile 内联的 $host 站点块，避免重复定义)"
+  else
+    $SUDO cp "$bak" "$cf"
+    echo "    !! 移除内联块后配置校验失败，已还原主 Caddyfile，请手动检查"
   fi
 }
 
@@ -221,6 +252,7 @@ setup_caddy() {
   $SUDO mkdir -p /etc/caddy/Caddyfile.d
   $SUDO rm -f /etc/caddy/Caddyfile.d/studio.conf   # 清理旧扩展名，避免重复加载
   ensure_caddy_import
+  remove_inline_site "$CF_HOST"   # 防重跑：删掉主文件里内联的同名站点块，避免 ambiguous site
   local use_tls=0
   if [ "$mode" = "1" ]; then
     if read_pem "请输入 SSL 公钥 (origin_certificate.pem，可粘贴或输入文件路径):" \
@@ -239,7 +271,7 @@ setup_caddy() {
   $SUDO tee /etc/caddy/Caddyfile.d/studio.caddyfile >/dev/null <<EOF
 $CF_HOST {
 $tls_line
-    basicauth {
+    basic_auth {
         studio $HASH
     }
     encode gzip

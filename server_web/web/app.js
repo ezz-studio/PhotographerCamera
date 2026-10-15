@@ -41,7 +41,7 @@ const PARAM_LABEL = {
   threshold: "阈值", strength: "强度", amount: "强度", radius: "半径",
   saturation: "饱和度", compression: "压缩", black_point: "黑点",
   contrast: "对比度", luma: "亮度噪点", chroma: "彩度噪点",
-  size: "颗粒尺寸", density: "密度", warmth: "暖度",
+  size: "颗粒尺寸", density: "密度", luma_contrast: "颗粒明暗分布", warmth: "暖度",
   shadow_floor: "暗部下界", highlight_ceiling: "高光上界",
 };
 const HUE_CN = {

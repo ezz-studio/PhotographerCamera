@@ -403,12 +403,11 @@ class Handler(BaseHTTPRequestHandler):
                 # enforce the safe band on load too (e.g. an old profile with
                 # shadow_floor 25.5 shows up already clamped to 16)
                 prof = S.safe_clamp(prof)
-                # LUT profiles: params are the POST-LUT tuning layer now.
-                # Old profiles carry a stale inverse-solved approximation of
-                # the LUT in their params — reset it so tuning starts clean.
-                _norm = R.neutralize_lut_params(prof)
-                if _norm is not None:
-                    prof = _norm
+                # 严格按 JSON 显示：载入即原样呈现 profile 内的参数值，不再
+                # neutralize_lut_params。LUT profile 的 look 已烘焙进 LUT 网格，参数层
+                # 只是可在此之上微调的 POST-LUT 层；旧逻辑把整组参数重置为架构默认值，
+                # 会让滑块显示 1/0/0.8 而非真实值，并把 hsl 写成空对象导致整组 HSL 滑竿
+                # 被跳过。与 /api/import_profile 保持一致。
                 with _LOCK:
                     STATE["profile"] = prof
                     STATE["profile_path"] = fp
