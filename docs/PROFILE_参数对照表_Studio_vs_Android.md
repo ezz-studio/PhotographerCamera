@@ -96,14 +96,27 @@ bloomThreshold 0..1、bloomRadius 归一 0..1。
 | `color_adaptive` | 未列 | 全链无消费 | ⬜ Android 死字段（预留） |
 | `color_lut.source/strength` | 未列 | strength=烘焙元数据（已烘进 data，运行时 100% 采样即正确）；source 无消费 | ⬜ 元数据字段（非缺陷） |
 
-### 2. HSL hue_shift 单位语义差（PA-05，需求 2.5/6.2）
+### 2. HSL hue_shift 单位语义（PA-05，需求 2.5/6.2）—— 2026 复核修正
 
-- 桌面 `profile_renderer.apply_hsl`：hue_shift 按**度**解释（`/360.0`）。
-- Android `PreviewColorShaderModules.kt:224`：`hue_shift * radians(20.0)` —— **1.0 = 20°**。
-- 同一 JSON 值两端旋转量相差约 **18 倍**（360/20）。已按需求标记为**近似映射**，禁止视为等价。
-- **处置决策：不改单位。** 修改 Android 侧单位会 silently 改变所有存量 profile 的渲染语义（风险大于收益）；
-  正确路径是在 Profile Builder（Studio）导出时把 hue_shift 归一化为 Android 约定（度 → /18 或显式度），
-  属 Phase F 范围。在此之前，本文档即权威声明：**两端 hue_shift 非等价**。
+**结论：profile 的 `hue_shift` 字段在两端（Studio ↔ Android HSL-LUT 阶段）语义一致，均为「度」（`/360.0`），
+并非此前误判的 18–20 倍差异。此前结论已作废。**
+
+- 桌面 `profile_renderer.apply_hsl`（`tools/profile_renderer.py`）：`hue_shift / 360.0` —— 按**度**解释。
+- Android HSL-LUT 阶段：`assets/shaders/hsl.glsl:19` 与 `effect.frag:283` 均为 `pl.b / 360.0`，**同样按度**，
+  与桌面逐字节等价（CPU 参考测试 `tests/test_shader_equivalence.py` 覆盖）。
+- **此前「18 倍不匹配」的误判来源**：Android 另有一条**独立的 OKLCH 调色阶段**
+  （`uLchHueAdjustments * radians(20.0)`，见 `PreviewColorShaderModules.kt:224` / `VideoLutEffect.kt:395`），
+  其 9 段 hue/chroma/lightness 偏移由 `ProfileToRecipeMapper.mapHsl` 把同一 `hsl.<hue>.hueShift`
+  映射到 `redHue/orangeHue/…/magentaHue` 喂入。该阶段是**独立的、按色相带加权 + 肤色/色度门控的重型调色**，
+  缩放为 `×radians(20.0)`，**并非 `hue_shift` 字段的 HSL-LUT 渲染路径**，也不能用简单的「全局 ×20°」
+  在 CPU 参考里复现（它是 per-pixel 带权重 + 色度门控的旋转）。
+- **处置决策（不变）**：HSL-LUT 路径两端已一致，**Studio 代码无需改动**（已加注释固化契约，见
+  `profile_renderer.py` / `glsl_reference.py` 的 `/360.0` 处）。LCH 调色阶段属独立模块，
+  由真机（PLG110）验证，不在 CPU 参考建模范围（等价于 blur/grain 等 GPU 近似层）。
+- **遗留 OPEN QUESTION（待用户/真机裁决，不在 Phase F 范围）**：Android 同一 `hue_shift` 值会**同时**驱动
+  HSL-LUT（`/360.0`，细微）与 LCH 调色（`×20°`，重型）两道阶段。当前所有内置 profile 的 `hue_shift=0`，
+  两道阶段都为零贡献，故现网两端一致；若未来用到非零 `hue_shift`，Android 会出现 HSL-LUT + LCH 的
+  **叠加旋转**，与桌面（仅 HSL-LUT）产生差异。是否应让二者互斥或仅保留其一，需真机评估后决定。
 
 ### 3. 新增注入通道 D：CaptureProfileStore（Phase B，需求 2.7）
 

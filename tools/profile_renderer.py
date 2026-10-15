@@ -240,6 +240,15 @@ def apply_hsl(rgb, hsl: dict):
             mask = (hd >= a) & (hd < b)
         sat_f = np.where(mask, params.get("saturation", 1.0), sat_f)
         light_f = np.where(mask, params.get("lightness", 1.0), light_f)
+        # CONTRACT (degrees): hue_shift is specified in DEGREES; the normalized
+        # hue rotation is hue_shift / 360.0. This reproduces the on-device HSL-LUT
+        # stage exactly (assets/shaders/hsl.glsl:19 and effect.frag:283 both use
+        # `pl.b / 360.0`). NOTE: Android ALSO has a SEPARATE LCH color-mixer stage
+        # (uLchHueAdjustments * radians(20.0), a 9-band OKLCH grade fed by
+        # ProfileToRecipeMapper.mapHsl -> redHue/..) that reads the same profile
+        # hue_shift; that heavier, band-weighted grade is intentionally NOT modeled
+        # here (on-device validated, see tests/test_shader_equivalence.py). Do NOT
+        # "fix" this to * 20.0 — it would diverge from the real HSL-LUT path.
         hue_shift = np.where(mask, params.get("hue_shift", 0) / 360.0, hue_shift)
     h2 = (h + hue_shift) % 1.0
     s2 = np.clip(s * sat_f, 0, 1)

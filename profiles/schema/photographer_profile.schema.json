@@ -48,8 +48,8 @@
           "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": -2, "maximum": 2 } },
           "default": [[1,0,0],[0,1,0],[0,0,1]]
         },
-        "input_gamut": { "type": "string", "default": "sRGB" },
-        "output_gamut": { "type": "string", "default": "sRGB" }
+        "input_gamut": { "type": "string", "default": "sRGB", "description": "预留/元数据：当前双端（Android 与 Studio CPU 参考）均无消费端（PA-07）。不改变渲染。" },
+        "output_gamut": { "type": "string", "default": "sRGB", "description": "预留/元数据：当前双端均无消费端（PA-07）。不改变渲染。" }
       }
     },
     "hsl": {
@@ -87,7 +87,7 @@
       "properties": {
         "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.8 },
         "strength":  { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
-        "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
+        "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0, "description": "预留/死参数（PA-07）：Android 实时通道无对应 uniform 消费端；仅桌面 apply_shadow 路径消费。双端不等价，标记为 inert，不在 Android 接线。" }
       }
     },
     "shadow": {
@@ -165,7 +165,7 @@
     "hsl_color": {
       "type": "object",
       "properties": {
-        "hue_shift":  { "type": "number", "minimum": -30, "maximum": 30, "default": 0 },
+        "hue_shift":  { "type": "number", "minimum": -30, "maximum": 30, "default": 0, "description": "色相偏移，单位：度（degrees）。归一化旋转 = hue_shift / 360.0，与 Android HSL-LUT 阶段（assets/shaders/hsl.glsl / effect.frag，pl.b/360.0）逐字节一致（见 tests/test_shader_equivalence.py）。注意：Android 另有独立的 OKLCH 调色阶段（uLchHueAdjustments * radians(20.0)）使用不同缩放，它不在此字段的 HSL-LUT 路径内，不改变本字段语义。" },
         "saturation": { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 },
         "lightness":  { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
       }

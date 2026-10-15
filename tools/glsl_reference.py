@@ -178,6 +178,13 @@ def pc_hsl(c, hsl_lut):
     u = (idx + 0.5) / float(len(hsl_lut))
     li = np.clip(np.floor(u * len(hsl_lut)).astype(np.int32), 0, len(hsl_lut) - 1)
     pl = hsl_lut[li]
+    # CONTRACT (degrees): the HSL-LUT B channel stores hue_shift in DEGREES; the
+    # normalized rotation is hue_shift / 360.0. This mirrors the on-device HSL-LUT
+    # stage (assets/shaders/hsl.glsl:19 / effect.frag:283). A SEPARATE Android LCH
+    # color-mixer stage (uLchHueAdjustments * radians(20.0), via
+    # ProfileToRecipeMapper.mapHsl) applies its own heavier, band-weighted hue
+    # rotation; that path is intentionally outside this CPU reference. Do NOT change
+    # / 360.0 to * 20.0 — it would break parity with the real HSL-LUT shader.
     sat_f = pl[..., 0]; light_f = pl[..., 1]; hue_shift = pl[..., 2] / 360.0
     h2 = (h + hue_shift) % 1.0
     s2 = np.clip(s * sat_f, 0, 1)
