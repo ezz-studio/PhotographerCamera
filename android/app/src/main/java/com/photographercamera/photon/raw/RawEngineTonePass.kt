@@ -305,6 +305,9 @@ internal class RawEngineTonePass(
         uniform vec2 uTexelSize;
         uniform float uHighlights;
         uniform float uShadows;
+        // Phase E-2：shadow.saturation-1 增量（ShadowsHighlightsShader.GLSL 消费，
+        // 默认 0 = 恒等；RAW 引擎 tone pass 不接线，保持既有行为）。
+        uniform float uShadowSaturationDelta;
                 """.trimIndent()
             } else {
                 ""

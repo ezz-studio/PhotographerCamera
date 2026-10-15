@@ -3,23 +3,37 @@ package com.photographercamera.photon.lut
 import android.opengl.GLES30
 
 object ShadowsHighlightsShader {
-    fun bindUniforms(program: Int, highlights: Float, shadows: Float) {
+    fun bindUniforms(
+        program: Int,
+        highlights: Float,
+        shadows: Float,
+        shadowSaturationDelta: Float = 0f,
+    ) {
         bindUniformLocations(
             highlightsLocation = GLES30.glGetUniformLocation(program, "uHighlights"),
             shadowsLocation = GLES30.glGetUniformLocation(program, "uShadows"),
+            shadowSaturationDeltaLocation = GLES30.glGetUniformLocation(program, "uShadowSaturationDelta"),
             highlights = highlights,
-            shadows = shadows
+            shadows = shadows,
+            shadowSaturationDelta = shadowSaturationDelta,
         )
     }
 
     fun bindUniformLocations(
         highlightsLocation: Int,
         shadowsLocation: Int,
+        shadowSaturationDeltaLocation: Int = -1,
         highlights: Float,
-        shadows: Float
+        shadows: Float,
+        shadowSaturationDelta: Float = 0f,
     ) {
         GLES30.glUniform1f(highlightsLocation, highlights)
         GLES30.glUniform1f(shadowsLocation, shadows)
+        // Phase E-2：shadow.saturation 增量（饱和度-1）。未设置的主机（RAW 引擎
+        // 内部 pass 等）拿默认 0 = 恒等，绝不应因 uniform 默认值 0 而被全局去色。
+        if (shadowSaturationDeltaLocation >= 0) {
+            GLES30.glUniform1f(shadowSaturationDeltaLocation, shadowSaturationDelta)
+        }
     }
 
     val GLSL = """
@@ -194,6 +208,17 @@ object ShadowsHighlightsShader {
         }
 
         vec3 applyShadowsHighlights(vec3 inputColor, vec2 uv) {
+            // Phase E-2：shadow.saturation 接线（桌面 apply_shadow 语义——全局饱和度
+            // 缩放 out = clip(lum + (out - lum) * saturation)，lum 为三通道等权均值）。
+            // 必须先于下方 highlights/shadows 早退施用：两者为 0 时该参数仍需生效。
+            // uniform 存「饱和度-1」增量：未设置的主机默认 0 = 恒等（若直接存饱和度，
+            // GLSL uniform 默认值 0 会把未接线宿主全图去色）。
+            float shadowSaturation = clamp(1.0 + uShadowSaturationDelta, 0.0, 4.0);
+            if (abs(shadowSaturation - 1.0) > 0.001) {
+                float satLum = (inputColor.r + inputColor.g + inputColor.b) / 3.0;
+                inputColor = clamp(satLum + (inputColor - satLum) * shadowSaturation, 0.0, 1.0);
+            }
+
             float highlights = 2.0 * clamp(uHighlights, -1.0, 1.0);
             float shadows = 2.0 * clamp(uShadows, -1.0, 1.0);
             if (abs(highlights) < 0.001 && abs(shadows) < 0.001) {

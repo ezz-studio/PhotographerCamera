@@ -111,6 +111,9 @@ internal class RawAdjustmentPass(
             uniform vec2 uTexelSize;
             uniform float uHighlights;
             uniform float uShadows;
+            // Phase E-2：shadow.saturation-1 增量（ShadowsHighlightsShader.GLSL 消费，
+            // 默认 0 = 恒等；RAW 引擎调整 pass 不接线，保持既有行为）。
+            uniform float uShadowSaturationDelta;
             uniform float uBlacks;
             uniform float uWhites;
 

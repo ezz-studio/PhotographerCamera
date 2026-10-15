@@ -908,8 +908,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             ShadowsHighlightsShader.bindUniformLocations(
                 highlightsLocation = locations.uHighlightsLocation,
                 shadowsLocation = locations.uShadowsLocation,
+                shadowSaturationDeltaLocation = locations.uShadowSaturationDeltaLocation,
                 highlights = params.highlights,
-                shadows = params.shadows
+                shadows = params.shadows,
+                // Phase E-2：shadow.saturation 接线（桌面 apply_shadow 全局饱和度缩放）。
+                // 预览端取实时单例（与 grain/vignette 同源）；profile 未注入时默认
+                // 1.0 → 增量 0 = 恒等。
+                shadowSaturationDelta = com.photographercamera.core.photon.color.FilmParamsStore.current.shadowSaturation - 1f,
             )
             GLES30.glUniform1f(locations.uToneToeLocation, params.toneToe)
             GLES30.glUniform1f(locations.uToneShoulderLocation, params.toneShoulder)
@@ -1725,12 +1730,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val dsW = width / 4;
         val dsH = height / 4
         val spatialScale = getPreviewSpatialEffectScale(width, height)
-        val texelW = spatialScale / dsW;
-        val texelH = spatialScale / dsH
         // 0.9.1：hdfEnabled 已按 FilmParamsStore 补值判断，提取强度同步补值
         //（否则 profile halation 被 JSON 桥抹零后提取纹理全黑，合成补值无效）
         val effectiveHdfStrength = maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength)
-        val threshold = 0.9f - effectiveHdfStrength * 0.3f
+        // Phase E-2：halation.threshold / halation.radius 接线（预览端取实时单例，
+        // 与预览其他 profile 参数同源；成片端在 LutImageProcessor 用快门快照）。
+        // threshold 消费 profile 值（桌面默认 0.9）；radius 通过缩放 texel 实现
+        // （tap 间距 = offset × texel × radius，默认 1.0 恒等，无需改 shader）。
+        val previewFilmParams = com.photographercamera.core.photon.color.FilmParamsStore.current
+        val threshold = if (previewFilmParams.profileActive) {
+            previewFilmParams.halationThreshold.coerceIn(0.5f, 0.99f)
+        } else {
+            0.9f - effectiveHdfStrength * 0.3f
+        }
+        val blurRadius = if (previewFilmParams.profileActive) previewFilmParams.halationRadius.coerceIn(0.2f, 4f) else 1f
+        val texelW = spatialScale * blurRadius / dsW
+        val texelH = spatialScale * blurRadius / dsH
         // Pass 1: Extract + Horizontal Blur
         GLES30.glUseProgram(hdfExtractBlurHProgram)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, hdfFboId[0])
@@ -2001,6 +2016,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, bloomTexId[compositeMipUpper])
         GLES30.glUniform1i(GLES30.glGetUniformLocation(bloomCompositeProgram, "uBloomTextureNext"), 1)
+        // Phase E-1：共享 composite shader 新增 uSourceTexture/uAddSource。预览端恒显式
+        // uAddSource=0（仅输出 bloom 分量，源图由上方 blend 叠加写入 8-bit 目标）——
+        // 不依赖 uniform 默认值，防止 program 复用期间状态残留误走合成分支。
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTexId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(bloomCompositeProgram, "uSourceTexture"), 2)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(bloomCompositeProgram, "uAddSource"), 0f)
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(bloomCompositeProgram, "uBloomTexelSize"),
             1f / bloomMipWidths[compositeMipLower],
@@ -2410,6 +2432,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[1])
         GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfCompositeProgram, "uBloomTexture"), 1)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfCompositeProgram, "uHalation"), maxOf(halation, com.photographercamera.core.photon.color.FilmParamsStore.current.halationStrength))
+        // Phase E-2：halation.warmth（桌面 (warmth, 0.4, 1/warmth) 暖色权重，默认 1.0）
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(hdfCompositeProgram, "uHalationWarmth"),
+            com.photographercamera.core.photon.color.FilmParamsStore.current.halationWarmth.coerceIn(0.1f, 4f)
+        )
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (redHalation > 0f) halationTexId[1] else 0)

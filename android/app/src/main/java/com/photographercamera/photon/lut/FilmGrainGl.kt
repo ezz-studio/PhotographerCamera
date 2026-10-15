@@ -26,6 +26,9 @@ internal class FilmGrainGl(
     private var outputFramebufferId = 0
     private var outputWidth = 0
     private var outputHeight = 0
+    // Phase E-1：输出目标格式跟随调用方链（成片 16F 链 → RGBA16F；其余 8-bit）。
+    // 尺寸缓存命中判断必须包含本标志，否则 16F/8-bit 交替调用会复用错格式目标。
+    private var outputIs16F = false
 
     fun prepare(): Boolean = ensureProgram()
 
@@ -36,9 +39,13 @@ internal class FilmGrainGl(
         amount: Float,
         frameSeed: Float,
         drawQuad: (Int) -> Unit,
+        use16F: Boolean = false,
+        grainSize: Float? = null,
+        grainDensity: Float? = null,
+        grainLumaContrast: Float? = null,
     ): FilmGrainOutput? {
         if (abs(amount) <= ENABLE_EPSILON) return null
-        if (!ensureProgram() || !ensureOutput(width, height)) return null
+        if (!ensureProgram() || !ensureOutput(width, height, use16F)) return null
         if (!drawToFramebuffer(
                 targetFramebufferId = outputFramebufferId,
                 sourceTextureId = sourceTextureId,
@@ -47,6 +54,9 @@ internal class FilmGrainGl(
                 amount = amount,
                 frameSeed = frameSeed,
                 drawQuad = drawQuad,
+                grainSize = grainSize,
+                grainDensity = grainDensity,
+                grainLumaContrast = grainLumaContrast,
             )
         ) {
             return null
@@ -62,6 +72,9 @@ internal class FilmGrainGl(
         amount: Float,
         frameSeed: Float,
         drawQuad: (Int) -> Unit,
+        grainSize: Float? = null,
+        grainDensity: Float? = null,
+        grainLumaContrast: Float? = null,
     ): Boolean {
         if (abs(amount) <= ENABLE_EPSILON) return false
         if (!ensureProgram()) return false
@@ -81,9 +94,11 @@ internal class FilmGrainGl(
         GLES30.glUniform1f(amountLocation, amount.coerceIn(0f, 1f))
         GLES30.glUniform1f(frameSeedLocation, frameSeed)
         GLES30.glUniform1f(pixelScaleLocation, FilmGrainShaders.pixelScale(width, height))
-        GLES30.glUniform1f(lumaContrastLocation, FilmParamsStore.current.grainLumaContrast)
-        GLES30.glUniform1f(sizeLocation, FilmParamsStore.current.grainSize)
-        GLES30.glUniform1f(densityLocation, FilmParamsStore.current.grainDensity)
+        // grain 参数优先取调用方入参（成片端传快门快照值，Phase B 闭环）；
+        // 未传时回退 FilmParamsStore 单例（预览/录像路径的既有行为）。
+        GLES30.glUniform1f(lumaContrastLocation, grainLumaContrast ?: FilmParamsStore.current.grainLumaContrast)
+        GLES30.glUniform1f(sizeLocation, grainSize ?: FilmParamsStore.current.grainSize)
+        GLES30.glUniform1f(densityLocation, grainDensity ?: FilmParamsStore.current.grainDensity)
         drawQuad(programId)
         val error = GLES30.glGetError()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
@@ -109,6 +124,7 @@ internal class FilmGrainGl(
         outputFramebufferId = 0
         outputWidth = 0
         outputHeight = 0
+        outputIs16F = false
     }
 
     fun release() {
@@ -144,12 +160,13 @@ internal class FilmGrainGl(
         return true
     }
 
-    private fun ensureOutput(width: Int, height: Int): Boolean {
+    private fun ensureOutput(width: Int, height: Int, use16F: Boolean): Boolean {
         if (
             outputTextureId != 0 &&
             outputFramebufferId != 0 &&
             outputWidth == width &&
-            outputHeight == height
+            outputHeight == height &&
+            outputIs16F == use16F
         ) {
             return true
         }
@@ -165,7 +182,15 @@ internal class FilmGrainGl(
         GLES30.glGenTextures(1, texture, 0)
         outputTextureId = texture[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, outputTextureId)
-        GLES30.glTexStorage2D(GLES30.GL_TEXTURE_2D, 1, GLES30.GL_RGBA8, width, height)
+        // Phase E-1：成片 16F 链（use16F）下颗粒输出 RGBA16F——避免链尾第二次
+        // 8-bit 量化把前序 16F 精度抹掉；8-bit 链保持 RGBA8 不变。
+        GLES30.glTexStorage2D(
+            GLES30.GL_TEXTURE_2D,
+            1,
+            if (use16F) GLES30.GL_RGBA16F else GLES30.GL_RGBA8,
+            width,
+            height
+        )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -193,6 +218,7 @@ internal class FilmGrainGl(
         }
         outputWidth = width
         outputHeight = height
+        outputIs16F = use16F
         return true
     }
 
@@ -207,6 +233,7 @@ internal class FilmGrainGl(
         }
         outputWidth = 0
         outputHeight = 0
+        outputIs16F = false
     }
 
     private companion object {

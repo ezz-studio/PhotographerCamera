@@ -170,45 +170,51 @@ object Shaders {
         }
     """.trimIndent()
 
-    /** HDF 合成：原图 + HDF 扩散 + spektrafilm 风格红色 halation */
-    val HDF_PREVIEW_COMPOSITE = """
-        #version 300 es
-        precision highp float;
-        in vec2 vTexCoord;
-        out vec4 fragColor;
-        uniform sampler2D uOriginalTexture;
-        uniform sampler2D uBloomTexture;
-        uniform float uHalation;
-        uniform sampler2D uRedHalationTexture;
-        uniform float uRedHalation;
-        uniform sampler2D uSoftLightTexture;
-        uniform float uSoftLight;
+/** HDF 合成：原图 + HDF 扩散 + spektrafilm 风格红色 halation */
+val HDF_PREVIEW_COMPOSITE = """
+    #version 300 es
+    precision highp float;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    uniform sampler2D uOriginalTexture;
+    uniform sampler2D uBloomTexture;
+    uniform float uHalation;
+    // Phase E-2：profile halation.warmth 接线（桌面 apply_halation 语义：
+    // 光晕按 (warmth, 0.4, 1/warmth) 着色——R 通道 ×warmth、B 通道 ×1/warmth、
+    // G 通道恒定 0.4 压制成暖色）。默认 1.0 = 桌面参考值。
+    uniform float uHalationWarmth;
+    uniform sampler2D uRedHalationTexture;
+    uniform float uRedHalation;
+    uniform sampler2D uSoftLightTexture;
+    uniform float uSoftLight;
+    
+    void main() {
+        vec4 color = texture(uOriginalTexture, vTexCoord);
         
-        void main() {
-            vec4 color = texture(uOriginalTexture, vTexCoord);
-            
-            if (uSoftLight > 0.0) {
-                vec3 softBlur = texture(uSoftLightTexture, vTexCoord).rgb;
-                vec3 screen = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - softBlur);
-                vec3 softGlow = mix(color.rgb, screen, 0.42);
-                color.rgb = mix(color.rgb, softGlow, uSoftLight * 0.75);
-                float softLuma = dot(softBlur, vec3(0.2126, 0.7152, 0.0722));
-                color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
-                // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5
-                // 已删除：无空间 mask，会抬黑压白，与成片端 LutImageProcessor 保持一致。
-            }
-            
-            if (uHalation > 0.0) {
-                vec3 bloom = texture(uBloomTexture, vTexCoord).rgb;
-                float bLuma = dot(bloom, vec3(0.2126, 0.7152, 0.0722));
-                bloom = mix(vec3(bLuma), bloom, 1.6);
-                vec3 bloomEffect = bloom * uHalation * 1.4;
-                color.rgb = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - bloomEffect);
-                float mist = bLuma * uHalation * 0.15;
-                color.rgb += mist;
-                // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5
-                // 已删除（同成片端）：泛光只在高光晕区叠加，不再压平整体对比度。
-            }
+        if (uSoftLight > 0.0) {
+            vec3 softBlur = texture(uSoftLightTexture, vTexCoord).rgb;
+            vec3 screen = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - softBlur);
+            vec3 softGlow = mix(color.rgb, screen, 0.42);
+            color.rgb = mix(color.rgb, softGlow, uSoftLight * 0.75);
+            float softLuma = dot(softBlur, vec3(0.2126, 0.7152, 0.0722));
+            color.rgb += vec3(softLuma) * (uSoftLight * 0.025);
+            // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uSoftLight * 0.05) + 0.5
+            // 已删除：无空间 mask，会抬黑压白，与成片端 LutImageProcessor 保持一致。
+        }
+        
+        if (uHalation > 0.0) {
+            vec3 bloom = texture(uBloomTexture, vTexCoord).rgb;
+            float bLuma = dot(bloom, vec3(0.2126, 0.7152, 0.0722));
+            bloom = mix(vec3(bLuma), bloom, 1.6);
+            // Phase E-2：halation.warmth 暖色权重（桌面参考 (warmth, 0.4, 1/warmth)）。
+            vec3 warmthTint = vec3(uHalationWarmth, 0.4, 1.0 / max(1e-4, uHalationWarmth));
+            vec3 bloomEffect = bloom * uHalation * 1.4 * warmthTint;
+            color.rgb = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - bloomEffect);
+            float mist = bLuma * uHalation * 0.15;
+            color.rgb += mist;
+            // 原有的全图对比度压缩 (color.rgb - 0.5) * (1.0 - uHalation * 0.08) + 0.5
+            // 已删除（同成片端）：泛光只在高光晕区叠加，不再压平整体对比度。
+        }
             
             if (uRedHalation > 0.0) {
                 vec3 halationBlur = texture(uRedHalationTexture, vTexCoord).rgb;
@@ -364,18 +370,23 @@ object Shaders {
         }
     """.trimIndent()
 
-    /** LDR Bloom: final blurred highlight contribution. */
-    val BEVY_BLOOM_COMPOSITE = """
-        #version 300 es
-        precision highp float;
-        in vec2 vTexCoord;
-        out vec4 fragColor;
-        uniform sampler2D uBloomTexture;
-        uniform sampler2D uBloomTextureNext;
-        uniform vec2 uBloomTexelSize;
-        uniform vec2 uBloomTexelSizeNext;
-        uniform float uBlend;
-        uniform float uMipBlend;
+/** LDR Bloom: final blurred highlight contribution. */
+val BEVY_BLOOM_COMPOSITE = """
+    #version 300 es
+    precision highp float;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    uniform sampler2D uBloomTexture;
+    uniform sampler2D uBloomTextureNext;
+    uniform vec2 uBloomTexelSize;
+    uniform vec2 uBloomTexelSizeNext;
+    uniform float uBlend;
+    uniform float uMipBlend;
+    // Phase E-1：成片端（capture）单次合成模式——源图由本 shader 直接采样相加，
+    // 免去「预绘源图 + GL 叠加混合」两步，也不再依赖 float blend 语义。
+    // 预览端（preview）恒传 0：保持「仅输出 bloom 分量 + 调用方 blend 叠加」原行为。
+    uniform sampler2D uSourceTexture;
+    uniform float uAddSource;
 
         vec3 sampleTentLower(vec2 uv) {
             float x = uBloomTexelSize.x;
@@ -416,8 +427,17 @@ object Shaders {
         void main() {
             vec3 lowerBloom = sampleTentLower(vTexCoord);
             vec3 upperBloom = sampleTentUpper(vTexCoord);
-            vec3 bloom = mix(lowerBloom, upperBloom, uMipBlend) * uBlend;
-            fragColor = vec4(clamp(bloom, 0.0, 1.0), 1.0);
+            vec3 bloom = clamp(mix(lowerBloom, upperBloom, uMipBlend) * uBlend, 0.0, 1.0);
+            if (uAddSource > 0.5) {
+                // 成片端：源图 + bloom 单次合成。16F 目标上不做 [0,1] 钳制——
+                // HDR 高光延伸由链路终点统一 clamp（FINAL_ENCODE_DITHER_SHADER），
+                // 与无后处理路径的 16F 语义保持一致。
+                vec3 source = texture(uSourceTexture, vTexCoord).rgb;
+                fragColor = vec4(source + bloom, 1.0);
+            } else {
+                // 预览端：仅输出 bloom 分量；源图由调用方预绘后以 GL 叠加混合写入 8-bit 目标。
+                fragColor = vec4(bloom, 1.0);
+            }
         }
     """.trimIndent()
 

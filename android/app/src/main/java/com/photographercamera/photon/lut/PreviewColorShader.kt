@@ -48,6 +48,9 @@ internal object PreviewColorShader {
             uniform float uVibrance;
             uniform float uHighlights;
             uniform float uShadows;
+            // Phase E-2：shadow.saturation-1 增量（ShadowsHighlightsShader.GLSL 消费，
+            // 默认 0 = 恒等）。声明必须与 GLSL 嵌入处同作用域。
+            uniform float uShadowSaturationDelta;
             uniform float uToneToe;
             uniform float uToneShoulder;
             uniform float uTonePivot;
@@ -80,6 +83,13 @@ internal object PreviewColorShader {
             uniform sampler2D uCurveTexture;
             uniform bool uCurveEnabled;
             ${if (variant.includeSpatialRecipeEffects) """
+            // Phase E-3：录像路径 halation 一致性。预览端走独立的 HDF_PREVIEW_COMPOSITE
+            // 二次合成 pass（LutRenderer），此处把同一套 HDF 光晕 + 红色光晕 + 柔光内联进
+            // 共享 shader，仅录像端（RealtimeVideoRenderer）在 halation 激活时开启该变体，
+            // 预览端保持独立 pass 不变（避免双重叠加）。
+            uniform sampler2D uHdfTexture;
+            uniform float uHalation;
+            uniform float uHalationWarmth;
             uniform sampler2D uRedHalationTexture;
             uniform float uRedHalation;
             uniform sampler2D uSoftLightTexture;
@@ -385,6 +395,17 @@ internal object PreviewColorShader {
                 }
 
                 ${if (variant.includeSpatialRecipeEffects) """
+                if (uHalation > 0.0) {
+                    vec3 bloom = texture(uHdfTexture, uvCoord).rgb;
+                    float bLuma = dot(bloom, W);
+                    bloom = mix(vec3(bLuma), bloom, 1.6);
+                    vec3 warmthTint = vec3(uHalationWarmth, 0.4, 1.0 / max(1e-4, uHalationWarmth));
+                    vec3 bloomEffect = bloom * uHalation * 1.4 * warmthTint;
+                    color.rgb = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - bloomEffect);
+                    float mist = bLuma * uHalation * 0.15;
+                    color.rgb += mist;
+                    color.rgb = sanitizeColor(color.rgb);
+                }
                 if (uRedHalation > 0.0) {
                     vec3 halationBlur = texture(uRedHalationTexture, uvCoord).rgb;
                     float halationMask = smoothstep(0.001, 0.06, dot(halationBlur, W));

@@ -121,6 +121,9 @@ class LutImageProcessor(context: Context? = null) {
     private var lutSharpenFboId = 0
     private var lutSharpenWidth = 0
     private var lutSharpenHeight = 0
+    // Phase E-1：锐化中间目标格式（working16F → RGBA16F）。尺寸缓存命中判断
+    // 必须包含本标志，防止 16F/8-bit 链交替调用时复用错格式的目标。
+    private var lutSharpenIs16F = false
     private val filmGrainGl = FilmGrainGl(TAG)
 
     // HDF (Highlight Diffusion) 光晕效果资源
@@ -147,6 +150,9 @@ class LutImageProcessor(context: Context? = null) {
     private var clarityOutputFboId = 0
     private var clarityOutputWidth = 0
     private var clarityOutputHeight = 0
+    // Phase E-1：clarity 输出目标格式（working16F → RGBA16F）。金字塔本级
+    // 早已是 16F；output 是后处理链第一站，8-bit 会把 16F 主链精度抹掉。
+    private var clarityOutputIs16F = false
 
     // Halation (胶片红晕) 效果资源
     private var halationExtractBlurHProgram = 0
@@ -170,6 +176,8 @@ class LutImageProcessor(context: Context? = null) {
     private var bloomOutputFboId = 0
     private var bloomOutputWidth = 0
     private var bloomOutputHeight = 0
+    // Phase E-1：bloom 合成输出目标格式（working16F → RGBA16F + 免混合单次合成）。
+    private var bloomOutputIs16F = false
 
     private var isInitialized = false
 
@@ -1093,7 +1101,16 @@ class LutImageProcessor(context: Context? = null) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uTint"), tint)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uFade"), fade)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uVibrance"), vibrance)
-            ShadowsHighlightsShader.bindUniforms(program, highlights, shadows)
+            // Phase E-2：shadow.saturation 接线（桌面 apply_shadow 的全局饱和度缩放
+            // 语义）。传「饱和度-1」增量；快照优先，与下方 vignette/film curve 同源。
+            // profile 未注入时 FilmParams 默认 1.0 → 增量 0 = 恒等。
+            ShadowsHighlightsShader.bindUniforms(
+                program, highlights, shadows,
+                shadowSaturationDelta = (
+                    com.photographercamera.core.photon.color.CaptureProfileStore.current?.film
+                        ?: com.photographercamera.core.photon.color.FilmParamsStore.current
+                    ).shadowSaturation - 1f,
+            )
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uToneToe"), toneToe)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uToneShoulder"), toneShoulder)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uTonePivot"), tonePivot)
@@ -1206,6 +1223,12 @@ class LutImageProcessor(context: Context? = null) {
         // 补回 profile 原值（成片端 HDF 链路；与预览端 LutRenderer 同源）
         val effectiveHalation = maxOf(halation, (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).halationStrength)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uHalation"), effectiveHalation)
+        // Phase E-2：halation.warmth 接线（快照优先，与上方 filmParams 同源）。
+        // 桌面 apply_halation 的暖色权重即 (warmth, 0.4, 1/warmth)，默认 1.0。
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(program, "uHalationWarmth"),
+            filmParams.halationWarmth.coerceIn(0.1f, 4f)
+        )
         if (effectiveHalation > 0f) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[1])
@@ -1260,17 +1283,23 @@ class LutImageProcessor(context: Context? = null) {
         if (positionHandle >= 0) GLES30.glDisableVertexAttribArray(positionHandle)
         if (texCoordHandle >= 0) GLES30.glDisableVertexAttribArray(texCoordHandle)
 
+        // Phase E-1（PA-02/Q3）：后处理层 F16 化。working16F（RAW 引擎交接 /
+        // 双层链中间层）时 clarity/sharpen/bloom/grain 的中间目标全部 RGBA16F，
+        // 消除后处理层 8-bit 量化对 16F 主链精度的抹除（P1 瓶颈）；8-bit 链
+        // （YUV/JPEG）保持原 8-bit 目标不变——降级路径 Q4 维持既有行为，
+        // 且 8-bit FBO 上的 UNSIGNED_BYTE 直读回合法（16F 上非法，真机已证伪）。
+        val postProcess16F = working16F
         val clarityApplied = kotlin.math.abs(clarity) > 0.001f &&
-            renderClarity(outputTextureId, width, height, clarity)
+            renderClarity(outputTextureId, width, height, clarity, postProcess16F)
         val postClarityTextureId = if (clarityApplied) clarityOutputTextureId else outputTextureId
         val postClarityFramebufferId = if (clarityApplied) clarityOutputFboId else framebufferId
 
         val sharpened = kotlin.math.abs(sharpening) > 0.0001f &&
-            renderLutSharpenPass(postClarityTextureId, width, height, sharpening)
+            renderLutSharpenPass(postClarityTextureId, width, height, sharpening, postProcess16F)
         val postSharpenTextureId = if (sharpened) lutSharpenTextureId else postClarityTextureId
         val postSharpenFramebufferId = if (sharpened) lutSharpenFboId else postClarityFramebufferId
 
-        val bloomApplied = bloom > 0.001f && renderLdrBloom(postSharpenTextureId, width, height, bloom)
+        val bloomApplied = bloom > 0.001f && renderLdrBloom(postSharpenTextureId, width, height, bloom, postProcess16F)
         val postBloomTextureId = if (bloomApplied) bloomOutputTextureId else postSharpenTextureId
         val postBloomFramebufferId = if (bloomApplied) bloomOutputFboId else postSharpenFramebufferId
         val filmGrainOutput = if (filmGrain > 0.001f) {
@@ -1281,6 +1310,13 @@ class LutImageProcessor(context: Context? = null) {
                 amount = filmGrain,
                 frameSeed = 0f,
                 drawQuad = ::drawQuad,
+                use16F = postProcess16F,
+                // Phase B 快照闭环：grain 参数取快门瞬间固化的 profile 快照
+                // （filmParams 上方已按 CaptureProfileStore 优先解析），
+                // 避免渲染期间单例被下一次拍照覆写。
+                grainSize = filmParams.grainSize,
+                grainDensity = filmParams.grainDensity,
+                grainLumaContrast = filmParams.grainLumaContrast,
             )
         } else {
             null
@@ -1381,7 +1417,19 @@ class LutImageProcessor(context: Context? = null) {
             // 安兜底：16F attachment 上 UNSIGNED_BYTE 读回不受驱动保证（真机已证伪），
             // 改用恒合法的 HALF_FLOAT 读 + Skia 软件转换（仅损失 TPDF 抖动，不花片）。
             if (readFramebufferId == framebufferId) {
-                return readMain16FAs8Bit(width, height, inputColorSpace)
+                return readF16FboAs8Bit(framebufferId, width, height, inputColorSpace)
+            }
+            // Phase E-1：working16F 时后处理 pass 目标已 16F 化，readFramebufferId
+            // 可能是 16F 的 clarity/sharpen/bloom/grain FBO——直接 UNSIGNED_BYTE
+            // 读回属非法组合（GL_INVALID_OPERATION，缓冲区不写入 → 陈旧内存当
+            // 像素 = 花片，1.3.4 同款事故）。先把最后一级 pass 纹理直通回主
+            // 16F FBO，再走恒合法的 HALF_FLOAT 读。
+            if (working16F && renderPassthroughToMainFbo(lastPassTextureId, width, height)) {
+                return readF16FboAs8Bit(framebufferId, width, height, inputColorSpace)
+            }
+            if (working16F) {
+                // 直通也失败的最后手段：直接从 16F 后处理 FBO 恒合法读回。
+                return readF16FboAs8Bit(readFramebufferId, width, height, inputColorSpace)
             }
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, readFramebufferId)
             val fallbackBuffer = obtainReadbackBuffer(width * height * 4)
@@ -2132,11 +2180,12 @@ class LutImageProcessor(context: Context? = null) {
         drawQuad(bitmapDenoisePassthroughProgram)
     }
 
-    private fun setupLutSharpenFramebuffer(width: Int, height: Int): Boolean {
+    private fun setupLutSharpenFramebuffer(width: Int, height: Int, use16F: Boolean): Boolean {
         if (lutSharpenFboId != 0 &&
             lutSharpenTextureId != 0 &&
             lutSharpenWidth == width &&
-            lutSharpenHeight == height
+            lutSharpenHeight == height &&
+            lutSharpenIs16F == use16F
         ) {
             return true
         }
@@ -2147,15 +2196,17 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glGenTextures(1, textures, 0)
         lutSharpenTextureId = textures[0]
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, lutSharpenTextureId)
+        // Phase E-1：16F 链上锐化中间目标 RGBA16F——锐化卷积在 8-bit 上做会把
+        // 16F 主链的渐变精度量化掉（抬黑/曲线后的暗部断层主要来源之一）。
         GLES30.glTexImage2D(
             GLES30.GL_TEXTURE_2D,
             0,
-            GLES30.GL_RGBA,
+            if (use16F) GLES30.GL_RGBA16F else GLES30.GL_RGBA,
             width,
             height,
             0,
             GLES30.GL_RGBA,
-            GLES30.GL_UNSIGNED_BYTE,
+            if (use16F) GLES30.GL_HALF_FLOAT else GLES30.GL_UNSIGNED_BYTE,
             null
         )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
@@ -2184,6 +2235,7 @@ class LutImageProcessor(context: Context? = null) {
 
         lutSharpenWidth = width
         lutSharpenHeight = height
+        lutSharpenIs16F = use16F
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return true
     }
@@ -2192,11 +2244,12 @@ class LutImageProcessor(context: Context? = null) {
         sourceTextureId: Int,
         width: Int,
         height: Int,
-        sharpening: Float
+        sharpening: Float,
+        use16F: Boolean,
     ): Boolean {
         if (kotlin.math.abs(sharpening) <= 0.0001f) return false
         ensureLutSharpenProgram()
-        if (lutSharpenProgram == 0 || !setupLutSharpenFramebuffer(width, height)) {
+        if (lutSharpenProgram == 0 || !setupLutSharpenFramebuffer(width, height, use16F)) {
             return false
         }
 
@@ -2441,13 +2494,14 @@ class LutImageProcessor(context: Context? = null) {
     }
 
     /**
-     * 1.3.5 终点编码失败时的安全兜底：从主 16F FBO 以 HALF_FLOAT 直读
+     * 1.3.5 终点编码失败时的安全兜底：从 16F FBO 以 HALF_FLOAT 直读
      * （RGBA16F attachment + RGBA/HALF_FLOAT 组合恒合法，1.3.4 已实证），
      * 再用 Skia 软件转换成 ARGB_8888。仅损失 TPDF 抖动，绝不产生花片。
-     * 调用前提：主 framebufferId 当前持有链路最终图像（无后处理 pass 激活）。
+     * Phase E-1：sourceFboId 参数化——主 FBO（无后处理）与 16F 后处理
+     * pass 目标（clarity/sharpen/bloom/grain）均可作为读回源。
      */
-    private fun readMain16FAs8Bit(width: Int, height: Int, colorSpace: ColorSpace): Bitmap {
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebufferId)
+    private fun readF16FboAs8Bit(sourceFboId: Int, width: Int, height: Int, colorSpace: ColorSpace): Bitmap {
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, sourceFboId)
         val f16Buffer = obtainReadbackBuffer(width * height * 8)
         GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
         GLES30.glPixelStorei(GLES30.GL_PACK_ALIGNMENT, 8)
@@ -2466,7 +2520,7 @@ class LutImageProcessor(context: Context? = null) {
         if (readError == GLES30.GL_NO_ERROR) {
             f16Bitmap.copyPixelsFromBuffer(f16Buffer)
         } else {
-            PLog.e(TAG, "readMain16FAs8Bit: glError $readError; output will be blank")
+            PLog.e(TAG, "readF16FboAs8Bit: glError $readError; output will be blank")
         }
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         android.graphics.Canvas(out).drawBitmap(f16Bitmap, 0f, 0f, null)
@@ -2485,6 +2539,7 @@ class LutImageProcessor(context: Context? = null) {
         }
         lutSharpenWidth = 0
         lutSharpenHeight = 0
+        lutSharpenIs16F = false
     }
 
     private data class BitmapDenoiseParams(
@@ -2786,11 +2841,12 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
     }
 
-    private fun setupClarityFramebuffers(width: Int, height: Int): Boolean {
+    private fun setupClarityFramebuffers(width: Int, height: Int, use16F: Boolean): Boolean {
         if (
             clarityOutputWidth == width &&
             clarityOutputHeight == height &&
             clarityOutputTextureId != 0 &&
+            clarityOutputIs16F == use16F &&
             clarityPyramidTexId.all { it != 0 }
         ) {
             return true
@@ -2830,7 +2886,9 @@ class LutImageProcessor(context: Context? = null) {
         val output = createClarityFramebuffer(
             width = width,
             height = height,
-            internalFormat = GLES30.GL_RGBA8,
+            // Phase E-1：16F 链上 clarity 输出 RGBA16F——局部对比度在 8-bit
+            // 中间层上做会量化渐变（金字塔本就是 16F，唯独 output 拖后腿）。
+            internalFormat = if (use16F) GLES30.GL_RGBA16F else GLES30.GL_RGBA8,
             label = "output",
         ) ?: run {
             releaseClarityFramebuffers()
@@ -2840,6 +2898,7 @@ class LutImageProcessor(context: Context? = null) {
         clarityOutputFboId = output.second
         clarityOutputWidth = width
         clarityOutputHeight = height
+        clarityOutputIs16F = use16F
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return true
@@ -2907,6 +2966,7 @@ class LutImageProcessor(context: Context? = null) {
         }
         clarityOutputWidth = 0
         clarityOutputHeight = 0
+        clarityOutputIs16F = false
     }
 
     private fun renderClarity(
@@ -2914,6 +2974,7 @@ class LutImageProcessor(context: Context? = null) {
         width: Int,
         height: Int,
         clarity: Float,
+        use16F: Boolean,
     ): Boolean {
         ensureClarityPrograms()
         if (clarityDownsampleProgram == 0 || clarityCompositeProgram == 0) {
@@ -2924,7 +2985,7 @@ class LutImageProcessor(context: Context? = null) {
             PLog.e(TAG, "renderClarity skipped after upstream glError $upstreamError")
             return false
         }
-        if (!setupClarityFramebuffers(width, height)) return false
+        if (!setupClarityFramebuffers(width, height, use16F)) return false
 
         val identityMatrix = FloatArray(16)
         android.opengl.Matrix.setIdentityM(identityMatrix, 0)
@@ -3163,13 +3224,24 @@ class LutImageProcessor(context: Context? = null) {
 
         val dsW = width / 4
         val dsH = height / 4
-        val texelW = 1.0f / dsW
-        val texelH = 1.0f / dsH
+        // Phase E-2：halation.threshold / halation.radius 接线（快照优先）。
+        // - threshold 消费 profile 值（桌面 apply_halation 默认 0.9；成片链 recipe
+        //   halation 恒 0，原公式在此恒输出 0.9，接线后默认值零变化）；
+        //   未注入 profile 时保持既有公式。
+        // - radius 不改 shader：模糊 tap 间距 = offset × texel × radius，直接把
+        //   texel 缩放 radius 倍即可（乘法可交换），默认 1.0 恒等。
+        val filmParams = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current)
+        val threshold = if (filmParams.profileActive) {
+            filmParams.halationThreshold.coerceIn(0.5f, 0.99f)
+        } else {
+            0.9f - halation * 0.3f
+        }
+        val blurRadius = if (filmParams.profileActive) filmParams.halationRadius.coerceIn(0.2f, 4f) else 1f
+        val texelW = blurRadius / dsW
+        val texelH = blurRadius / dsH
 
         val identityMatrix = FloatArray(16)
         android.opengl.Matrix.setIdentityM(identityMatrix, 0)
-
-        val threshold = 0.9f - halation * 0.3f
 
         // Pass 1: 提取高光 + 水平高斯模糊 (1/4 分辨率)
         GLES30.glUseProgram(hdfExtractBlurHProgram)
@@ -3184,7 +3256,7 @@ class LutImageProcessor(context: Context? = null) {
         // 防上游 toJson 抹零后 profile halation 链全灭）
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"),
-            maxOf(halation, (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current).halationStrength),
+            maxOf(halation, filmParams.halationStrength),
         )
         GLES30.glUniformMatrix4fv(
             GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uMVPMatrix"), 1, false, identityMatrix, 0
@@ -3208,21 +3280,33 @@ class LutImageProcessor(context: Context? = null) {
         checkGlError("renderHDFBlur")
     }
 
-    private fun setupBloomOutputFramebuffer(width: Int, height: Int): Boolean {
+    private fun setupBloomOutputFramebuffer(width: Int, height: Int, use16F: Boolean): Boolean {
         if (bloomOutputFboId != 0 &&
             bloomOutputTextureId != 0 &&
             bloomOutputWidth == width &&
-            bloomOutputHeight == height
+            bloomOutputHeight == height &&
+            bloomOutputIs16F == use16F
         ) {
             return true
         }
         if (bloomOutputFboId != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(bloomOutputFboId), 0)
         if (bloomOutputTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(bloomOutputTextureId), 0)
+        bloomOutputIs16F = false
         val f = IntArray(1)
         val t = IntArray(1)
         GLES30.glGenTextures(1, t, 0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t[0])
-        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        // Phase E-1：16F 链上 bloom 合成输出 RGBA16F。原 8-bit 目标先把源图
+        // 钳进 [0,1] 再叠加 bloom，是 Q3 量化瓶颈的最后一站；16F 化后由链路
+        // 终点（FINAL_ENCODE_DITHER_SHADER）统一 clamp，HDR 高光得以保留。
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0,
+            if (use16F) GLES30.GL_RGBA16F else GLES30.GL_RGBA,
+            width, height, 0,
+            GLES30.GL_RGBA,
+            if (use16F) GLES30.GL_HALF_FLOAT else GLES30.GL_UNSIGNED_BYTE,
+            null
+        )
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
@@ -3242,6 +3326,7 @@ class LutImageProcessor(context: Context? = null) {
         bloomOutputFboId = f[0]
         bloomOutputWidth = width
         bloomOutputHeight = height
+        bloomOutputIs16F = use16F
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         return true
     }
@@ -3331,12 +3416,12 @@ class LutImageProcessor(context: Context? = null) {
         bloomSourceHeight = 0
     }
 
-    private fun renderLdrBloom(sourceTextureId: Int, width: Int, height: Int, bloomStrength: Float): Boolean {
+    private fun renderLdrBloom(sourceTextureId: Int, width: Int, height: Int, bloomStrength: Float, use16F: Boolean): Boolean {
         ensureBloomPrograms()
         if (!setupBloomFramebuffers(width, height)) {
             return false
         }
-        if (!setupBloomOutputFramebuffer(width, height)) {
+        if (!setupBloomOutputFramebuffer(width, height, use16F)) {
             return false
         }
         if (bloomMipCount <= 0 || bloomDownsampleFirstProgram == 0 || bloomDownsampleProgram == 0 || bloomUpsampleProgram == 0 || bloomCompositeProgram == 0) {
@@ -3393,13 +3478,15 @@ class LutImageProcessor(context: Context? = null) {
         val compositeMipLower = BloomLdrSettings.compositeMipLowerIndex(bloomMipCount, bloomStrength)
         val compositeMipUpper = BloomLdrSettings.compositeMipUpperIndex(bloomMipCount, bloomStrength)
         val compositeMipBlend = BloomLdrSettings.compositeMipBlend(bloomMipCount, bloomStrength)
-        if (bitmapDenoisePassthroughProgram == 0) {
-            return false
+        if (!use16F) {
+            // 8-bit 链：先预绘源图（passthrough 会切走 program，须在下方重新绑定
+            // composite program 之后再绘制），再以 (ONE, ONE) 叠加混合 bloom 分量。
+            if (bitmapDenoisePassthroughProgram == 0) {
+                return false
+            }
+            renderTexturePassthrough(sourceTextureId, bloomOutputFboId, width, height)
         }
-        renderTexturePassthrough(sourceTextureId, bloomOutputFboId, width, height)
-        GLES30.glEnable(GLES30.GL_BLEND)
-        GLES30.glBlendEquation(GLES30.GL_FUNC_ADD)
-        GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE)
+        GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, bloomOutputFboId)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(bloomCompositeProgram)
@@ -3409,6 +3496,17 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, bloomTexId[compositeMipUpper])
         GLES30.glUniform1i(GLES30.glGetUniformLocation(bloomCompositeProgram, "uBloomTextureNext"), 1)
+        // uSourceTexture/uAddSource：成片 16F 链（use16F）单次合成 source+bloom，
+        // 免「预绘源图 + GL 叠加混合」；8-bit 链保持 blend 叠加原行为（uAddSource=0）。
+        // 两条分支都显式设置 uAddSource——program 跨调用复用，uniform 状态会残留，
+        // 隐式依赖默认值 0 会在 16F→8-bit 交替渲染时把 bloom 合成分支带进 8-bit 路径。
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(bloomCompositeProgram, "uSourceTexture"), 2)
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(bloomCompositeProgram, "uAddSource"),
+            if (use16F) 1f else 0f
+        )
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(bloomCompositeProgram, "uBloomTexelSize"),
             1f / bloomMipWidths[compositeMipLower],
@@ -3421,6 +3519,11 @@ class LutImageProcessor(context: Context? = null) {
         )
         GLES30.glUniform1f(GLES30.glGetUniformLocation(bloomCompositeProgram, "uBlend"), finalBlend)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(bloomCompositeProgram, "uMipBlend"), compositeMipBlend)
+        if (!use16F) {
+            GLES30.glEnable(GLES30.GL_BLEND)
+            GLES30.glBlendEquation(GLES30.GL_FUNC_ADD)
+            GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE)
+        }
         drawQuad(bloomCompositeProgram)
         GLES30.glDisable(GLES30.GL_BLEND)
         val error = GLES30.glGetError()
@@ -3879,6 +3982,9 @@ class LutImageProcessor(context: Context? = null) {
             uniform float uVibrance;      // 0.0 ~ 2.0 (蓝色增强)
             uniform float uHighlights;    // -1.0 ~ +1.0 (高光调整)
             uniform float uShadows;       // -1.0 ~ +1.0 (阴影调整)
+            // Phase E-2：shadow.saturation-1 增量（ShadowsHighlightsShader.GLSL 消费，
+            // 默认 0 = 恒等）。声明必须与 GLSL 嵌入处同作用域。
+            uniform float uShadowSaturationDelta;
             uniform float uToneToe;       // -1.0 ~ +1.0 (暗部曲线塑形)
             uniform float uToneShoulder;  // -1.0 ~ +1.0 (亮部曲线塑形)
             uniform float uTonePivot;     // -1.0 ~ +1.0 (曲线中点偏移)
@@ -3909,6 +4015,9 @@ class LutImageProcessor(context: Context? = null) {
             // HDF 光晕效果
             uniform float uHalation;      // 0.0 ~ 1.0 (光晕强度)
             uniform sampler2D uHdfTexture; // 光晕合成纹理
+            // Phase E-2：profile halation.warmth（桌面 apply_halation 语义——光晕按
+            // (warmth, 0.4, 1/warmth) 着色：R ×warmth、B ×1/warmth、G 恒定 0.4）
+            uniform float uHalationWarmth;
             uniform float uSoftLight;      // 0.0 ~ 1.0 (柔光扩散强度)
             uniform sampler2D uSoftLightTexture; // 柔光扩散纹理
             uniform float uRedHalation;      // 0.0 ~ 1.0 (胶片红晕强度)
@@ -4237,15 +4346,18 @@ class LutImageProcessor(context: Context? = null) {
                 // === HDF 光晕效果（在色彩配方之后，LUT 之前） ===
                 if (uHalation > 0.0) {
                     vec3 bloom = texture(uHdfTexture, uvCoord).rgb;
-                    
+
                     // 1. 色彩色散处理：增强饱和度同时避免过度饱和导致的伪影
                     float bLuma = dot(bloom, vec3(0.2126, 0.7152, 0.0722));
-                    bloom = mix(vec3(bLuma), bloom, 1.6); 
-                    
+                    bloom = mix(vec3(bLuma), bloom, 1.6);
+
                     // 2. 模拟物理滤镜的扩散扩散感
                     // 使用更科学的系数平衡明度与扩散面积
-                    vec3 bloomEffect = bloom * uHalation * 1.4;
-                    
+                    // Phase E-2：halation.warmth 暖色权重（桌面 apply_halation 语义
+                    // (warmth, 0.4, 1/warmth)——R ×warmth、B ×1/warmth、G 恒定 0.4）。
+                    vec3 warmthTint = vec3(uHalationWarmth, 0.4, 1.0 / max(1e-4, uHalationWarmth));
+                    vec3 bloomEffect = bloom * uHalation * 1.4 * warmthTint;
+
                     // 3. 混合原图：Screen 叠加
                     color.rgb = vec3(1.0) - (vec3(1.0) - color.rgb) * (vec3(1.0) - bloomEffect);
                     

@@ -132,6 +132,36 @@ class RealtimeVideoRenderer(
     @Volatile
     private var stabilizationSessionStarted = false
 
+    // Phase E-3：录像路径 halation 一致性。默认 halation 强度≈0（母版 halation.amount
+    // = 0.0037），故默认 hdfEnabled=false → 不创建任何 FBO、不跑模糊 pass、不绑定空间效果
+    // uniform，录像路径行为与改动前完全一致（零成本）。仅在 profile 显式启用 halation 时
+    // 才生成 HDF/红色光晕模糊纹理并内联叠加，与预览端 HDF_PREVIEW_COMPOSITE 同源同算法。
+    private val hdfEnabled: Boolean
+        get() {
+            val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+            val anyRedHalation = layers.any { it.params.redHalation > 0.001f }
+            return fp.halationStrength > 0.001f || anyRedHalation
+        }
+
+    private var spatialSourceTexId = 0
+    private var spatialSourceFboId = 0
+    private var spatialSourceWidth = 0
+    private var spatialSourceHeight = 0
+    private val hdfTexId = IntArray(2)
+    private val hdfFboId = IntArray(2)
+    private var hdfWidth = 0
+    private var hdfHeight = 0
+    private val halationTexId = IntArray(2)
+    private val halationFboId = IntArray(2)
+    private var halationWidth = 0
+    private var halationHeight = 0
+    private var hdfExtractBlurHProgram = 0
+    private var hdfBlurVProgram = 0
+    private var halationExtractBlurHProgram = 0
+    private var halationBlurVProgram = 0
+    private var passthroughProgram = 0
+    private var blackTexId = 0
+
     val inputSurface: Surface?
         get() = cameraSurface
 
@@ -252,6 +282,16 @@ class RealtimeVideoRenderer(
         val firstLayer = layers.first()
         val grainEnabled = finalFilmGrainEnabled
         val firstTargetFbo = if (layers.size > 1 || grainEnabled) intermediateFboId else 0
+        // Phase E-3：halation 一致性。仅当 profile 显式启用 halation 时生成模糊纹理，
+        // 默认 hdfEnabled=false → 跳过，录像路径零成本。
+        if (hdfEnabled) {
+            renderVideoSpatialBlur(
+                sourceTexId = sourceTextureId,
+                sourceTexTarget = sourceTextureTarget,
+                width = encoderOutputSize.width,
+                height = encoderOutputSize.height,
+            )
+        }
         drawLayer(
             layer = firstLayer,
             targetFboId = firstTargetFbo,
@@ -388,6 +428,7 @@ class RealtimeVideoRenderer(
             lutConfig = layer.lutConfig,
             lutEnabled = lutEnabled,
             videoLogEnabled = enableVideoLog,
+            spatialRecipeEffectsEnabled = hdfEnabled,
         )
         val locations = colorProgramCache.get(variant)
             ?: throw IllegalStateException("Cannot create realtime video color shader: $variant")
@@ -530,8 +571,12 @@ class RealtimeVideoRenderer(
         ShadowsHighlightsShader.bindUniformLocations(
             highlightsLocation = locations.uHighlightsLocation,
             shadowsLocation = locations.uShadowsLocation,
+            shadowSaturationDeltaLocation = locations.uShadowSaturationDeltaLocation,
             highlights = params.highlights,
             shadows = params.shadows,
+            // Phase E-2：shadow.saturation 接线（录像端与预览/成片同源，取实时单例；
+            // profile 未注入时默认 1.0 → 增量 0 = 恒等）
+            shadowSaturationDelta = com.photographercamera.core.photon.color.FilmParamsStore.current.shadowSaturation - 1f,
         )
         GLES30.glUniform1f(locations.uToneToeLocation, params.toneToe)
         GLES30.glUniform1f(locations.uToneShoulderLocation, params.toneShoulder)
@@ -599,6 +644,266 @@ class RealtimeVideoRenderer(
             CameraRawCalibrationMatrix.build(params),
             0,
         )
+        // Phase E-3：halation 一致性。HDF 光晕 + 红色光晕内联到共享 shader 的空间效果块；
+        // 柔光默认 0（母版无 softLight）绑 1x1 黑纹理做占位，不采样。
+        if (hdfEnabled) {
+            val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+            val effectiveHalation = maxOf(0f, fp.halationStrength)
+            val redHalation = params.redHalation
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(locations.programId, "uHalation"),
+                effectiveHalation,
+            )
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(locations.programId, "uHalationWarmth"),
+                fp.halationWarmth,
+            )
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE6)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[1])
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(locations.programId, "uHdfTexture"),
+                6,
+            )
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(locations.programId, "uRedHalation"),
+                redHalation,
+            )
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE7)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, halationTexId[1])
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(locations.programId, "uRedHalationTexture"),
+                7,
+            )
+            GLES30.glUniform1f(
+                GLES30.glGetUniformLocation(locations.programId, "uSoftLight"),
+                0f,
+            )
+            ensureBlackTexture()
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE8)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, blackTexId)
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(locations.programId, "uSoftLightTexture"),
+                8,
+            )
+        }
+    }
+
+    private fun ensureBlackTexture(): Boolean {
+        if (blackTexId != 0) return true
+        val t = IntArray(1)
+        GLES30.glGenTextures(1, t, 0)
+        blackTexId = t[0]
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, blackTexId)
+        val pixel = byteArrayOf(0.toByte(), 0.toByte(), 0.toByte(), 255.toByte())
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, 1, 1, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, java.nio.ByteBuffer.wrap(pixel),
+        )
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        return blackTexId != 0
+    }
+
+    // Phase E-3：录像路径 halation 一致性。在编码前把相机帧生成 HDF 光晕 + 红色光晕模糊
+    // 纹理（1/4 分辨率、双 pass），与预览端 renderHdfPreviewBlur / renderHalationPreviewBlur
+    // 同源同算法。默认 hdfEnabled=false 时本方法不被调用，录像路径零成本、零副作用。
+    private fun ensureSpatialPrograms(): Boolean {
+        if (hdfExtractBlurHProgram != 0) return true
+        val compile = { vs: String, fs: String ->
+            val v = GlUtils.compileShader(GLES30.GL_VERTEX_SHADER, vs)
+            val f = GlUtils.compileShader(GLES30.GL_FRAGMENT_SHADER, fs)
+            if (v == 0 || f == 0) {
+                if (v != 0) GLES30.glDeleteShader(v)
+                if (f != 0) GLES30.glDeleteShader(f)
+                0
+            } else {
+                val p = GlUtils.linkProgram(v, f)
+                GLES30.glDeleteShader(v)
+                GLES30.glDeleteShader(f)
+                p
+            }
+        }
+        hdfExtractBlurHProgram = compile(Shaders.SIMPLE_VERTEX_SHADER, Shaders.HDF_PREVIEW_EXTRACT_BLUR_H)
+        hdfBlurVProgram = compile(Shaders.SIMPLE_VERTEX_SHADER, Shaders.HDF_PREVIEW_BLUR_V)
+        halationExtractBlurHProgram = compile(Shaders.SIMPLE_VERTEX_SHADER, Shaders.HALATION_PREVIEW_EXTRACT_BLUR_H)
+        halationBlurVProgram = compile(Shaders.SIMPLE_VERTEX_SHADER, Shaders.HALATION_PREVIEW_BLUR_V)
+        passthroughProgram = compile(Shaders.SIMPLE_VERTEX_SHADER, Shaders.FRAGMENT_SHADER_PASSTHROUGH)
+        return hdfExtractBlurHProgram != 0 && hdfBlurVProgram != 0 &&
+            halationExtractBlurHProgram != 0 && halationBlurVProgram != 0 && passthroughProgram != 0
+    }
+
+    private fun setupSpatialSource(width: Int, height: Int): Boolean {
+        if (spatialSourceTexId != 0 && spatialSourceFboId != 0 &&
+            spatialSourceWidth == width && spatialSourceHeight == height
+        ) {
+            return true
+        }
+        releaseSpatialSource()
+        val t = IntArray(1)
+        val f = IntArray(1)
+        GLES30.glGenTextures(1, t, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, t[0])
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glGenFramebuffers(1, f, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, f[0])
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, t[0], 0)
+        if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+            PLog.e(TAG, "Realtime video spatial-source FBO incomplete")
+            releaseSpatialSource()
+            return false
+        }
+        spatialSourceTexId = t[0]
+        spatialSourceFboId = f[0]
+        spatialSourceWidth = width
+        spatialSourceHeight = height
+        return true
+    }
+
+    private fun setupBlurFbos(
+        texIds: IntArray,
+        fboIds: IntArray,
+        cachedW: Int,
+        cachedH: Int,
+        width: Int,
+        height: Int,
+    ): Boolean {
+        if (texIds[0] != 0 && fboIds[0] != 0 && texIds[1] != 0 && fboIds[1] != 0 &&
+            cachedW == width && cachedH == height
+        ) {
+            return true
+        }
+        releaseBlurFbos(texIds, fboIds)
+        for (i in 0..1) {
+            val t = IntArray(1)
+            GLES30.glGenTextures(1, t, 0)
+            texIds[i] = t[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texIds[i])
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0,
+                GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            val f = IntArray(1)
+            GLES30.glGenFramebuffers(1, f, 0)
+            fboIds[i] = f[0]
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fboIds[i])
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D, texIds[i], 0)
+            if (GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                PLog.e(TAG, "Realtime video blur FBO incomplete")
+                releaseBlurFbos(texIds, fboIds)
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                return false
+            }
+        }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        return true
+    }
+
+    private fun releaseSpatialSource() {
+        if (spatialSourceTexId != 0) { GLES30.glDeleteTextures(1, intArrayOf(spatialSourceTexId), 0); spatialSourceTexId = 0 }
+        if (spatialSourceFboId != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(spatialSourceFboId), 0); spatialSourceFboId = 0 }
+        spatialSourceWidth = 0; spatialSourceHeight = 0
+    }
+
+    private fun releaseBlurFbos(texIds: IntArray, fboIds: IntArray) {
+        for (i in 0..1) {
+            if (texIds[i] != 0) { GLES30.glDeleteTextures(1, intArrayOf(texIds[i]), 0); texIds[i] = 0 }
+            if (fboIds[i] != 0) { GLES30.glDeleteFramebuffers(1, intArrayOf(fboIds[i]), 0); fboIds[i] = 0 }
+        }
+    }
+
+    // 删除 E-3 引入的 5 个共享 shader 程序（原始 GL program ID）。
+    private fun releaseSpatialPrograms() {
+        if (hdfExtractBlurHProgram != 0) { GLES30.glDeleteProgram(hdfExtractBlurHProgram); hdfExtractBlurHProgram = 0 }
+        if (hdfBlurVProgram != 0) { GLES30.glDeleteProgram(hdfBlurVProgram); hdfBlurVProgram = 0 }
+        if (halationExtractBlurHProgram != 0) { GLES30.glDeleteProgram(halationExtractBlurHProgram); halationExtractBlurHProgram = 0 }
+        if (halationBlurVProgram != 0) { GLES30.glDeleteProgram(halationBlurVProgram); halationBlurVProgram = 0 }
+        if (passthroughProgram != 0) { GLES30.glDeleteProgram(passthroughProgram); passthroughProgram = 0 }
+    }
+
+    private fun renderVideoSpatialBlur(sourceTexId: Int, sourceTexTarget: Int, width: Int, height: Int) {
+        if (!ensureSpatialPrograms()) return
+        val dsW = max(1, width / 4)
+        val dsH = max(1, height / 4)
+        // 准备 2D 源纹理：2D 直用；OES 先拷贝到 2D（模糊提取 shader 均为 sampler2D）。
+        val srcTex: Int
+        if (sourceTexTarget == GLES30.GL_TEXTURE_2D) {
+            srcTex = sourceTexId
+        } else {
+            if (!setupSpatialSource(width, height)) return
+            GLES30.glUseProgram(passthroughProgram)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, spatialSourceFboId)
+            GLES30.glViewport(0, 0, width, height)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, sourceTexId)
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(passthroughProgram, "uCameraTexture"), 0)
+            drawSimpleQuad(passthroughProgram)
+            srcTex = spatialSourceTexId
+        }
+
+        val fp = com.photographercamera.core.photon.color.FilmParamsStore.current
+        val effectiveHdfStrength = maxOf(0f, fp.halationStrength)
+        val hdfThreshold = if (fp.profileActive) fp.halationThreshold.coerceIn(0.5f, 0.99f) else 0.9f - effectiveHdfStrength * 0.3f
+        val blurRadius = if (fp.profileActive) fp.halationRadius.coerceIn(0.2f, 4f) else 1f
+        val texelW = blurRadius / dsW.toFloat()
+        val texelH = blurRadius / dsH.toFloat()
+
+        // HDF 光晕模糊（双 pass）
+        if (!setupBlurFbos(hdfTexId, hdfFboId, hdfWidth, hdfHeight, dsW, dsH)) return
+        hdfWidth = dsW; hdfHeight = dsH
+        GLES30.glUseProgram(hdfExtractBlurHProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, hdfFboId[0])
+        GLES30.glViewport(0, 0, dsW, dsH)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, srcTex)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uTexelSize"), texelW, texelH)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uThreshold"), hdfThreshold)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(hdfExtractBlurHProgram, "uStrength"), effectiveHdfStrength)
+        drawSimpleQuad(hdfExtractBlurHProgram)
+        GLES30.glUseProgram(hdfBlurVProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, hdfFboId[1])
+        GLES30.glViewport(0, 0, dsW, dsH)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, hdfTexId[0])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(hdfBlurVProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(hdfBlurVProgram, "uTexelSize"), texelW, texelH)
+        drawSimpleQuad(hdfBlurVProgram)
+
+        // 红色光晕模糊（双 pass，阈值/强度与预览 renderHalationPreviewBlur 一致）
+        val redHalation = layers.maxOfOrNull { it.params.redHalation } ?: 0f
+        val halThreshold = 0.72f - redHalation.coerceIn(0f, 1f) * 0.22f
+        if (!setupBlurFbos(halationTexId, halationFboId, halationWidth, halationHeight, dsW, dsH)) return
+        halationWidth = dsW; halationHeight = dsH
+        GLES30.glUseProgram(halationExtractBlurHProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, halationFboId[0])
+        GLES30.glViewport(0, 0, dsW, dsH)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, srcTex)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(halationExtractBlurHProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(halationExtractBlurHProgram, "uTexelSize"), texelW, texelH)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(halationExtractBlurHProgram, "uThreshold"), halThreshold)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(halationExtractBlurHProgram, "uStrength"), redHalation)
+        drawSimpleQuad(halationExtractBlurHProgram)
+        GLES30.glUseProgram(halationBlurVProgram)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, halationFboId[1])
+        GLES30.glViewport(0, 0, dsW, dsH)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, halationTexId[0])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(halationBlurVProgram, "uInputTexture"), 0)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(halationBlurVProgram, "uTexelSize"), texelW, texelH)
+        drawSimpleQuad(halationBlurVProgram)
+
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
     }
 
     private fun initializeEgl(encoderSurface: Surface) {
@@ -929,6 +1234,17 @@ class RealtimeVideoRenderer(
         mgcEisYuvRenderer.release()
         colorProgramCache.release()
         basicToneTextures.release()
+
+        // Phase E-3：清理录像路径 HDF/红色光晕空间效果相关 GPU 资源（默认 hdfEnabled=false
+        // 时这些资源从未创建，删除调用对 0 值是安全的 no-op）。
+        releaseSpatialSource()
+        releaseBlurFbos(hdfTexId, hdfFboId)
+        releaseBlurFbos(halationTexId, halationFboId)
+        releaseSpatialPrograms()
+        if (blackTexId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(blackTexId), 0)
+            blackTexId = 0
+        }
 
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(

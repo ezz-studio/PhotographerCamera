@@ -39,6 +39,10 @@ internal data class PreviewColorShaderVariant(
             lutConfig: LutConfig?,
             lutEnabled: Boolean,
             videoLogEnabled: Boolean,
+            // Phase E-3：录像路径 halation 一致性。预览端（LutRenderer）走独立
+            // HDF_PREVIEW_COMPOSITE 二次合成 pass，此处保持 false；录像端在 halation
+            // 激活时传 true，启用共享 shader 内联的 HDF 光晕 + 红色光晕 + 柔光。
+            spatialRecipeEffectsEnabled: Boolean = false,
         ): PreviewColorShaderVariant {
             val lutCurve = lutConfig?.curve ?: TransferCurve.SRGB
             return PreviewColorShaderVariant(
@@ -51,6 +55,7 @@ internal data class PreviewColorShaderVariant(
                 includePreLogFilmGrain = videoLogEnabled &&
                     !lutEnabled &&
                     params.filmGrain > EPSILON,
+                includeSpatialRecipeEffects = spatialRecipeEffectsEnabled,
             )
         }
 

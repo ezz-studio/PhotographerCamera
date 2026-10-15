@@ -28,6 +28,9 @@ internal data class ColorPassLocations(
     val uVibranceLocation: Int,
     val uHighlightsLocation: Int,
     val uShadowsLocation: Int,
+    // Phase E-2：shadow.saturation-1 增量位置（PreviewColorShader 已声明；
+    // minimalFallback 等未声明该 uniform 的程序会拿到 -1，绑定处有守卫跳过）
+    val uShadowSaturationDeltaLocation: Int,
     val uToneToeLocation: Int,
     val uToneShoulderLocation: Int,
     val uTonePivotLocation: Int,
@@ -161,6 +164,9 @@ internal class PreviewColorProgramCache {
             uVibranceLocation = GLES30.glGetUniformLocation(program, "uVibrance"),
             uHighlightsLocation = GLES30.glGetUniformLocation(program, "uHighlights"),
             uShadowsLocation = GLES30.glGetUniformLocation(program, "uShadows"),
+            // Phase E-2：shadow.saturation-1 增量（预览/录像共用 PreviewColorShader，
+            // 该 shader 已声明 uShadowSaturationDelta）
+            uShadowSaturationDeltaLocation = GLES30.glGetUniformLocation(program, "uShadowSaturationDelta"),
             uToneToeLocation = GLES30.glGetUniformLocation(program, "uToneToe"),
             uToneShoulderLocation = GLES30.glGetUniformLocation(program, "uToneShoulder"),
             uTonePivotLocation = GLES30.glGetUniformLocation(program, "uTonePivot"),
