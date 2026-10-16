@@ -72,6 +72,8 @@ RESID_CAP = 5.0      # max |ab| the per-hue residual may move a pixel
 TINT_CAP = 4.0       # max |ab| the per-luma tint may move a pixel
 MU_CAP = 4.0         # max |ab| global white-balance shift
 GAIN_CAP = 1.8       # max/min singular value of the chroma transport map
+TOP_QUANTILE_TRUST_SLACK = 1.5  # L*: curve may exceed T's measured quantiles by
+                     # at most this in the highlights; None = legacy unclamped
 # 4-fold CV (see _diag/stylefit_curve.py) showed full strength overshoots on
 # held-out photos (ΔE 10.2); a mild shrink lands closer to the look AND keeps
 # the photograph intact (ΔE ~6.3, structure corr 0.996). CV-optimal setting.
@@ -153,6 +155,21 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     qmap = np.interp(grid, xs, ys)
     shape = np.clip(qmap - lin_grid, -shape_cap, shape_cap)
     curve = (1.0 - strength) * grid + strength * (lin_grid + shape)
+    # Top-end quantile trust: shape_cap truncates the downward correction in
+    # the highlights (qmap wants -10..-17 L* up there vs cap 8), letting the
+    # affine extrapolation run to pure white even though T's graded highlights
+    # roll off (measured on 5207: T p99.9 = 97.6 L*, S->T top error +3.7 L*).
+    # Clamp the curve to T's REAL measured quantiles + small slack so the LUT
+    # reproduces the corpus's actual highlight rendering. Midtones are untouched
+    # (curve < qmap+slack everywhere below ~L*90), and the iterative residual
+    # rounds re-enter here, so repetition can no longer push the top brighter.
+    # TOP_QUANTILE_TRUST_SLACK = None restores the legacy unclamped behaviour.
+    top_slack = TOP_QUANTILE_TRUST_SLACK
+    if top_slack is not None:
+        cap_hi = qmap + float(top_slack)
+        over = curve > cap_hi
+        if np.any(over):
+            curve[over] = cap_hi[over]
     curve = np.maximum.accumulate(np.clip(curve, 0.0, 100.0))
 
     if relative_luma:
