@@ -559,6 +559,7 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                seed: int = 20240917, max_ref_images: int = 260,
                px_per_ref: int = 8000,                px_per_plain: int = 60000,
                rounds: int = 12,
+               relative_luma: bool = False, luma_level_keep: float = 0.0,
                **_ignored) -> tuple:
     """Learn the look from two corpora of images (already decoded, 0..1 float).
 
@@ -603,9 +604,11 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
     src_px = _sample_from_images(plains, px_per_plain, rng)
 
     say("  学习分布迁移（Lab：亮度分位 + 色度最优传输 + 分色相/分亮度残差）…")
-    model, desc = TR.learn(src_px, dst_px, strength=strength)
+    model, desc = TR.learn(src_px, dst_px, strength=strength,
+                           relative_luma=relative_luma, luma_level_keep=luma_level_keep)
     lut = TR.bake(model, lut_size)
-    say(f"    LUT {lut_size}³ 覆盖率 100%（解析式烘焙，无空洞、无插值猜测）")
+    say(f"    LUT {lut_size}³ 覆盖率 100%（解析式烘焙，无空洞、无插值猜测）"
+        + ("  [相对亮度模式：去掉绝对电平偏移]" if relative_luma else ""))
 
     # ------------------------- v3.1 iterative residual refinement ----------------
     # Held-out evaluation inputs are needed both by the round gate and by the
@@ -617,7 +620,10 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
 
     curve_model = model
     itrace = None
-    rounds = int(rounds)
+    # In relative-luma mode the iterative residual rounds re-learn src->dst
+    # (the ABSOLUTE target distribution) and would re-inject the level shift we
+    # just removed, so we stay on the single base pass.
+    rounds = 1 if relative_luma else int(rounds)
     if rounds > 1:
         from . import iterative as IT
         say(f"  迭代残差训练（安全上限 {rounds} 个额外轮次，"
@@ -762,6 +768,7 @@ def fit(reference_paths: List[str], name: str = "My Look",
             "其中一半用于测量输入分布，另一半留作验证。")
 
     seed = int(kw.get("seed", 20240917))
+    relative = bool(kw.get("relative_luma", False))
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(plains))
     n_fit = int(round(len(plains) * plain_fit_fraction))
@@ -801,12 +808,15 @@ def fit(reference_paths: List[str], name: str = "My Look",
     # the fit on the corpus it was trained on). Kept separate from the
     # (optimistic) in-report style_distance that reuses the same corpus.
     cv_strength = float(kw.get("strength", 0.8))
-    try:
-        cv = cross_validate(graded_all, plain_imgs, k=4, strength=cv_strength)
-        if cv:
-            rep["cv"] = cv
-    except Exception as e:  # CV is a reporting aid only — never block delivery
-        rep["cv_error"] = str(e)
+    if not relative:  # relative mode intentionally drops the absolute level,
+                      # so the K-fold "does render(plain) reach T's brightness?"
+                      # score is meaningless and would mislead the Studio panel.
+        try:
+            cv = cross_validate(graded_all, plain_imgs, k=4, strength=cv_strength)
+            if cv:
+                rep["cv"] = cv
+        except Exception as e:  # CV is a reporting aid only — never block delivery
+            rep["cv_error"] = str(e)
     rep["dataset"]["plain_fit_used"] = len(plain_fit)
     rep["dataset"]["plain_eval_used"] = len(plain_eval)
     rep["dataset"]["graded_skipped"] = len(skipped)

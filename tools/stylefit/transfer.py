@@ -117,7 +117,22 @@ def _min_count(n):
 
 # ---------------------------------------------------------------------- learn
 def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resid_cap=RESID_CAP,
-          tint_cap=TINT_CAP, mu_cap=MU_CAP, gain_cap=GAIN_CAP):
+          tint_cap=TINT_CAP, mu_cap=MU_CAP, gain_cap=GAIN_CAP,
+          relative_luma=False, luma_level_keep=0.0):
+    """Learn the S -> T colour map.  src_rgb / dst_rgb are (N,3) float 0..1.
+
+    relative_luma : bake a *content-anchored* luminance transfer instead of an
+        absolute one. The default (False) imposes T's absolute brightness level
+        (the affine mu_s->mu_t shift + histogram-match location); applied to a
+        photo brighter/darker than S, that over-lifts (wash) or crushes. With
+        relative_luma=True the curve is recentered at the source mean so a photo
+        keeps its OWN tonality and only receives the film's *relative* tone
+        shape (toe lift, S-curve, shoulder) plus its colour -- it can no longer
+        be washed out or darkened regardless of input brightness.
+    luma_level_keep : 0.0 = fully relative (no level shift at all); 1.0 = the
+        original absolute behaviour. Intermediate values keep a fraction of the
+        level shift for films whose characteristic airiness is part of the look.
+    """
     """Learn the S -> T colour map.  src_rgb / dst_rgb are (N,3) float 0..1."""
     s = C.rgb_to_lab(np.asarray(src_rgb, np.float32)).astype(np.float64)
     t = C.rgb_to_lab(np.asarray(dst_rgb, np.float32)).astype(np.float64)
@@ -139,6 +154,18 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     shape = np.clip(qmap - lin_grid, -shape_cap, shape_cap)
     curve = (1.0 - strength) * grid + strength * (lin_grid + shape)
     curve = np.maximum.accumulate(np.clip(curve, 0.0, 100.0))
+
+    if relative_luma:
+        # Remove the ABSOLUTE brightness level shift (mu_s -> mu_t) that the
+        # affine + histogram-match transfer imposes, keeping the RELATIVE tone
+        # shape (toe lift, S-curve, shoulder) and ALL chroma. Anchored at the
+        # source mean so the input corpus keeps its own tonality; a brighter or
+        # darker photo can no longer be washed out or crushed.
+        off = float(np.interp(mu_s, grid, curve) - mu_s)
+        curve = curve - (1.0 - float(luma_level_keep)) * off
+        curve = np.clip(curve, 0.0, 100.0)
+        curve = np.maximum.accumulate(curve)
+
     sL2 = np.interp(sL, grid, curve)
 
     # ------------------------------------------- 2. chroma (linear transport)
@@ -194,6 +221,8 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     model = {
         "version": 3,
         "strength": strength,
+        "relative_luma": bool(relative_luma),
+        "luma_level_keep": float(luma_level_keep),
         "L_grid": grid.astype(np.float32),
         "L_curve": curve.astype(np.float32),
         "M": M.astype(np.float32),

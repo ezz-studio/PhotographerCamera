@@ -59,8 +59,11 @@ def _decode_lut(payload):
     """Decode an embedded colour LUT payload (cached — base64 is not free)."""
     if not isinstance(payload, dict) or not payload.get("data"):
         return None
+    # key on a hash of the FULL data — a prefix key silently returned stale
+    # arrays when two LUTs differ only in their tail (e.g. highlight shoulder).
+    import hashlib as _hashlib
     key = (payload.get("size"), payload.get("dtype"),
-           len(payload.get("data", "")), payload.get("data", "")[:96])
+           _hashlib.md5(payload.get("data", "").encode("ascii")).hexdigest())
     hit = _LUT_CACHE.get(key)
     if hit is not None:
         return hit
