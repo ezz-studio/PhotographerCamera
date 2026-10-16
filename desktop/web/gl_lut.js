@@ -212,15 +212,28 @@ vec3 pc_noise(vec3 c, float nl, float ncr, float luma, float chroma){
 }
 float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
 vec3 brightBlur(vec2 uv, float radius, float threshold){
+  // Multi-scale radial glow: rings whose radius grows exponentially so the
+  // highlight bloom/halation truly feathers outward (a wide soft halo) instead
+  // of only lifting the lit pixels in place. Intent-matched to the Android
+  // multi-mip bloom / separable-blur chain. Halation keeps its warm-red tint
+  // downstream (see the caller in main()).
   vec3 acc = vec3(0.0);
-  for (int k=0;k<12;k++){
-    float a = float(k)/12.0 * 6.2831853;
-    float rr = radius * (1.0 + mod(float(k), 3.0));
-    vec2 off = vec2(cos(a), sin(a)) * rr * u_texel;
-    vec3 s = texture(u_color, uv + off).rgb;
-    acc += clamp(s - threshold, 0.0, 1.0) / max(1e-4, 1.0 - threshold);
+  float wsum = 0.0;
+  const int LEVELS = 8;
+  const int ANGLES = 12;
+  for (int L = 0; L < LEVELS; L++){
+    float scale = radius * pow(2.0, float(L));        // 1,2,4,8,16,32 px rings
+    float w = 1.0 / (1.0 + 0.55 * float(L));          // larger rings softer
+    for (int A = 0; A < ANGLES; A++){
+      float a = (float(A) / float(ANGLES) + float(L) * 0.061) * 6.2831853;
+      vec2 off = vec2(cos(a), sin(a)) * scale * u_texel;
+      vec3 s = texture(u_color, uv + off).rgb;
+      vec3 h = clamp(s - threshold, 0.0, 1.0) / max(1e-4, 1.0 - threshold);
+      acc += h * w;
+      wsum += w;
+    }
   }
-  return acc / 12.0;
+  return acc / max(1e-4, wsum);
 }
 void main(){
   vec2 uv = v_uv; vec3 c = texture(u_color, uv).rgb;

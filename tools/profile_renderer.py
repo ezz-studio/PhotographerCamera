@@ -306,11 +306,19 @@ def apply_bloom(rgb, amount=0.0, threshold=0.9, radius=1.0):
     if amount <= 0.0 or cv2 is None:
         return rgb
     bright = np.clip(rgb - threshold, 0, 1) / max(1e-4, 1 - threshold)
-    ksz = max(3, int(round(6 * radius)) | 1)
-    bloom = np.zeros_like(rgb)
-    for c in range(3):
-        small = cv2.GaussianBlur(bright[..., c], (ksz, ksz), 0)
-        bloom[..., c] = cv2.GaussianBlur(small, (ksz, ksz), 0)
+    # Multi-scale bloom: Gaussian radii scale with the image's short side, so the
+    # highlight glow feathers outward over a visible span (tens to hundreds of
+    # px) instead of only lifting the lit pixels. Resolution-independent, and
+    # intent-matched to the Android multi-mip bloom and the WebGL brightBlur.
+    h, w = rgb.shape[:2]
+    short = min(h, w)
+    sigmas = [radius * short * f for f in (0.008, 0.020, 0.045)]
+    bloom = np.zeros_like(bright)
+    for sig in sigmas:
+        ksz = max(3, int(round(sig * 2.5)) | 1)
+        for c in range(3):
+            bloom[..., c] += cv2.GaussianBlur(bright[..., c], (ksz, ksz), sig)
+    bloom /= len(sigmas)
     return _clip(rgb + amount * bloom)
 
 
@@ -319,9 +327,17 @@ def apply_halation(rgb, amount=0.0, threshold=0.9, radius=1.0, warmth=1.0):
         return rgb
     lum = rgb.mean(axis=2)
     bright = np.clip(lum - threshold, 0, 1) / max(1e-4, 1 - threshold)
-    ksz = max(3, int(round(8 * radius * _rel_scale(rgb))) | 1)
-    glow = cv2.GaussianBlur(bright, (ksz, ksz), 0)
-    glow = cv2.GaussianBlur(glow, (ksz, ksz), 0)
+    # Same multi-scale separable blur as bloom, scaled to the image short side,
+    # so the warm-red halo truly diffuses around highlights (film halation)
+    # instead of merely lifting them. Resolution-independent.
+    h, w = rgb.shape[:2]
+    short = min(h, w)
+    sigmas = [radius * short * f for f in (0.012, 0.030, 0.070)]
+    glow = np.zeros_like(bright)
+    for sig in sigmas:
+        ksz = max(3, int(round(sig * 2.5)) | 1)
+        glow += cv2.GaussianBlur(bright, (ksz, ksz), sig)
+    glow /= len(sigmas)
     out = rgb.copy()
     # warm/red glow
     out[..., 0] += amount * glow * warmth
