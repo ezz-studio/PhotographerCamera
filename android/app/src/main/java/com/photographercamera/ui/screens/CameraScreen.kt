@@ -504,10 +504,14 @@ fun CameraScreen(navController: NavController) {
         val mapping = ProfileToRecipeMapper.map(profile)
         // 快捷面板叠加：EV（recipe 曝光偏移，始终生效）与 Grain 乘数。
         // 1.6.2：Grain 不再是无补偿的线性乘法——见 grainWithMultiplier 注释。
+        // 2026-10-16：noise 层恢复真实有效，并入同一纹理强度滑块——
+        // ×1.00 = 完全符合 profile，<1 减弱，>1 增强（纯乘法，profile 基准忠实）。
         val grainBase = mapping.recipe.filmGrain
+        val noiseBase = mapping.recipe.noise
         val adjustedRecipe = mapping.recipe.copy(
             exposure = mapping.recipe.exposure + adjEv,
             filmGrain = grainWithMultiplier(grainBase, adjGrain),
+            noise = (noiseBase * adjGrain).coerceIn(0f, 1f),
         )
         val lutId = "profile:$selected"
         com.photographercamera.core.debug.DebugLog.log(

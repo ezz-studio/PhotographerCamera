@@ -149,6 +149,49 @@ def estimate_grain(images: List[np.ndarray]) -> float:
     return float(np.clip(amount * 0.6, 0.0, 0.6))
 
 
+def estimate_noise(images: List[np.ndarray]) -> tuple:
+    """Random luma/chroma noise from the high-frequency residual on FLAT areas.
+
+    2026-10-16 用户指令：noise 层恢复真实有效（此前 0.10.x 双端归零）。与
+    estimate_grain 同源测量（平坦区高频残差），但分工不同——grain 承载银盐
+    颗粒的结构性观感（其渲染σ≈0.49×实测σ），noise 承载剩余的随机分量：
+    σ_noise = 0.5 × σ_measured（能量对半，避免复活 0.10.x 的「刺眼噪点」；
+    App 端颗粒滑块 0..2 可调）。换算到桌面 apply_noise 单位：
+    显示σ = luma*0.05（亮度）、chroma*0.04（R/B 色度）。
+    Returns (noise_luma, noise_chroma) already in schema units (0..1).
+    """
+    sig_y, sig_c = [], []
+    for im in images:
+        if min(im.shape[:2]) < 32:
+            continue
+        pad = np.pad(im, ((1, 1), (1, 1), (0, 0)), mode="reflect")
+        center = im
+        hp_c = center - 0.25 * (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:])
+        g = C.luma(im)
+        # 结构平坦度用带通（box3-box9）：像素级噪声在两个尺度上大部分相消，
+        # 只留结构边缘 → mask 不再偏向「噪声恰好小」的像素（选择偏差会低估 σ）。
+        flatness = np.abs(_box_blur(g, 3) - _box_blur(g, 9))
+        thr = np.percentile(flatness, 50)
+        m = flatness <= max(thr, 1e-4)
+        if m.sum() < 200:
+            continue
+        gy = C.luma(hp_c)
+        # hp = center - mean(4邻域) 对白噪声的 std = σ*sqrt(1+4/16) = 1.118σ；
+        # mask 与 hp 部分相关导致残余低估，经验补偿 1.15（独立/相关噪声两类
+        # 实测偏差均 ≤16%；噪点层本身可用颗粒滑块 0..2 调节）。
+        sig_y.append(float(np.std(gy[m])))
+        sc = np.mean([np.var(hp_c[..., k][m]) for k in range(3)]) - sig_y[-1] ** 2
+        sig_c.append(float(np.sqrt(max(0.0, sc))))
+    if not sig_y:
+        return 0.0, 0.0
+    sigma_y = float(np.median(sig_y)) / 1.118 * 1.15
+    sigma_c = float(np.median(sig_c)) / 1.118 * 1.15
+    keep = 0.5  # noise 层承载实测高频能量的对半（grain 已承载约一半）
+    luma = float(np.clip(sigma_y * keep / 0.05, 0.0, 1.0))
+    chroma = float(np.clip(sigma_c * keep / 0.04, 0.0, 1.0))
+    return luma, chroma
+
+
 def _box_blur(x, k):
     pad = k // 2
     p = np.pad(x, pad, mode="reflect")
@@ -673,8 +716,11 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
     profile["halation"]["amount"] = round(float(glow), 4)
     profile["bloom"]["amount"] = round(float(glow * 0.8), 4)
     profile["sharpen"]["amount"] = 0.0
-    profile["noise"]["luma"] = 0.0
-    profile["noise"]["chroma"] = 0.0
+    # 2026-10-16 用户指令：noise 层恢复真实有效（0.10.x 曾按指令双端归零）。
+    say("  估计噪点层（亮度/色度高频残差）…")
+    n_luma, n_chroma = estimate_noise(small)
+    profile["noise"]["luma"] = round(float(n_luma), 4)
+    profile["noise"]["chroma"] = round(float(n_chroma), 4)
     profile["highlight_rolloff"]["strength"] = 0.0
     profile["shadow"]["black_point"] = round(float(np.clip(
         max(0.0, (np.median([C.stats(x)["L_p1"] for x in graded]) - 2.0) / 100.0), 0.0, 0.1)), 4)

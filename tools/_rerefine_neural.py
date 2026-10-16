@@ -21,7 +21,7 @@ from stylefit import lut3d as L3
 from stylefit import color as C
 from stylefit import neural_refine as NR
 from stylefit.neural_refine import refine_lut, _w2_1d, _ab_band_w2
-from stylefit.fit import discover_images, _load, _sample_from_images
+from stylefit.fit import discover_images, _load, _sample_from_images, estimate_noise
 
 PLAIN = "D:/下载/DNG原图检测图/未命名导出"
 OLD = "dist/profiles/studio"
@@ -128,6 +128,12 @@ def main():
             payload["source"] = payload.get("source", "") + tag
             payload["strength"] = old_prof["color_lut"].get("strength", 0.8)
             out["color_lut"] = payload
+            # 2026-10-16 用户指令：noise 层恢复真实有效——从语料重新估计并写入
+            # （旧 studio profile 的 noise 为 0.10.x 归零值，不能照抄）。
+            n_luma, n_chroma = estimate_noise(graded[:150])
+            out["noise"]["luma"] = round(float(n_luma), 4)
+            out["noise"]["chroma"] = round(float(n_chroma), 4)
+            print(f"[{name}] noise 估计: luma={n_luma:.4f} chroma={n_chroma:.4f}", flush=True)
             with open(f"{OUT}/{name}.json", "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False)
             print(f"[{name}] saved ({why}) {OUT}/{name}.json 总用时 {time.time()-t0:.0f}s", flush=True)

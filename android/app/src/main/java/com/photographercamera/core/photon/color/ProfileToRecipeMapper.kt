@@ -103,12 +103,12 @@ object ProfileToRecipeMapper {
             // 颗粒（银盐质感）走原生 applyDensityFilmGrain 通路（simplex 银盐颗粒，
             // 与原生滤镜同一套），保持 1:1 接线上游。下方 noise 才是「刺眼噪点」元凶。
             filmGrain = effective.grain.amount,
-            // 0.10.x 修复（用户指令：去掉 profile 里面的噪点）：profile 不再驱动独立的
-            // uNoise 纯随机通道。该通道每帧重随机、带彩色、观感刺眼，且原生滤镜的
-            // noise 恒为 0 —— 收敛到原生行为后，profile 与原生滤镜一致只有银盐颗粒，
-            // 不再叠加传感器式噪点 / 色彩断层。profile 自身的 noise.luma/chroma 仅用于
-            // 桌面端分析参考，不再下发到实时渲染通道。
-            noise = 0f,
+            // 2026-10-16 用户指令：noise 层恢复真实有效（0.10.x 曾按指令抹零）。
+            // recipe.uNoise 是单旋钮（shader 内固定 0.7/0.8 色度混合，显示σ≈0.41×uNoise）；
+            // 桌面 apply_noise 显示σ = luma*0.05（亮度）/ chroma*0.04（R/B）。
+            // 标定：uNoise = luma*0.12 + chroma*0.05 → 两端显示幅度同量级。
+            // 颗粒滑块（adjGrain，×1.00=profile 忠实）在 CameraScreen 侧同步乘此值。
+            noise = (effective.noise.luma * 0.12f + effective.noise.chroma * 0.05f).coerceIn(0f, 1f),
             halation = effective.halation.amount,
             bloom = effective.bloom.amount,
             sharpness = effective.sharpen.amount,
