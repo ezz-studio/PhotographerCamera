@@ -83,6 +83,13 @@ TOP_QUANTILE_TRUST_SLACK = 1.5  # L*: curve may exceed T's measured quantiles by
 # shoulder absorbs the lift; dark corpus exposes left and its toe lifts.
 EXPOSURE_EV_CAP = 0.8         # max stops the exposure pre-stage may shift
 EXPOSURE_EV_DEADBAND = 0.05   # stop difference below which no exposure is applied
+# The exposure pre-stage + key-elastic experiments DOUBLE count brightness in
+# a static LUT (exposure lifts mids, then the quantile map lifts again ->
+# whole-image washed grey, user-verified).  Default OFF: luminance uses the
+# proven composition (affine level + capped shape + top-end quantile trust);
+# ev is still measured and exported in the profile for a future App-side
+# ADAPTIVE stage that exposes at capture time, before the LUT.
+EXPOSURE_STAGE = False
 # Film scans ALWAYS contain clipped atoms (dead white / dead black).  Small
 # atoms are capture/scanner physics -> redistribute so the learned target
 # shows a smooth shoulder/toe instead of a cliff into 100/0.  Atoms ABOVE
@@ -218,8 +225,12 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     """
     # ------------------------------------------------- 0. exposure pre-stage
     # Exposure difference measured as stop distance between robust linear-
-    # luma medians, capped to +-EXPOSURE_EV_CAP.  The input is exposed toward
-    # T FIRST (向右/向左), then the film tone shape is applied below.
+    # luma medians.  With EXPOSURE_STAGE=False (default) this is MEASURED AND
+    # EXPORTED ONLY (profile param for a future App-side adaptive stage) —
+    # the pixels are NOT exposed: a static LUT cannot stack an exposure on
+    # top of a quantile-map without double counting brightness (verified:
+    # whole-image washed grey).  With EXPOSURE_STAGE=True the input is
+    # exposed toward T FIRST (向右/向左), then the film tone shape follows.
     medY_s = float(np.median(_lin_luma(src_rgb)))
     medY_t = float(np.median(_lin_luma(dst_rgb)))
     ev_raw = float(np.log2(max(medY_t, 1e-6) / max(medY_s, 1e-6)))
@@ -227,7 +238,8 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     if abs(ev_raw) >= EXPOSURE_EV_DEADBAND:
         ev = float(np.clip(ev_raw, -EXPOSURE_EV_CAP, EXPOSURE_EV_CAP))
     gain = 2.0 ** ev
-    src2 = _expose_rgb(src_rgb, gain) if ev else np.asarray(src_rgb, np.float32)
+    src2 = (_expose_rgb(src_rgb, gain)
+            if (ev and EXPOSURE_STAGE) else np.asarray(src_rgb, np.float32))
 
     s0 = C.rgb_to_lab(np.asarray(src_rgb, np.float32)).astype(np.float64)  # original
     s = C.rgb_to_lab(src2).astype(np.float64)                              # exposed
@@ -260,38 +272,40 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
     ys = np.maximum.accumulate(np.quantile(tL_d, _Q))
     grid = np.linspace(0.0, 100.0, _LGRID)
 
-    # Absolute (despiked) quantile map, shrunk by the CV-validated strength.
-    film = (1.0 - strength) * grid + strength * np.interp(grid, xs, ys)
-
-    # -- key-anchored ELASTIC suppression -----------------------------------
-    # The quantile map carries T's ABSOLUTE key; expressed as displacement
-    # d = film - grid, that level component is what washes App photos that
-    # were auto-exposed differently.  Suppress it elastically: ZERO
-    # displacement at the corpus key, full film displacement far from it
-    # (fog at blacks, S-contrast, shoulder at highlights), smooth in between
-    # (rational elastic kernel, C1, monotone-preserving).  Brightness then
-    # lives ONLY in the bounded exposure pre-stage + the film's shape
-    # features — never as an absolute midtone re-anchoring.
-    key_e = float(np.median(sL))                     # exposed-domain key
-    q25, q75 = np.quantile(sL, [0.25, 0.75])
-    w_el = float(np.clip(KEY_ELASTIC_IQR * (q75 - q25),
-                         KEY_ELASTIC_MIN_W, KEY_ELASTIC_MAX_W))
-    u_abs = np.abs(grid - key_e)
-    gamma = u_abs / (u_abs + w_el)                   # 0 at key -> 1 far away
-    curve = np.maximum.accumulate(np.clip(grid + (film - grid) * gamma,
-                                          0.0, 100.0))
-
-    # Fold the exposure pre-stage INTO the curve so the model (chain.apply,
-    # bake, and the baked 33^3 LUT) keeps operating on ORIGINAL photo values:
-    # curve_o(v) = curve(exposure(v)).  The exposure map is headroom-tapered
-    # and unclipped (see _expo_lstar_map).
-    if ev:
-        expo = _expo_lstar_map(grid, gain, ev)
-        curve_o = np.interp(expo, grid, curve)
-        qmap_o = np.interp(np.clip(expo, 0.0, 100.0), xs, ys)  # T target, orig domain
+    # Proven-look luminance synthesis (default).  This is the composition the
+    # user visually approved: affine absolute level (S->T key, the film's
+    # characteristic lift) + capped relative shape (toe/contrast/shoulder).
+    # The experimental exposure-prestage + key-elastic variants below DOUBLE
+    # count brightness when folded into a static LUT (exposure lifts mids
+    # +17 L*, then the quantile map adds its displacement again -> whole-image
+    # washed-out grey); they are kept behind flags for the future App-side
+    # ADAPTIVE exposure stage only, where the pre-stage is applied at capture
+    # time and the LUT never stacks on top of it.
+    qmap = np.interp(grid, xs, ys)
+    if EXPOSURE_STAGE:
+        # Absolute (despiked) quantile map, shrunk by strength.
+        film = (1.0 - strength) * grid + strength * qmap
+        key_e = float(np.median(sL))                 # exposed-domain key
+        q25, q75 = np.quantile(sL, [0.25, 0.75])
+        w_el = float(np.clip(KEY_ELASTIC_IQR * (q75 - q25),
+                             KEY_ELASTIC_MIN_W, KEY_ELASTIC_MAX_W))
+        u_abs = np.abs(grid - key_e)
+        gamma = u_abs / (u_abs + w_el)               # 0 at key -> 1 far away
+        curve = np.maximum.accumulate(np.clip(grid + (film - grid) * gamma,
+                                              0.0, 100.0))
+        if ev:
+            expo = _expo_lstar_map(grid, gain, ev)
+            curve_o = np.interp(expo, grid, curve)
+            qmap_o = np.interp(np.clip(expo, 0.0, 100.0), xs, ys)
+        else:
+            expo = grid
+            curve_o = curve.copy()
+            qmap_o = qmap
     else:
+        lin_grid = (grid - mu_s) * k + mu_t
+        shape = np.clip(qmap - lin_grid, -shape_cap, shape_cap)
+        curve_o = (1.0 - strength) * grid + strength * (lin_grid + shape)
         expo = grid
-        curve_o = curve.copy()
         qmap_o = qmap
 
     # -- end protections, ORIGINAL domain, strength ADAPTIVE to T's ends -----
@@ -390,8 +404,10 @@ def learn(src_rgb, dst_rgb, strength=DEFAULT_STRENGTH, shape_cap=SHAPE_CAP, resi
         "exposure_ev_raw": round(ev_raw, 4),
         "atom_mass": {"source_white": round(atom_s[0], 5), "source_black": round(atom_s[1], 5),
                       "target_white": round(atom_t[0], 5), "target_black": round(atom_t[1], 5)},
-        "key_anchor": round(key_e, 3),
-        "key_elastic_width": round(w_el, 3),
+        "key_anchor": round(float(np.median(sL)), 3) if EXPOSURE_STAGE else None,
+        "key_elastic_width": None if not EXPOSURE_STAGE else
+        float(np.clip(KEY_ELASTIC_IQR * (np.quantile(sL, 0.75) - np.quantile(sL, 0.25)),
+                      KEY_ELASTIC_MIN_W, KEY_ELASTIC_MAX_W)),
         "end_protection": {"white_keep": round(white_keep, 3),
                            "black_keep": round(black_keep, 3)},
         "L_grid": grid.astype(np.float32),
