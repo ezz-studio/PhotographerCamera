@@ -560,6 +560,7 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                px_per_ref: int = 8000,                px_per_plain: int = 60000,
                rounds: int = 12,
                relative_luma: bool = False, luma_level_keep: float = 0.0,
+               neural_refine: bool = True, neural_steps: int = 90,
                **_ignored) -> tuple:
     """Learn the look from two corpora of images (already decoded, 0..1 float).
 
@@ -682,12 +683,72 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
 
     profile["color_layer"] = "lut"
     profile["color_adaptive"] = False
+
+    # ------------------------------------------- neural residual refinement
+    # Scientific basis: Pitié et al., CVIU 2007 (colour grading as N-D
+    # probability-distribution transfer, solved by iterative 1-D quantile
+    # matching) + Zeng et al., TPAMI 2022 (3-D LUTs are learnable end-to-end
+    # by gradient descent, unpaired OK, smoothness-regularised).  We refine
+    # the stylefit analytic LUT directly in LUT space: loss = differentiable
+    # 1-D quantile transfer (L globally, a/b conditioned on luminance bands)
+    # + TV smoothness + L2 pull-to-init.  GATED: accepted only if the honest
+    # hold-out distribution distance improves AND dead ends do not regress.
+    _neural_tag = ""
+    if neural_refine:
+        try:
+            from .neural_refine import refine_lut, _w2_1d, _ab_band_w2
+            say("  神经残差精修（Pitié 2007 分布传输 × Zeng TPAMI 2022 LUT 梯度学习）…")
+            lut_nr, nr_rep = refine_lut(lut, src_px, dst_px, steps=int(neural_steps))
+            # The refinement optimises distribution match over the WHOLE input
+            # corpus (src_px); the gate must measure on the same corpus family.
+            # A 1-image hold-out (plain_fit_fraction=1.0) has a wildly different
+            # distribution and would reject honest improvements.
+            eval_imgs = [x for x in (plains or eval_images or []) if x is not None]
+
+            def _dead(lx):
+                P = np.concatenate([L3.sample(lx, a).reshape(-1, 3) for a in eval_imgs])
+                nd = P.max(-1) <= 0.99
+                nb = P.min(-1) >= 0.01
+                return ((P.max(-1)[nd] > 0.99).mean(), (P.min(-1)[nb] < 0.01).mean())
+
+            def _dist(lx):
+                P = np.concatenate([L3.sample(lx, a).reshape(-1, 3) for a in eval_imgs])
+                Q = dst_px
+                r = np.random.default_rng(5)
+                nsub = min(P.shape[0], Q.shape[0], 120000)
+                P = P[r.choice(P.shape[0], nsub, replace=False)]
+                Q = Q[r.choice(Q.shape[0], nsub, replace=False)]
+                Lp = C.rgb_to_lab(P)[:, 0].astype(np.float64)
+                Lt = C.rgb_to_lab(Q)[:, 0].astype(np.float64)
+                Ap = C.rgb_to_lab(P)[:, 1].astype(np.float64)
+                At = C.rgb_to_lab(Q)[:, 1].astype(np.float64)
+                Bp = C.rgb_to_lab(P)[:, 2].astype(np.float64)
+                Bt = C.rgb_to_lab(Q)[:, 2].astype(np.float64)
+                l1, _ = _w2_1d(Lp, Lt)
+                l2, _, _ = _ab_band_w2(Lp, Ap, Bp, Lt, At, Bt)
+                return float(l1 + l2)
+
+            dw0, db0 = _dead(lut)
+            dw1, db1 = _dead(lut_nr)
+            s0, s1 = _dist(lut), _dist(lut_nr)
+            dead_ok = dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4
+            if dead_ok and s1 < s0 * 0.995:
+                lut = lut_nr
+                _neural_tag = "+neural"
+                say(f"    神经精修接受: 分布距离 {s0:.3f}->{s1:.3f} "
+                    f"死端 ({dw0*100:.2f},{db0*100:.2f})%->({dw1*100:.2f},{db1*100:.2f})%")
+            else:
+                say(f"    神经精修拒绝（门控）: 分布距离 {s0:.3f}->{s1:.3f}, "
+                    f"死端回归={not dead_ok}")
+        except Exception as e:  # refinement is an enhancement, never a blocker
+            say(f"    神经精修跳过: {e}")
+
     payload = L3.to_payload(lut)
     _acc = (int(sum(1 for t in (itrace or [])
                     if t.get("round", 0) > 0 and t.get("accepted")))
             if itrace is not None else 0)
     payload["source"] = ("stylefit/v3.1-iterative-distribution-transfer" if _acc > 0
-                         else "stylefit/v3-distribution-transfer")
+                         else "stylefit/v3-distribution-transfer") + _neural_tag
     payload["strength"] = float(strength)
     profile["color_lut"] = payload
     profile = safe_clamp(profile)
