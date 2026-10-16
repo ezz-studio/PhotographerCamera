@@ -343,6 +343,11 @@ function renderControls() {
       if (segs[0] === "hsl" && HUE_CN[segs[1]]) {
         label = HUE_CN[segs[1]] + "·" + (HSL_PARAM_CN[segs[2]] || label);
       }
+      // bloom / halation 的 radius 即羽化扩散尺度（brightBlur 的多尺度环基数），
+      // 明确命名为「羽化尺度」让用户一眼认出这是控制光晕/柔光溢出扩散范围的滑块。
+      if ((segs[0] === "bloom" || segs[0] === "halation") && segs[1] === "radius") {
+        label = "羽化尺度";
+      }
 
       if (c.type === "boolean") {
         row.innerHTML =
