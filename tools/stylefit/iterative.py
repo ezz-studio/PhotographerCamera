@@ -126,13 +126,33 @@ def _score_lut(lut, eval_images, ref_stats):
     re-binds the name `fit` to the fit() *function* in __init__, which would
     shadow the module here (lazy import also avoids the load-time cycle)."""
     from .fit import evaluate as _evaluate
+    from . import lut3d as L3
     rep = _evaluate(lambda im: L3.sample(lut, im), eval_images, ref_stats)
     cf = rep.get("content_fidelity", {})
-    return {
+    score = {
         "style_distance": rep.get("style_distance"),
         "deltaE": cf.get("deltaE_mean"),
         "structure": cf.get("structure_correlation"),
     }
+    # Dead-end metrics: fraction of NON-clipped input pixels rendered into
+    # dead white / dead black.  Feeds the non-regression gate in _gate_ok so
+    # iterative rounds can never trade highlight/shadow destruction for style.
+    try:
+        ins, outs = [], []
+        for im in eval_images[:12]:
+            a = np.asarray(im, np.float32).reshape(-1, 3)
+            a = a[::max(1, a.shape[0] // 120000)]          # strided subsample
+            ins.append(a)
+            outs.append(np.clip(L3.sample(lut, a.reshape(1, -1, 3)), 0, 1).reshape(-1, 3))
+        inA = np.concatenate(ins)
+        outA = np.concatenate(outs)
+        in_white = inA.max(-1) > 0.99
+        in_black = inA.min(-1) < 0.01
+        score["dead_white"] = float(((outA.max(-1) > 0.99) & ~in_white).mean())
+        score["dead_black"] = float(((outA.min(-1) < 0.01) & ~in_black).mean())
+    except Exception:
+        pass
+    return score
 
 
 def _cv_score(chain_factory, plains, ref_stats, k, seed, lut_size, fit_px):
@@ -209,6 +229,13 @@ def _gate_ok(score, best):
     de = score.get("deltaE")
     if de is None or not (DE_MIN <= float(de) <= DE_MAX):
         return False, f"deltaE {de} outside [{DE_MIN}, {DE_MAX}]"
+    # Dead-end non-regression: a round that pushes more non-clipped pixels
+    # into dead white / dead black than the current best (beyond tolerance)
+    # is rejected outright — 死黑死白 never buy style.
+    for key, tol in (("dead_white", 0.0015), ("dead_black", 0.0010)):
+        v, vb = score.get(key), best.get(key)
+        if v is not None and vb is not None and float(v) > float(vb) + tol:
+            return False, f"{key} {v:.4f} regressed from {vb:.4f}"
     # NOTE: no relative deltaE-degradation guard — the absolute [DE_MIN, DE_MAX]
     # band plus the structure-correlation floor already catch content
     # destruction; a relative guard would block rounds that legitimately push
