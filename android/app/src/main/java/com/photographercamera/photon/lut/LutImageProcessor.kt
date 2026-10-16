@@ -1046,6 +1046,13 @@ class LutImageProcessor(context: Context? = null) {
         val noise = effectiveRecipeParams?.noise ?: 0f
         val lowRes = effectiveRecipeParams?.lowRes ?: 0f
         val intensity = effectiveRecipeParams?.lutIntensity ?: 1f
+        // 1.7.6：server 同款链序（stylefit profile LUT 时启用）：
+        // 校准 → LUT → film(float) → 参数链（black_point 桌面语义），与桌面
+        // profile_renderer.render 的 LUT→film→shadow 顺序逐层对齐。
+        // 条件 = profile 注入（profileActive）且本趟确实带 LUT 纹理。
+        val filmParamsEarly = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film
+            ?: com.photographercamera.core.photon.color.FilmParamsStore.current)
+        val profileLutFirst = filmParamsEarly.profileActive && lutConfig != null
         val lchAdjustments = ColorRecipeGl.lchAdjustments(effectiveRecipeParams)
         // 0.9.2：profile.color_matrix 接线——与传感器校准矩阵复合（校准先行、
         // profile 矩阵后乘）。shader 端 applyPrimaryCalibration 的
@@ -1190,9 +1197,11 @@ class LutImageProcessor(context: Context? = null) {
         // 作为曲线 LUT 复合链的输入侧：master(channel(film(x)))。仅 profile 注入时生效
         //（FilmParamsStore 默认端点 8/248 非恒等，须用 profileActive 门控），
         // 未注入时 filmFloor/Ceiling 为 null，烘焙结果与原实现逐字节一致。
-        val filmParams = (com.photographercamera.core.photon.color.CaptureProfileStore.current?.film ?: com.photographercamera.core.photon.color.FilmParamsStore.current)
-        val filmFloor = if (filmParams.profileActive) filmParams.filmCurveShadowFloor else null
-        val filmCeiling = if (filmParams.profileActive) filmParams.filmCurveHighlightCeiling else null
+        // 1.7.6：profile LUT-first 模式下 film 曲线不再烘焙进曲线纹理（LUT 前侧），
+        // 改为 shader 内 float 精度应用在 LUT 之后（server 同款顺序）。
+        val filmParams = filmParamsEarly
+        val filmFloor = if (filmParams.profileActive && !profileLutFirst) filmParams.filmCurveShadowFloor else null
+        val filmCeiling = if (filmParams.profileActive && !profileLutFirst) filmParams.filmCurveHighlightCeiling else null
         val filmCurveActive = filmFloor != null && filmCeiling != null &&
             CurveUtils.buildFilmCurveLut(filmFloor, filmCeiling) != null
         val masterPts = effectiveRecipeParams?.masterCurvePoints
@@ -1209,6 +1218,12 @@ class LutImageProcessor(context: Context? = null) {
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (curveActive) curveTextureId else 0)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uCurveTexture"), 3)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uCurveEnabled"), if (curveActive) 1 else 0)
+
+        // 1.7.6：server 同款链序 uniforms（profile LUT-first 模式）
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "uProfileLutFirst"), if (profileLutFirst) 1 else 0)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uFilmFloorF"), filmParams.filmCurveShadowFloor)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uFilmCeilF"), filmParams.filmCurveHighlightCeiling)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(program, "uShadowBlackPoint"), filmParams.shadowBlackPoint)
 
         basicToneTextures.bind(
             context = appContext,
@@ -3969,6 +3984,15 @@ class LutImageProcessor(context: Context? = null) {
             uniform int uLutColorSpace;
             uniform int uInputColorSpace;
 
+            // 1.7.6：server 同款链序（stylefit profile LUT 时置 1）：
+            // 校准 → LUT → film(float) → 参数链（black_point 桌面语义），与桌面
+            // profile_renderer.render 的 LUT→film→shadow 顺序对齐。上游滤镜
+            // （非 profile）保持 uProfileLutFirst=0 的原链序，行为逐字节不变。
+            uniform int uProfileLutFirst;
+            uniform float uFilmFloorF;       // 0..255 显示电平（profile.film_curve）
+            uniform float uFilmCeilF;        // 0..255
+            uniform float uShadowBlackPoint; // 0..0.2（桌面 shadow.black_point）
+
             // 色彩配方控制
             uniform bool uColorRecipeEnabled;
 
@@ -4161,6 +4185,54 @@ class LutImageProcessor(context: Context? = null) {
                 return vec3(r, g, b);
             }
 
+            // === 1.7.6：3D LUT 阶段抽函数（原 main 内联块原样搬移，语义不变）===
+            vec3 applyLutStage(vec3 c) {
+                if (!uLutEnabled || uLutIntensity <= 0.0) return c;
+                bool isP3 = (uInputColorSpace == 1);
+                vec3 linearInput = srgbToLinear(c);
+
+                if (isP3) {
+                     linearInput = mat3(1.22486, -0.04205, -0.01974, -0.22471, 1.04192, -0.07865, 0.00000, 0.00013, 1.09837) * linearInput;
+                }
+                float effectiveLutIntensity = uLutIntensity * lutMaskWeight(uLutMaskType, linearInput);
+
+                vec3 colorSpaceRGB = applyLutColorSpace(linearInput, uLutColorSpace);
+                vec3 lutInColor = applyLutCurve(colorSpaceRGB, uLutCurve);
+
+                float scale = (uLutSize - 1.0) / uLutSize;
+                float offset = 1.0 / (2.0 * uLutSize);
+                vec3 lutCoord = lutInColor * scale + offset;
+                vec4 lutColor = texture(uLutTexture, lutCoord);
+
+                // 在非线性 sRGB 空间进行混合
+                vec3 srgbColor = linearToSrgb(linearInput);
+                vec3 outc = mix(srgbColor, lutColor.rgb, effectiveLutIntensity);
+
+                if (isP3) {
+                    // 混合完成后的 sRGB 颜色转回 P3
+                    vec3 linearSrgbOut = srgbToLinear(outc);
+                    outc = linearToSrgb(mat3(0.875905, 0.035332, 0.016382, 0.122070, 0.964542, 0.063767, 0.002025, 0.000126, 0.919851) * linearSrgbOut);
+                }
+                return outc;
+            }
+
+            // === 1.7.6：film 曲线 float 版（CurveUtils.buildFilmCurveLut 的连续形式，
+            // = 桌面 profile_renderer.apply_film_curve）。profile LUT-first 模式下在
+            // LUT 之后以 float 精度应用，不再烘焙 256 点 8-bit 曲线纹理。 ===
+            vec3 pcFilmCurve(vec3 c, float lo, float hi) {
+                if (lo <= 0.0 && hi >= 1.0) return c;
+                float kt = clamp(lo + 0.13, 0.04, 0.45);   // shadow knee
+                float kh = clamp(hi - 0.17, 0.55, 0.97);   // highlight knee
+                vec3 o = clamp(c, 0.0, 1.0);
+                vec3 t1 = clamp(o / max(kt, 1e-4), 0.0, 1.0);
+                vec3 below = lo + (kt - lo) * t1 * t1 * (2.0 - t1);          // flat@lo, slope1@kt
+                vec3 t2 = clamp((o - kh) / max(1e-4, 1.0 - kh), 0.0, 1.0);
+                vec3 above = kh + (hi - kh) * t2 * (1.0 + t2 - t2 * t2);     // slope1@kh, flat@hi
+                o = mix(o, below, step(o, vec3(kt)));
+                o = mix(o, above, step(vec3(kh), o));
+                return clamp(o, 0.0, 1.0);
+            }
+
             void main() {
                 // === 预处理：模拟真实低分辨率效果 ===
                 vec2 uvCoord = vTexCoord;
@@ -4189,6 +4261,19 @@ class LutImageProcessor(context: Context? = null) {
                     color = sampleImage(uvCoord);
                 }
 
+                // === 1.7.6 server 同款链序（stylefit profile LUT）：校准 → LUT → film(float) ===
+                // 桌面权威链序 = LUT → film → exposure → wb → matrix → highlight
+                // → shadow(bp) → tone → hsl → vignette。校准是 App 侧的输入域预处理
+                // （桌面输入是相机已校准 JPG，等价于校准先行），故放 LUT 之前。
+                if (uProfileLutFirst == 1) {
+                    color.rgb = applyPrimaryCalibration(color.rgb);
+                    color.rgb = applyLutStage(color.rgb);
+                    color.rgb = pcFilmCurve(color.rgb,
+                        clamp(uFilmFloorF / 255.0, 0.0, 0.4),
+                        clamp(uFilmCeilF / 255.0, 0.6, 1.0));
+                    color.rgb = sanitizeColor(color.rgb);
+                }
+
                 // === 色彩配方处理（按专业后期流程顺序） ===
                 if (uColorRecipeEnabled) {
                     // 1. 曝光调整（在线性空间执行 EV 增益，再回到显示空间）
@@ -4206,8 +4291,17 @@ class LutImageProcessor(context: Context? = null) {
                     color.rgb = sanitizeColor(color.rgb);
 
                     // 3.5. 影调曲线（独立塑造高调/低调 profile）
-                    color.rgb = applyToneCurve(color.rgb, uToneToe, uToneShoulder, uTonePivot);
-                    color.rgb = sanitizeColor(color.rgb);
+                    if (uProfileLutFirst == 1) {
+                        // 1.7.6：server 同款 —— black_point 用桌面 apply_shadow 黑位语义
+                        // `(x - bp) / (1 - bp)`，在 LUT 之后；toneToe 近似映射不消费。
+                        if (uShadowBlackPoint > 0.0) {
+                            color.rgb = (color.rgb - uShadowBlackPoint) / max(1e-4, 1.0 - uShadowBlackPoint);
+                            color.rgb = sanitizeColor(color.rgb);
+                        }
+                    } else {
+                        color.rgb = applyToneCurve(color.rgb, uToneToe, uToneShoulder, uTonePivot);
+                        color.rgb = sanitizeColor(color.rgb);
+                    }
 
                     // 3.6. Oplus BasicTone 端点 LUT（符号在 CPU 侧选端点，绝对值控制强度）
                     color.rgb = applyBasicToneLut(color.rgb);
@@ -4230,9 +4324,11 @@ class LutImageProcessor(context: Context? = null) {
                         color.rgb = sanitizeColor(color.rgb);
                     }
 
-                    // 6.5. 颜色校准 (Camera Calibration)
-                    color.rgb = applyPrimaryCalibration(color.rgb);
-                    color.rgb = sanitizeColor(color.rgb);
+                    // 6.5. 颜色校准 (Camera Calibration) — profile LUT-first 模式已前移到 LUT 之前
+                    if (uProfileLutFirst == 0) {
+                        color.rgb = applyPrimaryCalibration(color.rgb);
+                        color.rgb = sanitizeColor(color.rgb);
+                    }
 
                     color.rgb = applyLchColorMixer(color.rgb);
                     color.rgb = sanitizeColor(color.rgb);
@@ -4334,8 +4430,9 @@ class LutImageProcessor(context: Context? = null) {
                     color.rgb = sanitizeColor(color.rgb);
                 }
 
-                // === 曲线调整（色彩配方之后、HDF/LUT 之前） ===
-                if (uCurveEnabled) {
+                // === 曲线调整（色彩配方之后、HDF/LUT 之前）— profile LUT-first 模式下
+                // film 已以 float 精度应用在 LUT 之后，曲线纹理不再烘焙 film，此段跳过 ===
+                if (uCurveEnabled && uProfileLutFirst == 0) {
                     vec3 clamped = clamp(color.rgb, 0.0, 1.0);
                     float r = texture(uCurveTexture, vec2(clamped.r, 0.5)).r;
                     float g = texture(uCurveTexture, vec2(clamped.g, 0.5)).g;
@@ -4380,34 +4477,10 @@ class LutImageProcessor(context: Context? = null) {
                     color.rgb += halationBlur * halationStrength * halationMask;
                 }
 
-                // === LUT 处理（在色彩配方之后） ===
-                if (uLutEnabled && uLutIntensity > 0.0) {
-                    bool isP3 = (uInputColorSpace == 1);
-                    vec3 linearInput = srgbToLinear(color.rgb);
-                    
-                    if (isP3) {
-                         linearInput = mat3(1.22486, -0.04205, -0.01974, -0.22471, 1.04192, -0.07865, 0.00000, 0.00013, 1.09837) * linearInput;
-                    }
-                    float effectiveLutIntensity = uLutIntensity * lutMaskWeight(uLutMaskType, linearInput);
-
-                    vec3 colorSpaceRGB = applyLutColorSpace(linearInput, uLutColorSpace);
-                    vec3 lutInColor = applyLutCurve(colorSpaceRGB, uLutCurve);
-                    
-                    float scale = (uLutSize - 1.0) / uLutSize;
-                    float offset = 1.0 / (2.0 * uLutSize);
-                    vec3 lutCoord = lutInColor * scale + offset;
-                    vec4 lutColor = texture(uLutTexture, lutCoord);
-
-                    // 在非线性 sRGB 空间进行混合
-                    vec3 srgbColor = linearToSrgb(linearInput);
-                    color.rgb = mix(srgbColor, lutColor.rgb, effectiveLutIntensity);
-
-                    if (isP3) {
-                        // 混合完成后的 sRGB 颜色转回 P3
-                        vec3 linearSrgbOut = srgbToLinear(color.rgb);
-	                        color.rgb = linearToSrgb(mat3(0.875905, 0.035332, 0.016382, 0.122070, 0.964542, 0.063767, 0.002025, 0.000126, 0.919851) * linearSrgbOut);
-	                    }
-	                }
+                // === LUT 处理（在色彩配方之后）— profile LUT-first 模式已前移，跳过 ===
+                if (uLutEnabled && uLutIntensity > 0.0 && uProfileLutFirst == 0) {
+                    color.rgb = applyLutStage(color.rgb);
+                }
 
                 // === 柔光效果（LUT 之后，保持和实时预览一致） ===
                 if (uSoftLight > 0.0) {

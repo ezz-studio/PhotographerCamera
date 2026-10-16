@@ -188,14 +188,44 @@ def _tv(lut):
 
 
 # ------------------------------------------------------------------ driver
+def _neutral_chroma(lut):
+    """Max chroma (max-min channel spread) on the grey diagonal lattice cells.
+
+    Neutral-axis tinting IS part of a film look (colour coupler stain), but the
+    neural refine amplifying it is what turns ordinary low-saturation photos
+    into blotchy magenta/green patches (2026-10-16 用户反馈「颜色杂乱」).
+    """
+    n = lut.shape[0]
+    i = np.arange(n)
+    diag = lut[i, i, i]
+    return float((diag.max(-1) - diag.min(-1)).max())
+
+
+def _lattice_roughness(lut):
+    """Mean |2nd difference| along all lattice axes (curve smoothness)."""
+    d = 0.0
+    for ax in (0, 1, 2):
+        d += float(np.abs(np.take(lut, np.arange(2, lut.shape[ax]), axis=ax)
+                          - 2 * np.take(lut, np.arange(1, lut.shape[ax] - 1), axis=ax)
+                          + np.take(lut, np.arange(0, lut.shape[ax] - 2), axis=ax)).mean())
+    return d / 3.0
+
+
 def refine_lut(lut0, src_px, dst_px, steps=100, pixels=120000, seed=7,
-               w_tv=2.0, w_resid=4.0, verbose=False):
+               w_tv=10.0, w_resid=4.0, w_neutral=2000.0, neutral_cap=None,
+               verbose=False):
     """Residual-refine a baked LUT by direct gradient optimisation.
 
     lut0   : (n,n,n,3) float32, the stylefit analytic solution (initial AND
              the pull-to-initial anchor).
     src_px : (N,3) input-corpus pixels (sRGB 0..1) — rendered through the LUT.
     dst_px : (M,3) target-corpus pixels (sRGB 0..1) — the graded style.
+    w_tv   : TV smoothness weight (2026-10-16: 2.0 -> 10.0 — the refined
+             lattice roughness measured +20~50% over the analytic LUT at 2e-4,
+             producing hue jumps on out-of-domain low-saturation regions).
+    w_neutral / neutral_cap : grey-diagonal chroma cap. cap=None -> the INIT
+             LUT's own neutral chroma + 0.01 (preserve the trained film
+             character, forbid the optimiser from amplifying it — 域外安全).
     Returns (lut_refined, report).
     """
     rng = np.random.default_rng(seed)
@@ -212,6 +242,14 @@ def refine_lut(lut0, src_px, dst_px, steps=100, pixels=120000, seed=7,
     lut0_flat = lut0f.reshape(-1, 3)
     nvar = int(lut0f.size)
 
+    # grey-diagonal cells: r=g=b lattice points directly control how the LUT
+    # tints neutrals (skin highlights, grey sky, white walls on ANY photo).
+    n = lut0f.shape[0]
+    diag_idx = np.arange(n) + n * np.arange(n) + n * n * np.arange(n)
+    if neutral_cap is None:
+        d0 = lut0f.reshape(-1, 3)[diag_idx]
+        neutral_cap = float((d0.max(-1) - d0.min(-1)).max()) + 0.01
+
     evals = {"n": 0}
 
     def fun(x):
@@ -224,16 +262,33 @@ def refine_lut(lut0, src_px, dst_px, steps=100, pixels=120000, seed=7,
         ltv, gtv = _tv(lut)
         res = lut - lut0f
         lres = float(np.mean(res * res)) * w_resid * 100.0
+        # neutral-axis chroma cap: relu(chroma(diag) - cap)^2, subgradient via
+        # argmax/argmin channel attribution.
+        dv = lut.reshape(-1, 3)[diag_idx]
+        cmax = dv.max(-1)
+        cmin = dv.min(-1)
+        excess = np.maximum(cmax - cmin - neutral_cap, 0.0)
+        l_neu = float(np.mean(excess * excess))
         dLab = np.stack([dpL, dpA, dpB], -1)
         dOut = _lab_bwd(dLab, cache)
         gl = _scatter(dOut, corners, n).reshape(lut0f.shape)
         gl += gtv * w_tv * 1e-4
         gl += 2.0 * res * w_resid * 100.0 / res.size
+        act = excess > 0
+        if act.any():
+            gdiag = np.zeros((int(act.sum()), 3), np.float64)
+            coef = 2.0 * excess[act] * w_neutral / excess.size
+            amax = np.argmax(dv[act], -1)
+            amin = np.argmin(dv[act], -1)
+            gdiag[np.arange(int(act.sum())), amax] += coef
+            gdiag[np.arange(int(act.sum())), amin] -= coef
+            gl.reshape(-1, 3)[diag_idx[act]] += gdiag
         evals["n"] += 1
         if verbose and evals["n"] % 20 == 0:
             print(f"    [neural] it{evals['n']:3d}  L {lL:.4f}  ab {lAB:.4f} "
-                  f"tv {ltv:.1f} resid {lres:.3f}", flush=True)
-        return float(lL + lAB + ltv * w_tv * 1e-4 + lres), gl.reshape(-1)
+                  f"tv {ltv:.1f} resid {lres:.3f} neu {l_neu * w_neutral:.3f}", flush=True)
+        return float(lL + lAB + ltv * w_tv * 1e-4 + lres
+                     + l_neu * w_neutral), gl.reshape(-1)
 
     x0 = lut0f.reshape(-1).copy()
     res = minimize(fun, x0, jac=True, method="L-BFGS-B",

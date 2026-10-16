@@ -25,6 +25,12 @@ object FilmParamsStore {
         /** grain.lumaContrast（0..1）：胶片颗粒高光/暗部分布对比，1=强胶片感。 */
         val grainLumaContrast: Float = 1f,
         val shadowSaturation: Float = 1f,
+        /**
+         * 1.7.6：shadow.black_point（0..0.2，桌面 apply_shadow 黑位语义）。
+         * 成片端 server 同款链序（profile LUT-first）在 LUT 之后应用
+         * `(x - bp) / (1 - bp)`；预览端不消费（保持 toneToe 近似）。
+         */
+        val shadowBlackPoint: Float = 0f,
         val filmCurveShadowFloor: Float = 8f,
         val filmCurveHighlightCeiling: Float = 248f,
         val colorMatrix3x3: List<List<Float>> = listOf(

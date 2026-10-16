@@ -540,6 +540,7 @@ fun CameraScreen(navController: NavController) {
                         grainDensity = mapping.residual.grainDensity,
                         grainLumaContrast = mapping.residual.grainLumaContrast,
                         shadowSaturation = mapping.residual.shadowSaturation,
+                        shadowBlackPoint = mapping.residual.shadowBlackPoint,
                         filmCurveShadowFloor = mapping.residual.filmCurveShadowFloor,
                         filmCurveHighlightCeiling = mapping.residual.filmCurveHighlightCeiling,
                         colorMatrix3x3 = mapping.residual.colorMatrix3x3,

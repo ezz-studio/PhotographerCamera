@@ -697,6 +697,7 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
     if neural_refine:
         try:
             from .neural_refine import refine_lut, _w2_1d, _ab_band_w2
+            from . import neural_refine as NR
             say("  神经残差精修（Pitié 2007 分布传输 × Zeng TPAMI 2022 LUT 梯度学习）…")
             lut_nr, nr_rep = refine_lut(lut, src_px, dst_px, steps=int(neural_steps))
             # The refinement optimises distribution match over the WHOLE input
@@ -732,14 +733,24 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
             dw1, db1 = _dead(lut_nr)
             s0, s1 = _dist(lut), _dist(lut_nr)
             dead_ok = dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4
-            if dead_ok and s1 < s0 * 0.995:
+            # 域外安全门（2026-10-16「颜色杂乱」反馈）：中性轴染色、栅格粗糙度
+            # 与低饱和色相环色度都不得明显回归 —— 精修只允许在训练分布内变好，
+            # 不允许把灰区染得更花或把栅格变得更毛糙。
+            n0 = NR._neutral_chroma(lut)
+            n1 = NR._neutral_chroma(lut_nr)
+            r0 = NR._lattice_roughness(lut)
+            r1 = NR._lattice_roughness(lut_nr)
+            domain_ok = (n1 <= n0 + 0.01) and (r1 <= r0 * 1.25 + 5e-4)
+            if dead_ok and domain_ok and s1 < s0 * 0.995:
                 lut = lut_nr
                 _neural_tag = "+neural"
                 say(f"    神经精修接受: 分布距离 {s0:.3f}->{s1:.3f} "
-                    f"死端 ({dw0*100:.2f},{db0*100:.2f})%->({dw1*100:.2f},{db1*100:.2f})%")
+                    f"死端 ({dw0*100:.2f},{db0*100:.2f})%->({dw1*100:.2f},{db1*100:.2f})% "
+                    f"中性 {n0:.3f}->{n1:.3f} 粗糙度 {r0:.4f}->{r1:.4f}")
             else:
                 say(f"    神经精修拒绝（门控）: 分布距离 {s0:.3f}->{s1:.3f}, "
-                    f"死端回归={not dead_ok}")
+                    f"死端回归={not dead_ok}, 域外回归={not domain_ok} "
+                    f"(中性 {n0:.3f}->{n1:.3f}, 粗糙度 {r0:.4f}->{r1:.4f})")
         except Exception as e:  # refinement is an enhancement, never a blocker
             say(f"    神经精修跳过: {e}")
 

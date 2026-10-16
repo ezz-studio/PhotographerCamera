@@ -43,6 +43,12 @@ data class ResidualParams(
     val halationAmount: Float,
     /** shadow.saturation 原值（0..2，阴影区饱和度乘数；recipe 无对应字段）。 */
     val shadowSaturation: Float,
+    /**
+     * 1.7.6：shadow.black_point 原值（0..0.2，桌面 apply_shadow 黑位语义）。
+     * server 同款链序（profile LUT-first）下由成片 shader 在 LUT 之后按
+     * `(x - bp) / (1 - bp)` 直接应用，取代旧 toneToe 近似映射（成片端）。
+     */
+    val shadowBlackPoint: Float,
     /** lens 光学阶段参数（distortion/falloff/vignette/bloom/flare；CA 走 recipe）。 */
     val lens: com.photographercamera.core.photon.lens.LensParams =
         com.photographercamera.core.photon.lens.LensParams.ZERO,
@@ -136,6 +142,7 @@ object ProfileToRecipeMapper {
             filmCurveHighlightCeiling = effective.filmCurve.highlightCeiling,
             halationAmount = effective.halation.amount,
             shadowSaturation = effective.shadow.saturation,
+            shadowBlackPoint = effective.shadow.blackPoint,
             lens = LensParams.fromProfile(effective.lens),
         )
 
@@ -237,6 +244,7 @@ object ProfileToRecipeMapper {
         filmCurveShadowFloor = 8f, filmCurveHighlightCeiling = 248f,
         halationAmount = 0f,
         shadowSaturation = 1f,
+        shadowBlackPoint = 0f,
         lens = LensParams.ZERO,
     )
 }
