@@ -302,6 +302,37 @@ def apply_sharpen(rgb, amount=0.0, radius=1.0):
     return _clip(rgb + amount * (rgb - blur))
 
 
+def _feather_glow(src, sig):
+    """Resolution- and radius-independent gaussian feather. Small/medium images
+    use a numpy FFT (frequency-domain gaussian transfer function — fast & exact,
+    no giant kernel). Very large images (>8M px) fall back to cv2's separable
+    gaussian with a capped kernel to avoid the FFT's large complex array. The
+    feather span in pixels scales directly with `sig` in both paths."""
+    if sig <= 1e-6:
+        return src.copy()
+    h, w = src.shape[0], src.shape[1]
+    if cv2 is not None and h * w > 8_000_000:
+        ksz = max(3, min(int(round(sig * 2.5)) | 1, 1023))
+        if src.ndim == 3:
+            out = np.empty_like(src)
+            for c in range(src.shape[2]):
+                out[..., c] = cv2.GaussianBlur(src[..., c], (ksz, ksz), sig)
+            return out
+        return cv2.GaussianBlur(src, (ksz, ksz), sig)
+    fy = np.fft.fftfreq(h)
+    fx = np.fft.fftfreq(w)
+    FY, FX = np.meshgrid(fy, fx, indexing='ij')
+    H = np.exp(-2.0 * (np.pi * sig) ** 2 * (FY * FY + FX * FX))
+    if src.ndim == 3:
+        out = np.empty_like(src)
+        for c in range(src.shape[2]):
+            F = np.fft.fft2(src[..., c])
+            out[..., c] = np.real(np.fft.ifft2(F * H))
+        return out
+    F = np.fft.fft2(src)
+    return np.real(np.fft.ifft2(F * H))
+
+
 def apply_bloom(rgb, amount=0.0, threshold=0.9, radius=1.0):
     if amount <= 0.0 or cv2 is None:
         return rgb
@@ -312,12 +343,12 @@ def apply_bloom(rgb, amount=0.0, threshold=0.9, radius=1.0):
     # intent-matched to the Android multi-mip bloom and the WebGL brightBlur.
     h, w = rgb.shape[:2]
     short = min(h, w)
-    sigmas = [radius * short * f for f in (0.008, 0.020, 0.045)]
+    sigmas = [radius * short * f for f in (0.008, 0.020, 0.118)]
     bloom = np.zeros_like(bright)
     for sig in sigmas:
-        ksz = max(3, int(round(sig * 2.5)) | 1)
+        sig = min(sig, short * 1.0)                       # 羽化范围上限=短边（整幅扩散），半径拉大时持续增大
         for c in range(3):
-            bloom[..., c] += cv2.GaussianBlur(bright[..., c], (ksz, ksz), sig)
+            bloom[..., c] += _feather_glow(bright[..., c], sig)
     bloom /= len(sigmas)
     return _clip(rgb + amount * bloom)
 
@@ -332,11 +363,11 @@ def apply_halation(rgb, amount=0.0, threshold=0.9, radius=1.0, warmth=1.0):
     # instead of merely lifting them. Resolution-independent.
     h, w = rgb.shape[:2]
     short = min(h, w)
-    sigmas = [radius * short * f for f in (0.012, 0.030, 0.070)]
+    sigmas = [radius * short * f for f in (0.012, 0.030, 0.118)]
     glow = np.zeros_like(bright)
     for sig in sigmas:
-        ksz = max(3, int(round(sig * 2.5)) | 1)
-        glow += cv2.GaussianBlur(bright, (ksz, ksz), sig)
+        sig = min(sig, short * 1.0)                       # 羽化范围上限=短边（整幅扩散），半径拉大时持续增大
+        glow += _feather_glow(bright, sig)
     glow /= len(sigmas)
     out = rgb.copy()
     # warm/red glow

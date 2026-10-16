@@ -131,7 +131,7 @@
       "type": "object",
       "properties": {
         "amount":    { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
-        "radius":    { "type": "number", "minimum": 0.5, "maximum": 6, "default": 1.0, "description": "羽化尺度：光晕/柔光溢出扩散范围基数，越大越宽越柔" },
+        "radius":    { "type": "number", "minimum": 0.5, "maximum": 16, "default": 1.0, "description": "羽化尺度：光晕/柔光溢出扩散范围基数，越大越宽越柔" },
         "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
         "warmth":    { "type": "number", "minimum": 0, "maximum": 2, "default": 1.0 }
       }
@@ -140,7 +140,7 @@
       "type": "object",
       "properties": {
         "amount":    { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 },
-        "radius":    { "type": "number", "minimum": 0.5, "maximum": 6, "default": 1.0, "description": "羽化尺度：光晕/柔光溢出扩散范围基数，越大越宽越柔" },
+        "radius":    { "type": "number", "minimum": 0.5, "maximum": 16, "default": 1.0, "description": "羽化尺度：光晕/柔光溢出扩散范围基数，越大越宽越柔" },
         "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 }
       }
     },

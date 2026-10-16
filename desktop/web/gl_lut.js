@@ -223,7 +223,7 @@ vec3 brightBlur(vec2 uv, float radius, float threshold){
   const int ANGLES = 12;
   for (int L = 0; L < LEVELS; L++){
     float scale = radius * pow(2.0, float(L));        // 1,2,4,8,16,32 px rings
-    float w = 1.0 / (1.0 + 0.55 * float(L));          // larger rings softer
+    float w = 1.0 / (1.0 + 0.25 * float(L));          // larger rings softer (kept fairly flat so big radii truly feather wide)
     for (int A = 0; A < ANGLES; A++){
       float a = (float(A) / float(ANGLES) + float(L) * 0.061) * 6.2831853;
       vec2 off = vec2(cos(a), sin(a)) * scale * u_texel;
