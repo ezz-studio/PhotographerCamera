@@ -776,27 +776,38 @@ def fit_arrays(graded_images: List[np.ndarray], plain_images: List[np.ndarray],
                 return float(l1 + l2)
 
             dw0, db0 = _dead(lut)
-            dw1, db1 = _dead(lut_nr)
-            s0, s1 = _dist(lut), _dist(lut_nr)
-            dead_ok = dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4
+            s0 = _dist(lut)
             # 域外安全门（2026-10-16「颜色杂乱」反馈）：中性轴染色、栅格粗糙度
             # 与低饱和色相环色度都不得明显回归 —— 精修只允许在训练分布内变好，
             # 不允许把灰区染得更花或把栅格变得更毛糙。
+            # 2026-10-16 用户指令「小步幅改进，避免直接撞安全门控」：整步 (t=1)
+            # 撞门控时按回退线搜索取最大可接受步幅——风格迁移幅度随 t 线性收缩，
+            # 域外指标随之回退、分布距离改善按 t 保留；全败才回退解析 LUT。
             n0 = NR._neutral_chroma(lut)
-            n1 = NR._neutral_chroma(lut_nr)
             r0 = NR._lattice_roughness(lut)
-            r1 = NR._lattice_roughness(lut_nr)
-            domain_ok = (n1 <= n0 + 0.01) and (r1 <= r0 * 1.25 + 5e-4)
-            if dead_ok and domain_ok and s1 < s0 * 0.995:
-                lut = lut_nr
-                _neural_tag = "+neural"
-                say(f"    神经精修接受: 分布距离 {s0:.3f}->{s1:.3f} "
-                    f"死端 ({dw0*100:.2f},{db0*100:.2f})%->({dw1*100:.2f},{db1*100:.2f})% "
-                    f"中性 {n0:.3f}->{n1:.3f} 粗糙度 {r0:.4f}->{r1:.4f}")
+
+            def _accept(cand):
+                dw1, db1 = _dead(cand)
+                dead_ok = dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4
+                if not dead_ok:
+                    return False
+                n1 = NR._neutral_chroma(cand)
+                r1 = NR._lattice_roughness(cand)
+                if not (n1 <= n0 + 0.01 and r1 <= r0 * 1.25 + 5e-4):
+                    return False
+                return _dist(cand) < s0 * 0.995
+
+            lut_step, t_step, _ = NR.blend_step_search(
+                lut, lut_nr, _accept, steps=(1.0, 0.7, 0.5, 0.35, 0.2, 0.1))
+            if t_step > 0.0:
+                lut = lut_step
+                _neural_tag = ("+neural" if t_step >= 1.0
+                               else f"+neural(step{t_step:g})")
+                s1 = _dist(lut)
+                say(f"    神经精修接受 (步幅 t={t_step:g}): 分布距离 {s0:.3f}->{s1:.3f} "
+                    f"死端 ({dw0*100:.2f},{db0*100:.2f})%")
             else:
-                say(f"    神经精修拒绝（门控）: 分布距离 {s0:.3f}->{s1:.3f}, "
-                    f"死端回归={not dead_ok}, 域外回归={not domain_ok} "
-                    f"(中性 {n0:.3f}->{n1:.3f}, 粗糙度 {r0:.4f}->{r1:.4f})")
+                say(f"    神经精修拒绝（门控，含全部小步幅）: 分布距离基线 {s0:.3f}")
         except Exception as e:  # refinement is an enhancement, never a blocker
             say(f"    神经精修跳过: {e}")
 

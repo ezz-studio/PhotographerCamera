@@ -20,7 +20,7 @@ import numpy as np
 from stylefit import lut3d as L3
 from stylefit import color as C
 from stylefit import neural_refine as NR
-from stylefit.neural_refine import refine_lut, _w2_1d, _ab_band_w2
+from stylefit.neural_refine import refine_lut, _w2_1d, _ab_band_w2, blend_step_search
 from stylefit.fit import discover_images, _load, _sample_from_images, estimate_noise
 
 PLAIN = "D:/下载/DNG原图检测图/未命名导出"
@@ -105,24 +105,34 @@ def main():
                 l2, _, _ = _ab_band_w2(lp, ap, bp, lq, aq, bq)
                 return float(l1 + l2)
 
-            dw0, db0 = _dead(lut0); dw1, db1 = _dead(lut_nr)
-            s0, s1 = _dist(lut0), _dist(lut_nr)
-            n0, n1 = NR._neutral_chroma(lut0), NR._neutral_chroma(lut_nr)
-            r0, r1 = NR._lattice_roughness(lut0), NR._lattice_roughness(lut_nr)
-            g0, g1 = lowsat_ring_chroma(lut0), lowsat_ring_chroma(lut_nr)
-            dead_ok = dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4
-            domain_ok = (n1 <= n0 + 0.01) and (r1 <= r0 * 1.25 + 5e-4) and (g1 <= g0 + 0.02)
-            dist_ok = s1 < s0 * 0.995
-            print(f"[{name}] 门控: dist {s0:.3f}->{s1:.3f} ({'OK' if dist_ok else 'X'}) "
-                  f"dead ({dw0*100:.2f},{db0*100:.2f})->({dw1*100:.2f},{db1*100:.2f}) "
-                  f"({'OK' if dead_ok else 'X'}) 中性 {n0:.3f}->{n1:.3f} "
-                  f"粗糙 {r0:.4f}->{r1:.4f} 色环 {g0:.3f}->{g1:.3f} "
-                  f"({'OK' if domain_ok else 'X'})", flush=True)
+            dw0, db0 = _dead(lut0)
+            s0 = _dist(lut0)
+            n0 = NR._neutral_chroma(lut0)
+            r0 = NR._lattice_roughness(lut0)
+            g0 = lowsat_ring_chroma(lut0)
 
-            if dead_ok and domain_ok and dist_ok:
-                lut, tag, why = lut_nr, "+neural2", "refined"
+            def _accept(cand):
+                dw1, db1 = _dead(cand)
+                if not (dw1 <= dw0 + 5e-4 and db1 <= db0 + 5e-4):
+                    return False
+                if not (NR._neutral_chroma(cand) <= n0 + 0.01
+                        and NR._lattice_roughness(cand) <= r0 * 1.25 + 5e-4
+                        and lowsat_ring_chroma(cand) <= g0 + 0.02):
+                    return False
+                return _dist(cand) < s0 * 0.995
+
+            lut, t_step = blend_step_search(
+                lut0, lut_nr, _accept, steps=(1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2, 0.12, 0.06, 0.03))[:2]
+            if t_step > 0.0:
+                tag, why = (f"+neural2" if t_step >= 1.0 else f"+neural2(step{t_step:g})"), f"refined(t={t_step:g})"
+                s1 = _dist(lut)
+                print(f"[{name}] 步幅 t={t_step:g} 接受: dist {s0:.3f}->{s1:.3f}", flush=True)
             else:
                 lut, tag, why = lut0, "+neural2-gated-out", "revert-to-analytic"
+                print(f"[{name}] 全部步幅被拒 → 回退解析 LUT", flush=True)
+            print(f"[{name}] 域外指标: 中性 {n0:.3f}->{NR._neutral_chroma(lut):.3f} "
+                  f"粗糙 {r0:.4f}->{NR._lattice_roughness(lut):.4f} "
+                  f"色环 {g0:.3f}->{lowsat_ring_chroma(lut):.3f}", flush=True)
             out = json.loads(json.dumps(old_prof))
             payload = L3.to_payload(lut)
             payload["source"] = payload.get("source", "") + tag

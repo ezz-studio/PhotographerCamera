@@ -301,3 +301,25 @@ def refine_lut(lut0, src_px, dst_px, steps=100, pixels=120000, seed=7,
     rep = {"iters": evals["n"], "converged": bool(res.success),
            "final_objective": float(res.fun)}
     return lut.astype(np.float32), rep
+
+
+def blend_step_search(lut0, lut_nr, accept_fn,
+                      steps=(1.0, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2, 0.12, 0.06, 0.03)):
+    """Backtracking line search: largest blend of the refined LUT that passes.
+
+    2026-10-16 用户指令「AI 模型小步幅改进，避免直接撞安全门控」：整步精修
+    (t=1) 撞域外门控时，不是整段放弃，而是按 t ∈ (0,1] 把精修 LUT 与解析
+    LUT 逐格混合——风格迁移幅度随 t 线性收缩，域外指标（中性染色/粗糙度/
+    低饱和色环）随之回退，分布距离改善则按 t 保留。accept_fn(candidate)
+    返回 (ok, info)，返回第一个通过的 t（从大到小），全败返回 (lut0, 0.0)。
+    """
+    lut0f = lut0.astype(np.float32)
+    lutn = lut_nr.astype(np.float32)
+    info = {}
+    for t in steps:
+        cand = (lut0f * (1.0 - t) + lutn * t).astype(np.float32)
+        res = accept_fn(cand)
+        ok, info = res if isinstance(res, tuple) else (bool(res), {})
+        if ok:
+            return cand, float(t), info
+    return lut0f, 0.0, info
