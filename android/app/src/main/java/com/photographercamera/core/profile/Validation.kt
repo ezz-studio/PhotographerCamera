@@ -89,12 +89,12 @@ fun validateProfile(p: PhotographerProfile): ValidationResult {
     check(errs, "noise.chroma", p.noise.chroma, 0f, 1f)
 
     check(errs, "halation.amount", p.halation.amount, 0f, 1f)
-    check(errs, "halation.radius", p.halation.radius, 0.5f, 4f)
+    check(errs, "halation.radius", p.halation.radius, 0.5f, 16f)
     check(errs, "halation.threshold", p.halation.threshold, 0f, 1f)
     check(errs, "halation.warmth", p.halation.warmth, 0f, 2f)
 
     check(errs, "bloom.amount", p.bloom.amount, 0f, 1f)
-    check(errs, "bloom.radius", p.bloom.radius, 0.5f, 4f)
+    check(errs, "bloom.radius", p.bloom.radius, 0.5f, 16f)
     check(errs, "bloom.threshold", p.bloom.threshold, 0f, 1f)
 
     check(errs, "vignette.amount", p.vignette.amount, 0f, 1f)

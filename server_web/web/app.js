@@ -110,12 +110,12 @@ function buildControls() {
   c.push(num("noise.chroma", "彩度噪点", 0, 1));
 
   c.push(num("halation.amount", "强度", 0, 1));
-  c.push(num("halation.radius", "半径", 0.5, 4));
+  c.push(num("halation.radius", "半径", 0.5, 16));
   c.push(num("halation.threshold", "阈值", 0, 1));
   c.push(num("halation.warmth", "暖度", 0, 2));
 
   c.push(num("bloom.amount", "强度", 0, 1));
-  c.push(num("bloom.radius", "半径", 0.5, 4));
+  c.push(num("bloom.radius", "半径", 0.5, 16));
   c.push(num("bloom.threshold", "阈值", 0, 1));
 
   c.push(num("vignette.amount", "强度", 0, 1));
